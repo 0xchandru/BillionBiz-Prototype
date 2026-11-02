@@ -58,3 +58,30 @@ export async function publishOutboxEvent(
   return id;
 }
 
+export async function enqueueOutbox(params: {
+  organizationId: string;
+  storeId?: string;
+  eventType: string;
+  aggregateType?: string;
+  aggregateId?: string;
+  payload: Record<string, any>;
+  correlationId?: string;
+}) {
+  const id = `evt-${uuidv4()}`;
+  await query(
+    `INSERT INTO outbox_events (id, organization_id, store_id, event_type, aggregate_type, aggregate_id, payload, correlation_id, published)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE)`,
+    [
+      id,
+      params.organizationId,
+      params.storeId || null,
+      params.eventType,
+      params.aggregateType || 'SYSTEM',
+      params.aggregateId || id,
+      JSON.stringify(params.payload),
+      params.correlationId || uuidv4()
+    ]
+  );
+  return id;
+}
+

@@ -6,6 +6,10 @@ billionbiz-backend/dist/
 # Separate frontend repository (managed and pushed to its own repository)
 billionbiz-frontend/
 
+# Blueprint archives & extracted duplicates
+billionbiz_platform_blueprint_v2/
+*.zip
+
 # Local / OS files
 .DS_Store
 Thumbs.db

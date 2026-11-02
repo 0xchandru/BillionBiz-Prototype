@@ -690,6 +690,57 @@ export async function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_inv_balance_variant ON inventory_balances(variant_id);
     CREATE INDEX IF NOT EXISTS idx_audit_store_created ON audit_logs(store_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_outbox_unpublished ON outbox_events(published) WHERE published = FALSE;
+
+    -- V2 Identity, Onboarding & Notification Extensions
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_secret VARCHAR(255);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255);
+
+    CREATE TABLE IF NOT EXISTS email_verification_tokens (
+      id VARCHAR(64) PRIMARY KEY,
+      user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash VARCHAR(255) NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id VARCHAR(64) PRIMARY KEY,
+      user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash VARCHAR(255) NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      is_used BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS onboarding_checklists (
+      id VARCHAR(64) PRIMARY KEY,
+      store_id VARCHAR(64) NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+      step_key VARCHAR(64) NOT NULL,
+      title VARCHAR(255) NOT NULL,
+      description TEXT,
+      is_completed BOOLEAN NOT NULL DEFAULT FALSE,
+      completed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT uq_store_step UNIQUE (store_id, step_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS notifications (
+      id VARCHAR(64) PRIMARY KEY,
+      organization_id VARCHAR(64) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      store_id VARCHAR(64) REFERENCES stores(id) ON DELETE CASCADE,
+      user_id VARCHAR(64) REFERENCES users(id) ON DELETE SET NULL,
+      type VARCHAR(64) NOT NULL,
+      title VARCHAR(255) NOT NULL,
+      message TEXT NOT NULL,
+      is_read BOOLEAN NOT NULL DEFAULT FALSE,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_notifications_store_read ON notifications(store_id, is_read);
+    CREATE INDEX IF NOT EXISTS idx_checklists_store ON onboarding_checklists(store_id);
   `);
 
   console.log('[Migration] All migrations completed successfully.');

@@ -11,6 +11,7 @@ import { posRouter } from './modules/pos/pos.router.js';
 import { storefrontRouter } from './modules/storefront/storefront.router.js';
 import { extensionsRouter } from './modules/extensions/extensions.router.js';
 import { dashboardRouter } from './modules/dashboard/dashboard.router.js';
+import { notificationsRouter } from './modules/notifications/notifications.router.js';
 import { pool } from './db/pool.js';
 
 dotenv.config();
@@ -32,19 +33,35 @@ if (process.env.NODE_ENV !== 'test') {
   });
 }
 
-// Health check endpoint
+// Health check endpoints (REQ-OPS-003)
 app.get('/health', async (req, res) => {
   try {
     const dbCheck = await pool.query('SELECT 1;');
     res.json({
       status: 'UP',
       platform: 'BillionBiz Modular Platform',
-      version: '1.0.0',
+      version: '2.0.0',
       database: dbCheck.rowCount === 1 ? 'CONNECTED' : 'DISCONNECTED',
       timestamp: new Date().toISOString()
     });
   } catch (err: any) {
     res.status(500).json({ status: 'DOWN', database: 'ERROR', error: err.message });
+  }
+});
+
+app.get('/health/live', (req, res) => {
+  res.json({ status: 'LIVE', timestamp: new Date().toISOString() });
+});
+
+app.get('/health/ready', async (req, res) => {
+  try {
+    const dbCheck = await pool.query('SELECT 1;');
+    if (dbCheck.rowCount === 1) {
+      return res.json({ status: 'READY', database: 'CONNECTED', timestamp: new Date().toISOString() });
+    }
+    res.status(503).json({ status: 'NOT_READY', database: 'DISCONNECTED' });
+  } catch (err: any) {
+    res.status(503).json({ status: 'NOT_READY', database: 'ERROR', error: err.message });
   }
 });
 
@@ -59,6 +76,7 @@ app.use('/api/v1/pos', posRouter);
 app.use('/api/v1/storefront', storefrontRouter);
 app.use('/api/v1/extensions', extensionsRouter);
 app.use('/api/v1/dashboard', dashboardRouter);
+app.use('/api/v1/notifications', notificationsRouter);
 
 // Global Error Handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

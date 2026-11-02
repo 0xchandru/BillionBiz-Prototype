@@ -1,0 +1,1 @@
+defect_id,title,severity,priority,domain,environment_build,requirement_ids,flow_ids,task_id,test_case_ids,security_test_ids,preconditions,steps_to_reproduce,expected_result,actual_result,evidence,trace_id,workaround,owner,status,fix_commit,retest_result,opened_at,closed_at
