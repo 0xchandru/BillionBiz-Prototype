@@ -648,8 +648,31 @@ export async function runMigrations() {
     );
   `);
 
-  // 11. Extensions & Webhooks
+  // 11. Extensions & Webhooks (Tenant-Scoped Encrypted Connections, T-022, T-023, REQ-INT-001)
   await query(`
+    CREATE TABLE IF NOT EXISTS integration_connections (
+      id VARCHAR(64) PRIMARY KEY,
+      organization_id VARCHAR(64) REFERENCES organizations(id) ON DELETE CASCADE,
+      store_id VARCHAR(64) NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+      provider_key VARCHAR(64) NOT NULL, -- 'razorpay' | 'shiprocket'
+      environment VARCHAR(16) NOT NULL DEFAULT 'TEST', -- 'TEST' | 'LIVE'
+      status VARCHAR(32) NOT NULL DEFAULT 'NOT_CONNECTED', -- 'NOT_CONNECTED' | 'ACTIVE' | 'DISCONNECTED'
+      account_identifier VARCHAR(255),
+      ciphertext TEXT NOT NULL,
+      iv VARCHAR(64) NOT NULL,
+      tag VARCHAR(64) NOT NULL,
+      key_version VARCHAR(32) NOT NULL DEFAULT 'v1',
+      webhook_secret_ciphertext TEXT,
+      webhook_secret_iv VARCHAR(64),
+      webhook_secret_tag VARCHAR(64),
+      settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+      last_verified_at TIMESTAMPTZ,
+      last_error_code VARCHAR(64),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT uq_integration_store_provider_env UNIQUE (store_id, provider_key, environment)
+    );
+
     CREATE TABLE IF NOT EXISTS extension_connections (
       id VARCHAR(64) PRIMARY KEY,
       store_id VARCHAR(64) NOT NULL REFERENCES stores(id) ON DELETE CASCADE,

@@ -86,17 +86,25 @@ storefrontRouter.post(
     const pageId = `page-${uuidv4()}`;
 
     await withTransaction(async (client) => {
-      await client.query(
+      const inserted = await client.query(
         `INSERT INTO store_pages (id, store_id, name, path, type, category, status, page_props)
-         VALUES ($1, $2, $3, $4, $5, $6, 'draft', $7)`,
+         VALUES ($1, $2, $3, $4, $5, $6, 'draft', $7)
+         ON CONFLICT (store_id, path) DO UPDATE SET
+           name = EXCLUDED.name,
+           type = EXCLUDED.type,
+           category = EXCLUDED.category,
+           page_props = EXCLUDED.page_props,
+           updated_at = NOW()
+         RETURNING id`,
         [pageId, storeId, pageName, pagePath, type, category, JSON.stringify(pageProps)]
       );
+      const effectivePageId = inserted.rows[0]?.id || pageId;
 
       if (sections.length > 0) {
         await client.query(
           `INSERT INTO page_draft_versions (id, page_id, version, sections, page_props, created_by)
            VALUES ($1, $2, 1, $3, $4, $5)`,
-          [`draft-${uuidv4()}`, pageId, JSON.stringify(sections), JSON.stringify(pageProps), req.auth?.userId]
+          [`draft-${uuidv4()}`, effectivePageId, JSON.stringify(sections), JSON.stringify(pageProps), req.auth?.userId]
         );
       }
     });
@@ -105,20 +113,96 @@ storefrontRouter.post(
   }
 );
 
+// GET /api/v1/storefront/by-slug/:slug (Public Storefront by store slug, REQ-STOREFRONT-001)
+storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
+  const slug = req.params.slug as string;
+  const storeRes = await query(
+    `SELECT id, organization_id, name, slug, currency, timezone, status
+     FROM stores
+     WHERE slug = $1 AND status = 'ACTIVE'`,
+    [slug]
+  );
+
+  if (storeRes.rowCount === 0) {
+    return res.status(404).json({
+      error: 'STORE_NOT_FOUND',
+      message: `No active storefront found for '${slug}'`
+    });
+  }
+
+  const store = storeRes.rows[0];
+
+  // 1. Latest immutable published release snapshot
+  const releaseRes = await query(
+    `SELECT id, release_number, snapshot, content_hash, published_by, notes, created_at
+     FROM store_releases
+     WHERE store_id = $1
+     ORDER BY release_number DESC
+     LIMIT 1`,
+    [store.id]
+  );
+
+  // 2. Active theme
+  const themeRes = await query(`SELECT * FROM store_themes WHERE store_id = $1`, [store.id]);
+
+  // 3. Published pages
+  const pagesRes = await query(
+    `SELECT id, name, path, type, category, status, page_props
+     FROM store_pages
+     WHERE store_id = $1 AND status = 'published'`,
+    [store.id]
+  );
+
+  // 4. Active products with variants
+  const productsRes = await query(
+    `SELECT p.id, p.name, p.handle, p.description, p.product_type, p.media,
+            v.id as variant_id, v.sku, v.price_minor, v.compare_at_minor
+     FROM products p
+     LEFT JOIN product_variants v ON v.product_id = p.id
+     WHERE p.store_id = $1 AND p.status = 'ACTIVE'
+     ORDER BY p.created_at DESC
+     LIMIT 24`,
+    [store.id]
+  );
+
+  // 5. Active offerings (appointments/services)
+  const offeringsRes = await query(
+    `SELECT id, name, handle, description, duration_minutes, price_minor, deposit_required_minor
+     FROM offerings
+     WHERE store_id = $1 AND is_active = TRUE
+     ORDER BY name ASC
+     LIMIT 24`,
+    [store.id]
+  );
+
+  res.json({
+    store,
+    activeRelease: releaseRes.rows[0]?.snapshot || null,
+    releaseNumber: releaseRes.rows[0]?.release_number || null,
+    theme: themeRes.rows[0] || { preset_name: 'modern', palette: {}, typography: {}, buttons: {}, effects: {} },
+    pages: pagesRes.rows,
+    products: productsRes.rows,
+    offerings: offeringsRes.rows
+  });
+});
+
 // GET /api/v1/storefront/render (Render active storefront or draft preview)
 storefrontRouter.get('/render', resolveTenant, async (req: Request, res: Response) => {
   const storeId = req.tenant!.storeId;
+  const storeRes = await query(`SELECT id, name, slug, currency, timezone, status FROM stores WHERE id = $1`, [storeId]);
   const themeRes = await query(`SELECT * FROM store_themes WHERE store_id = $1`, [storeId]);
   const pagesRes = await query(`SELECT * FROM store_pages WHERE store_id = $1`, [storeId]);
   const latestRel = await query(
-    `SELECT snapshot FROM store_releases WHERE store_id = $1 ORDER BY release_number DESC LIMIT 1`,
+    `SELECT snapshot, release_number, content_hash FROM store_releases WHERE store_id = $1 ORDER BY release_number DESC LIMIT 1`,
     [storeId]
   );
 
   res.json({
+    store: storeRes.rows[0] || null,
     theme: themeRes.rows[0] || { preset_name: 'modern' },
     pages: pagesRes.rows,
-    activeRelease: latestRel.rows[0]?.snapshot || null
+    activeRelease: latestRel.rows[0]?.snapshot || null,
+    releaseNumber: latestRel.rows[0]?.release_number || null
   });
 });
 

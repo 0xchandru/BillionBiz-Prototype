@@ -13,6 +13,8 @@ billionbiz-backend/dist/
 *.env.local
 billionbiz-backend/.env
 billionbiz-backend/.env.local
+*.csv
+api-keys*
 
 # Separate frontend repository (managed and pushed to its own repository)
 billionbiz-frontend/

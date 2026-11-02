@@ -6,7 +6,36 @@ export async function resolveTenant(req: Request, res: Response, next: NextFunct
   let storeId = (req.headers['x-store-id'] as string) || req.auth?.storeId;
   const locationId = req.headers['x-location-id'] as string | undefined;
 
-  // Fallback to default store and org if not explicitly supplied
+  // Resolve store from slug header, query parameter, or Host header (*.stores.chandraprakash.codes)
+  const host = (req.headers['x-forwarded-host'] as string) || req.headers.host || '';
+  const hostClean = host.toLowerCase().split(':')[0];
+  const hostParts = hostClean.split('.');
+  let hostSlug: string | undefined;
+
+  if (hostParts.length >= 4 && hostParts[1] === 'stores') {
+    hostSlug = hostParts[0];
+  }
+
+  const explicitSlug = (req.headers['x-store-slug'] as string) || (req.query.slug as string) || hostSlug;
+
+  if (explicitSlug && (!orgId || !storeId)) {
+    const slugRes = await query(
+      `SELECT id, organization_id, status FROM stores WHERE slug = $1 AND status = 'ACTIVE'`,
+      [explicitSlug]
+    );
+    if (slugRes.rowCount && slugRes.rowCount > 0) {
+      storeId = slugRes.rows[0].id;
+      orgId = slugRes.rows[0].organization_id;
+    } else {
+      // Host or slug was explicitly provided but does not match any active store => return 404, never fallback
+      return res.status(404).json({
+        error: 'STORE_NOT_FOUND',
+        message: `No active storefront found for '${explicitSlug}'`
+      });
+    }
+  }
+
+  // Fallback to default store and org only if neither store nor slug was explicitly requested
   if (!orgId || !storeId) {
     const defaultStoreRes = await query(
       `SELECT s.id as store_id, s.organization_id

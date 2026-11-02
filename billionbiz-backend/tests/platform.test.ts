@@ -290,9 +290,9 @@ describe('Phase 6: Appointments & Availability Engine', () => {
   });
 
   it('TC-BOOK-003: should calculate available non-overlapping time slots', async () => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const dateStr = tomorrow.toISOString().split('T')[0];
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + 7 + Math.floor(Math.random() * 60));
+    const dateStr = targetDate.toISOString().split('T')[0];
 
     const res = await request('GET', `/api/v1/appointments/availability?offeringId=${offeringId}&date=${dateStr}`);
     expect(res.status).toBe(200);

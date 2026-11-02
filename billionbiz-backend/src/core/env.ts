@@ -16,16 +16,13 @@ const envSchema = z.object({
   APP_URL: z.string().default('https://chandraprakash.codes'),
   API_BASE_URL: z.string().default('http://localhost:8080'),
   EMAIL_PROVIDER: z.enum(['console', 'smtp', 'resend', 'sendgrid']).default('console'),
+  RESEND_API_KEY: z.string().optional(),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().optional().default(587),
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().default('noreply@chandraprakash.codes'),
-  RAZORPAY_KEY_ID: z.string().optional(),
-  RAZORPAY_KEY_SECRET: z.string().optional(),
-  RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
-  SHIPROCKET_EMAIL: z.string().optional(),
-  SHIPROCKET_PASSWORD: z.string().optional(),
+  INTEGRATION_CREDENTIALS_KEK: z.string().optional(),
   TUNNEL_URL: z.string().optional()
 });
 

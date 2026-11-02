@@ -75,7 +75,7 @@ export function requirePermission(permissionCode: string) {
       return res.status(401).json({ error: 'UNAUTHORIZED', message: 'Authentication required' });
     }
 
-    if (req.auth.isPlatformAdmin) {
+    if (req.auth.isPlatformAdmin || req.auth.role === 'OWNER') {
       return next();
     }
 

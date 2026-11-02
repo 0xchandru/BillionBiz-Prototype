@@ -1,0 +1,133 @@
+project:
+  name: BillionBiz
+  type: unified_multi_tenant_commerce_platform
+  specification_version: 2.3.0
+  research_date: 2026-11-02
+  implementation_mode: incremental
+  source_documents:
+  - billionbiz-pos-guide_261023_202149(3).pdf
+  - billionbiz-appointments-guide_260912_152532(1).pdf
+  - billionbiz-store-templates-guide_261016_045403.pdf
+  product_identity: multi_tenant_commerce_saas_for_merchants_to_build_publish_and_operate_their_own_websites
+  architecture_revision: 2.3.0
+  host_routing:
+    marketing: https://chandraprakash.codes
+    merchant_admin: https://admin.chandraprakash.codes
+    identity: https://accounts.chandraprakash.codes
+    staff: https://staff.chandraprakash.codes
+    pos: https://pos.chandraprakash.codes
+    platform_operations: https://ops.chandraprakash.codes
+    api: https://api.chandraprakash.codes
+    storefront_pattern: https://{storeSlug}.stores.chandraprakash.codes
+    distinct_application_per_host: true
+    merchant_admin_is_client_portal: true
+    ops_is_internal_only: true
+    sitestore_present: false
+  merchant_credentials:
+    storage: encrypted_tenant_scoped_database_records
+    provider_credentials_in_env: false
+    browser_receives_plaintext: false
+    test_and_live_separate: true
+  store_data_protection:
+    app_deploy_must_preserve_merchant_data: true
+    publish_uses_immutable_release_and_atomic_pointer: true
+    destructive_production_migrations_require_approval: true
+  storefront_modes:
+  - commerce
+  - services
+  - both
+  mode_semantics:
+    storefront_mode_is_presentation_preset: true
+    backend_capabilities_and_entitlements_are_separate: true
+    home_page_setting_is_independent: true
+  capabilities:
+    supported_initial:
+    - product_commerce
+    - appointments
+    - product_commerce_plus_appointments
+    product_authoring:
+    - category_driven_attribute_schemas
+    - variant_matrix_with_combination_preview
+    - per_variant_media_and_shipping_data
+    - inventory_ledger_and_location_stock
+    - bulk_import_dry_run_and_row_level_recovery
+    - product_readiness_review_and_responsive_preview
+    optional_vertical_capabilities:
+    - restaurant_pos
+    explicitly_deferred_unless_approved:
+    - marketplace_multi_vendor
+    - subscriptions
+    - rentals
+    - online_courses
+    - ticketing
+  experience_shells:
+    marketing: https://chandraprakash.codes
+    merchant_admin: https://admin.chandraprakash.codes
+    identity: https://accounts.chandraprakash.codes
+    staff: https://staff.chandraprakash.codes
+    pos: https://pos.chandraprakash.codes
+    api: https://api.chandraprakash.codes
+    platform_operations: https://ops.chandraprakash.codes
+    storefront_base: https://stores.chandraprakash.codes
+    storefront_pattern: https://{storeSlug}.stores.chandraprakash.codes
+    assets_optional: https://assets.chandraprakash.codes
+    status_optional: https://status.chandraprakash.codes
+    status: PROPOSED_NOT_DNS_VERIFIED
+  authentication:
+    initial_methods:
+    - email_password
+    - google_oidc
+    required_controls:
+    - email_verification
+    - secure_password_reset
+    - rate_limiting
+    - owner_admin_totp_mfa
+    - session_revocation
+    enhancements:
+    - passkeys_webauthn
+    deferred:
+    - phone_otp_primary
+    - additional_social_providers
+    staff_registration: invitation_only
+  brand_tokens:
+    teal: '#064652'
+    green: '#5A9A20'
+    yellow: '#FFBF15'
+    warm_background: '#F6F4EE'
+    white: '#FFFFFF'
+  launch_extensions:
+    available_candidates:
+    - razorpay
+    - shiprocket
+    coming_soon:
+    - email_marketing
+    - whatsapp
+    - delhivery
+    note: transactional_email_is_core_platform_infrastructure
+  realtime:
+    operational_write_visibility: real_time_or_explicitly_bounded_refresh
+    authoritative_source: transactional_database
+    event_transport: transactional_outbox_and_durable_queue
+    client_transport: authenticated_websocket_or_sse_where_valuable
+    no_demo_fallback_in_production: true
+  principles:
+  - distinct_host_applications
+  - merchant_provider_credentials_are_encrypted_database_records
+  - store_version_updates_never_delete_merchant_data
+  - modular_monolith_first
+  - postgres_is_transactional_source_of_truth
+  - tenant_isolation_by_design
+  - shared_identity_team_customer_payment_foundations
+  - preserve_existing_store_editor_architecture
+  - no_site_store_runtime_dependency_after_cutover
+  - no_fake_integrations_or_placeholder_completion
+  - role_specific_portals_share_identity_and_domain_services
+  - dashboard_and_operational_data_must_be_real
+  - all_pages_use_shared_brand_design_system
+  release_rules:
+  - production_destructive_migrations_require_human_approval
+  - payment_provider_live_credentials_require_authorized_owner
+  - domain_dns_cutover_requires_authorized_owner
+  - mail_dns_and_sender_activation_require_authorized_owner
+  - every_feature_requires_tests_and_evidence
+  - agent_must_checkpoint_before_context_or_session_end

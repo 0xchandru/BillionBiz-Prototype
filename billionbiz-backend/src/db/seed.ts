@@ -4,17 +4,8 @@ import bcrypt from 'bcryptjs';
 export async function seedDatabase() {
   console.log('[Seed] Seeding default platform data...');
 
-  // Reset test transactional tables for idempotency
-  await query(`
-    DELETE FROM booking_holds;
-    DELETE FROM bookings;
-    DELETE FROM order_lines;
-    DELETE FROM orders;
-    DELETE FROM cash_movements;
-    DELETE FROM register_sessions;
-    DELETE FROM outbox_events;
-    DELETE FROM notifications;
-  `);
+  // Idempotent non-destructive seed (preserves existing transactional records)
+  // Invariant: Never delete production orders, bookings, register sessions, or notifications
 
   // 1. Permissions
   const permissionsList = [

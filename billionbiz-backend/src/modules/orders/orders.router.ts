@@ -59,6 +59,36 @@ ordersRouter.get(
   }
 );
 
+// GET /api/v1/orders/customers (List customers, T-050, REQ-EXP-009)
+ordersRouter.get(
+  '/customers',
+  requireAuth,
+  resolveTenant,
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+    const { search, limit = '50', offset = '0' } = req.query;
+
+    let sql = `
+      SELECT id, store_id, email, phone, first_name, last_name, default_address,
+             total_orders, total_spent_minor, created_at, updated_at
+      FROM customers
+      WHERE store_id = $1
+    `;
+    const params: any[] = [storeId];
+
+    if (search) {
+      params.push(`%${search}%`);
+      sql += ` AND (first_name ILIKE $${params.length} OR last_name ILIKE $${params.length} OR email ILIKE $${params.length} OR phone ILIKE $${params.length})`;
+    }
+
+    sql += ` ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    params.push(parseInt(limit as string, 10), parseInt(offset as string, 10));
+
+    const result = await query(sql, params);
+    res.json({ customers: result.rows, total: result.rowCount });
+  }
+);
+
 // GET /api/v1/orders/:id (Order Detail)
 ordersRouter.get(
   '/:id',

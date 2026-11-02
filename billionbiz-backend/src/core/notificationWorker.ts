@@ -1,5 +1,51 @@
 import { query, withTransaction } from '../db/pool.js';
 import { v4 as uuidv4 } from 'uuid';
+import { Resend } from 'resend';
+import { env } from './env.js';
+
+let resendClient: Resend | null = null;
+function getResendClient(): Resend | null {
+  if (env.RESEND_API_KEY && !resendClient) {
+    resendClient = new Resend(env.RESEND_API_KEY);
+  }
+  return resendClient;
+}
+
+export async function sendEmail(
+  message: EmailMessage,
+  idempotencyKey?: string
+): Promise<{ success: boolean; id?: string; error?: any }> {
+  if (env.EMAIL_PROVIDER === 'resend' || (env.RESEND_API_KEY && env.EMAIL_PROVIDER !== 'console')) {
+    const resend = getResendClient();
+    if (resend) {
+      try {
+        const { data, error } = await resend.emails.send({
+          from: env.SMTP_FROM || 'BillionBiz <noreply@chandraprakash.codes>',
+          to: message.to,
+          subject: message.subject,
+          html: message.html,
+          text: message.text,
+          headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined
+        });
+
+        if (error) {
+          console.error('[Resend Error]', error);
+          return { success: false, error };
+        }
+
+        console.log(`[Resend Sent] Email ID: ${data?.id} to ${message.to}`);
+        return { success: true, id: data?.id };
+      } catch (err: any) {
+        console.error('[Resend Exception]', err);
+        return { success: false, error: err.message };
+      }
+    }
+  }
+
+  // Console mode for development & test suites
+  console.log(`[OutboxWorker] Email dispatched to ${message.to}: ${message.subject}`);
+  return { success: true, id: `console-${uuidv4()}` };
+}
 
 export interface EmailMessage {
   to: string;
@@ -192,7 +238,7 @@ export class NotificationOutboxService {
       case 'USER_REGISTERED':
       case 'USER_VERIFICATION_REQUESTED': {
         const emailContent = renderEmailTemplate('EMAIL_VERIFICATION', payload);
-        console.log(`[OutboxWorker] Email dispatched to ${payload.email}: ${emailContent.subject}`);
+        await sendEmail({ to: payload.email, ...emailContent }, `idemp-verify-${event.id}`);
 
         // In-app notification
         if (payload.userId) {
@@ -207,13 +253,17 @@ export class NotificationOutboxService {
 
       case 'USER_PASSWORD_RESET_REQUESTED': {
         const emailContent = renderEmailTemplate('PASSWORD_RESET', payload);
-        console.log(`[OutboxWorker] Password reset email dispatched to ${payload.email}: ${emailContent.subject}`);
+        await sendEmail({ to: payload.email, ...emailContent }, `idemp-reset-${event.id}`);
         break;
       }
 
       case 'ORDER_CREATED': {
         const emailContent = renderEmailTemplate('ORDER_CONFIRMATION', payload);
-        console.log(`[OutboxWorker] Order confirmation email dispatched: ${emailContent.subject}`);
+        if (payload.email) {
+          await sendEmail({ to: payload.email, ...emailContent }, `idemp-order-${payload.orderId || event.id}`);
+        } else {
+          console.log(`[OutboxWorker] Order confirmation email dispatched: ${emailContent.subject}`);
+        }
 
         await query(
           `INSERT INTO notifications (id, organization_id, store_id, type, title, message, metadata)
@@ -232,7 +282,11 @@ export class NotificationOutboxService {
 
       case 'BOOKING_CONFIRMED': {
         const emailContent = renderEmailTemplate('BOOKING_CONFIRMATION', payload);
-        console.log(`[OutboxWorker] Booking confirmation email dispatched: ${emailContent.subject}`);
+        if (payload.email) {
+          await sendEmail({ to: payload.email, ...emailContent }, `idemp-booking-${payload.bookingId || event.id}`);
+        } else {
+          console.log(`[OutboxWorker] Booking confirmation email dispatched: ${emailContent.subject}`);
+        }
 
         await query(
           `INSERT INTO notifications (id, organization_id, store_id, type, title, message, metadata)
