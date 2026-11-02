@@ -1,1 +1,0 @@
-security_run_id,security_test_id,environment,build_commit,authorized_scope,test_method,result,severity_observed,tester,executed_at,evidence_uri,defect_id,retest_of,notes

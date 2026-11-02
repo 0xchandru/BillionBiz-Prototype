@@ -1,1 +1,0 @@
-test_run_id,test_case_id,environment,build_commit,run_type,status,executed_by,executed_at,duration_seconds,actual_result,evidence_uri,defect_id,trace_id,notes
