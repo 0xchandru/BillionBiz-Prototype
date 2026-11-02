@@ -20,9 +20,42 @@ dotenv.config();
 
 export const app = express();
 export const server = http.createServer(app);
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
 
-app.use(cors({ origin: true, credentials: true }));
+const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (
+        allowedOrigins.includes(origin) ||
+        origin.endsWith('.chandraprakash.codes') ||
+        origin.endsWith('.ngrok-free.app') ||
+        origin.endsWith('.ngrok.io') ||
+        origin.includes('localhost') ||
+        origin.includes('127.0.0.1')
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'x-organization-id',
+      'x-store-id',
+      'idempotency-key',
+      'ngrok-skip-browser-warning',
+      'x-correlation-id'
+    ]
+  })
+);
 app.use(express.json({ limit: '10mb' }));
 
 // Request logging in dev
