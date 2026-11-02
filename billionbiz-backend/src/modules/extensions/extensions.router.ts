@@ -163,7 +163,7 @@ extensionsRouter.post(
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const organizationId = req.tenant!.organizationId;
-    const providerKey = req.params.provider.toLowerCase().trim();
+    const providerKey = String(req.params.provider || '').toLowerCase().trim();
     const envMode: 'TEST' | 'LIVE' = req.body?.environment?.toUpperCase() === 'LIVE' ? 'LIVE' : 'TEST';
 
     const connRes = await query(
@@ -236,7 +236,7 @@ extensionsRouter.post(
   requirePermission('extensions.manage'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
-    const providerKey = req.params.provider.toLowerCase().trim();
+    const providerKey = String(req.params.provider || '').toLowerCase().trim();
     const envMode: 'TEST' | 'LIVE' = req.body?.environment?.toUpperCase() === 'LIVE' ? 'LIVE' : 'TEST';
 
     await query(
