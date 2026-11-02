@@ -268,4 +268,50 @@ describe('V2 Native Storefront Runtime & Multi-Tenant Isolation Suite (REQ-STORE
     expect(historyRes.body.releases.length).toBeGreaterThanOrEqual(2);
     expect(historyRes.body.releases[0].release_number).toBe(releaseNum2);
   });
+
+  it('TC-STORE-006: Streamlined registration automatically creates active subdomain, published home page, and initial live release', async () => {
+    const timestamp = Date.now();
+    const testEmail = `auto_pub_${timestamp}@chandraprakash.codes`;
+    const testSlug = `auto-pub-${timestamp}`;
+
+    // 1. Send OTP
+    const sendOtp = await request('POST', '/api/v1/auth/otp/send', {
+      body: { identifier: testEmail, type: 'REGISTER' }
+    });
+    expect(sendOtp.status).toBe(200);
+
+    const otpDb = await query(
+      `SELECT code FROM verification_otps WHERE identifier = $1 ORDER BY created_at DESC LIMIT 1`,
+      [testEmail]
+    );
+    const code = otpDb.rows[0].code;
+
+    // 2. Verify OTP
+    const verifyOtp = await request('POST', '/api/v1/auth/otp/verify', {
+      body: { identifier: testEmail, code, type: 'REGISTER' }
+    });
+    expect(verifyOtp.status).toBe(200);
+
+    // 3. Register streamlined store
+    const regRes = await request('POST', '/api/v1/auth/register-streamlined', {
+      body: {
+        identifier: testEmail,
+        fullName: 'Chandru Admin',
+        storeName: 'Auto Pub Store',
+        slug: testSlug,
+        capabilityMode: 'COMMERCE'
+      }
+    });
+    expect(regRes.status).toBe(201);
+    expect(regRes.body.store.slug).toBe(testSlug);
+
+    // 4. Verify storefront by slug is immediately ACTIVE and serving published home page
+    const liveStoreRes = await request('GET', `/api/v1/storefront/by-slug/${testSlug}`);
+    expect(liveStoreRes.status).toBe(200);
+    expect(liveStoreRes.body.store.status).toBe('ACTIVE');
+    expect(liveStoreRes.body.releaseNumber).toBe(1);
+    expect(liveStoreRes.body.pages.length).toBeGreaterThanOrEqual(1);
+    expect(liveStoreRes.body.pages[0].path).toBe('/');
+    expect(liveStoreRes.body.pages[0].status).toBe('published');
+  });
 });

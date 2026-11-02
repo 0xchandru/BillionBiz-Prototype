@@ -300,9 +300,14 @@ storefrontRouter.post(
         [releaseId, storeId, releaseNumber, contentHash, JSON.stringify(storeSnapshot), req.auth?.userId, notes || 'Published release']
       );
 
-      // 5. Update page statuses to 'published'
+      // 5. Update page statuses to 'published' and ensure store is ACTIVE for live storefront
       await client.query(
         `UPDATE store_pages SET status = 'published', updated_at = NOW() WHERE store_id = $1`,
+        [storeId]
+      );
+
+      await client.query(
+        `UPDATE stores SET status = 'ACTIVE', updated_at = NOW() WHERE id = $1`,
         [storeId]
       );
 

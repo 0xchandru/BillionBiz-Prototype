@@ -163,10 +163,10 @@ identityRouter.post('/register', async (req: Request, res: Response) => {
       [orgId, `${storeName} Group`, `${storeSlug}-${uuidv4().substring(0, 6)}`]
     );
 
-    // 4. Create Store Shell (Status: DRAFT per specification)
+    // 4. Create Store Shell (Status: ACTIVE for automatic publishing)
     await client.query(
       `INSERT INTO stores (id, organization_id, name, slug, status)
-       VALUES ($1, $2, $3, $4, 'DRAFT')`,
+       VALUES ($1, $2, $3, $4, 'ACTIVE')`,
       [storeId, orgId, storeName, storeSlug]
     );
 
@@ -231,7 +231,66 @@ identityRouter.post('/register', async (req: Request, res: Response) => {
       [`thm-${uuidv4()}`, storeId]
     );
 
-    // 9. Guided Onboarding Checklist
+    // 9. Initial Published Home Page & Release Snapshot (Auto-published storefront)
+    const homePageId = `page-${uuidv4()}`;
+    const initialSections = [
+      {
+        id: 'sec-hero-1',
+        type: 'hero',
+        props: {
+          title: `Welcome to ${storeName}`,
+          subtitle: 'Discover our premium offerings handcrafted with care.',
+          buttonText: mode === 'SERVICES' ? 'Book Appointment' : 'Shop Now',
+          buttonLink: mode === 'SERVICES' ? '/booking' : '/shop'
+        }
+      },
+      {
+        id: 'sec-featured-1',
+        type: mode === 'SERVICES' ? 'service-grid' : 'product-grid',
+        props: {
+          title: mode === 'SERVICES' ? 'Featured Services' : 'Featured Products',
+          limit: 8
+        }
+      }
+    ];
+
+    await client.query(
+      `INSERT INTO store_pages (id, store_id, name, path, type, category, status, page_props)
+       VALUES ($1, $2, 'Home', '/', 'standard', 'storefront', 'published', '{}'::jsonb)`,
+      [homePageId, storeId]
+    );
+
+    await client.query(
+      `INSERT INTO page_draft_versions (id, page_id, version, sections, page_props, created_by)
+       VALUES ($1, $2, 1, $3, '{}'::jsonb, $4)`,
+      [`draft-${uuidv4()}`, homePageId, JSON.stringify(initialSections), userId]
+    );
+
+    const initialReleaseId = `rel-${uuidv4()}`;
+    const initialSnapshot = {
+      theme: { preset_name: 'modern', palette: {}, typography: {}, buttons: {}, effects: {} },
+      pages: [
+        {
+          id: homePageId,
+          name: 'Home',
+          path: '/',
+          type: 'standard',
+          category: 'storefront',
+          sections: initialSections,
+          page_props: {}
+        }
+      ],
+      publishedAt: new Date().toISOString()
+    };
+    const contentHash = crypto.createHash('sha256').update(JSON.stringify(initialSnapshot)).digest('hex');
+
+    await client.query(
+      `INSERT INTO store_releases (id, store_id, release_number, content_hash, snapshot, published_by, notes)
+       VALUES ($1, $2, 1, $3, $4, $5, 'Initial store auto-published release')`,
+      [initialReleaseId, storeId, contentHash, JSON.stringify(initialSnapshot), userId]
+    );
+
+    // 10. Guided Onboarding Checklist
     for (const item of defaultChecklist) {
       await client.query(
         `INSERT INTO onboarding_checklists (id, store_id, step_key, title, description, is_completed)
@@ -1100,10 +1159,10 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
       [orgId, `${storeName} Organization`, `${storeSlug}-${uuidv4().substring(0, 6)}`]
     );
 
-    // 3. Create Store Shell (Status: DRAFT per specification)
+    // 3. Create Store Shell (Status: ACTIVE for automatic publishing)
     await client.query(
       `INSERT INTO stores (id, organization_id, name, slug, status)
-       VALUES ($1, $2, $3, $4, 'DRAFT')`,
+       VALUES ($1, $2, $3, $4, 'ACTIVE')`,
       [storeId, orgId, storeName, storeSlug]
     );
 
@@ -1164,7 +1223,66 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
       [`thm-${uuidv4()}`, storeId]
     );
 
-    // 8. Onboarding Checklist
+    // 8. Initial Published Home Page & Release Snapshot (Auto-published storefront)
+    const homePageId = `page-${uuidv4()}`;
+    const initialSections = [
+      {
+        id: 'sec-hero-1',
+        type: 'hero',
+        props: {
+          title: `Welcome to ${storeName}`,
+          subtitle: 'Discover our premium offerings handcrafted with care.',
+          buttonText: mode === 'SERVICES' ? 'Book Appointment' : 'Shop Now',
+          buttonLink: mode === 'SERVICES' ? '/booking' : '/shop'
+        }
+      },
+      {
+        id: 'sec-featured-1',
+        type: mode === 'SERVICES' ? 'service-grid' : 'product-grid',
+        props: {
+          title: mode === 'SERVICES' ? 'Featured Services' : 'Featured Products',
+          limit: 8
+        }
+      }
+    ];
+
+    await client.query(
+      `INSERT INTO store_pages (id, store_id, name, path, type, category, status, page_props)
+       VALUES ($1, $2, 'Home', '/', 'standard', 'storefront', 'published', '{}'::jsonb)`,
+      [homePageId, storeId]
+    );
+
+    await client.query(
+      `INSERT INTO page_draft_versions (id, page_id, version, sections, page_props, created_by)
+       VALUES ($1, $2, 1, $3, '{}'::jsonb, $4)`,
+      [`draft-${uuidv4()}`, homePageId, JSON.stringify(initialSections), userId]
+    );
+
+    const initialReleaseId = `rel-${uuidv4()}`;
+    const initialSnapshot = {
+      theme: { preset_name: 'modern', palette: {}, typography: {}, buttons: {}, effects: {} },
+      pages: [
+        {
+          id: homePageId,
+          name: 'Home',
+          path: '/',
+          type: 'standard',
+          category: 'storefront',
+          sections: initialSections,
+          page_props: {}
+        }
+      ],
+      publishedAt: new Date().toISOString()
+    };
+    const contentHash = crypto.createHash('sha256').update(JSON.stringify(initialSnapshot)).digest('hex');
+
+    await client.query(
+      `INSERT INTO store_releases (id, store_id, release_number, content_hash, snapshot, published_by, notes)
+       VALUES ($1, $2, 1, $3, $4, $5, 'Initial store auto-published release')`,
+      [initialReleaseId, storeId, contentHash, JSON.stringify(initialSnapshot), userId]
+    );
+
+    // 9. Onboarding Checklist
     for (const item of defaultChecklist) {
       await client.query(
         `INSERT INTO onboarding_checklists (id, store_id, step_key, title, description, is_completed)
