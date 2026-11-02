@@ -43,7 +43,7 @@ The store templates guide is the controlling reference for the existing store-pa
 | `platform-experience-architecture.md` | Public landing, acquisition, signup, store provisioning, customer and internal operations experiences |
 | `identity-authentication-architecture.md` | Login, signup, Google OIDC, MFA, account lifecycle and role-aware routing |
 | `portal-role-and-pos-architecture.md` | Merchant Admin vs Staff Portal vs dedicated cashier POS separation |
-| `domains-routing-architecture.md` | chandraprakash.social host map, tenant routing, domain verification and DNS safeguards |
+| `domains-routing-architecture.md` | chandraprakash.codes host map, tenant routing, domain verification and DNS safeguards |
 | `notifications-email-architecture.md` | Transactional email, in-app notifications, delivery events and templates |
 | `design-system-architecture.md` | Logo-derived color tokens, shared components and accessibility rules |
 | `settings-control-plane.md` | Complete grouped settings architecture and safe settings UX |
@@ -97,6 +97,6 @@ This pack is a **target specification**, not evidence that the prototype already
 
 This revision expands the domain architecture into the complete acquisition-to-operation experience. Before implementation, read `platform-experience-architecture.md`, `identity-authentication-architecture.md`, `information-architecture.md`, `portal-role-and-pos-architecture.md`, `domains-routing-architecture.md`, `notifications-email-architecture.md`, `design-system-architecture.md`, `settings-control-plane.md`, `realtime-data-quality-architecture.md` and `extension-marketplace-architecture.md`.
 
-The proposed hosts are `chandraprakash.social`, `admin.chandraprakash.social`, `accounts.chandraprakash.social`, `staff.chandraprakash.social`, `pos.chandraprakash.social`, `api.chandraprakash.social`, restricted `ops.chandraprakash.social` and `{store}.stores.chandraprakash.social`. These are target names, not verified DNS/deployed endpoints. DNS records, certificates, OAuth credentials, mail sender records and production cutover require authorized provider access.
+The proposed hosts are `chandraprakash.codes`, `admin.chandraprakash.codes`, `accounts.chandraprakash.codes`, `staff.chandraprakash.codes`, `pos.chandraprakash.codes`, `api.chandraprakash.codes`, restricted `ops.chandraprakash.codes` and `{store}.stores.chandraprakash.codes`. These are target names, not verified DNS/deployed endpoints. DNS records, certificates, OAuth credentials, mail sender records and production cutover require authorized provider access.
 
 The supplied logo establishes shared tokens: teal `#064652`, green `#5A9A20`, yellow `#FFBF15`, warm off-white `#F6F4EE`. See `design-system-architecture.md`. Cashier POS is a separate portal; Merchant Admin → POS & Counters manages its resources. All production dashboards and operational pages must use real tenant-scoped data; demo fixtures are restricted to development/test/demo tenants.

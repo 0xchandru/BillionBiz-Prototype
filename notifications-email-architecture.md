@@ -58,9 +58,9 @@ Merchants can manage allowed customer-facing templates, branding, language and n
 
 ## 5. Email domain and deliverability
 
-Use a transactional email provider behind an adapter. It must support verified sending domains, authenticated APIs/webhooks, bounce/complaint events, suppression management, logs and relevant privacy/region requirements. Configure SPF, DKIM and DMARC before production sending. Prefer a subdomain such as `notify.chandraprakash.social` or `mail.chandraprakash.social` for sender identity so root-domain mail policy is not accidentally overwritten. Exact DNS records come from the chosen provider and must not be invented.
+Use a transactional email provider behind an adapter. It must support verified sending domains, authenticated APIs/webhooks, bounce/complaint events, suppression management, logs and relevant privacy/region requirements. Configure SPF, DKIM and DMARC before production sending. Prefer a subdomain such as `notify.chandraprakash.codes` or `mail.chandraprakash.codes` for sender identity so root-domain mail policy is not accidentally overwritten. Exact DNS records come from the chosen provider and must not be invented.
 
-Example sender `notifications@notify.chandraprakash.social` is only valid after provider/domain verification. Do not assume root-domain email hosting exists.
+Example sender `notifications@notify.chandraprakash.codes` is only valid after provider/domain verification. Do not assume root-domain email hosting exists.
 
 ## 6. Channels
 

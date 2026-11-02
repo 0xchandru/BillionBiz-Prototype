@@ -96,7 +96,7 @@ describe('V2 Identity, First-Store Provisioning & Outbox Services', () => {
     expect(res.body.user.emailVerified).toBe(false);
     expect(res.body.portalDestination).toBeDefined();
     expect(res.body.portalDestination.portal).toBe('MERCHANT_ADMIN');
-    expect(res.body.portalDestination.url).toBe('https://admin.chandraprakash.social');
+    expect(res.body.portalDestination.url).toBe('https://admin.chandraprakash.codes');
     expect(res.body.onboardingChecklist).toBeInstanceOf(Array);
     expect(res.body.onboardingChecklist.length).toBeGreaterThanOrEqual(4);
 
@@ -190,7 +190,7 @@ describe('V2 Identity, First-Store Provisioning & Outbox Services', () => {
 
     expect(ownerRes.status).toBe(200);
     expect(ownerRes.body.destination.portal).toBe('MERCHANT_ADMIN');
-    expect(ownerRes.body.destination.url).toBe('https://admin.chandraprakash.social');
+    expect(ownerRes.body.destination.url).toBe('https://admin.chandraprakash.codes');
 
     // 2. Cashier PIN login portal route
     const cashierRes = await makeRequest('POST', '/api/v1/auth/pin-login', {
@@ -199,7 +199,7 @@ describe('V2 Identity, First-Store Provisioning & Outbox Services', () => {
 
     expect(cashierRes.status).toBe(200);
     expect(cashierRes.body.portalDestination.portal).toBe('POS');
-    expect(cashierRes.body.portalDestination.url).toBe('https://pos.chandraprakash.social');
+    expect(cashierRes.body.portalDestination.url).toBe('https://pos.chandraprakash.codes');
   });
 
   it('T-054: Outbox Worker processes pending events, dispatches notifications, and updates inbox', async () => {

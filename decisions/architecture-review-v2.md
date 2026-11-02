@@ -32,7 +32,7 @@ A rigorous architectural red-team critique evaluated Architecture V1 across five
 
 ### 2.1 Threat 1: Cashier Privilege Escalation & Physical Counter Vulnerability
 - *Critique:* Co-locating POS cashier operations inside the Merchant Admin shell creates catastrophic security risks. If a cashier leaves a terminal unlocked or manipulates browser URL parameters, they could access store financial settings, team invitations, or payout configurations.
-- *Remediation in V2:* Complete physical and logical separation. Cashier billing MUST run exclusively in a dedicated POS portal (`pos.chandraprakash.social`) with register locks, device binding, and per-counter PIN auth. Merchant Admin `POS & Counters` is restricted to administrative configuration (locations, devices, registers, policies).
+- *Remediation in V2:* Complete physical and logical separation. Cashier billing MUST run exclusively in a dedicated POS portal (`pos.chandraprakash.codes`) with register locks, device binding, and per-counter PIN auth. Merchant Admin `POS & Counters` is restricted to administrative configuration (locations, devices, registers, policies).
 
 ### 2.2 Threat 2: Deceptive Metrics & Mock Data Leakage
 - *Critique:* Displaying mock or hardcoded records on the Dashboard corrupts business accounting and misleads merchants into believing demo transactions are real revenue.
@@ -53,7 +53,7 @@ A rigorous architectural red-team critique evaluated Architecture V1 across five
 
 ### 2.5 Threat 5: Routing Ambiguity & Domain Conflicts
 - *Critique:* Undefined routing between public marketing, admin, staff, cashier, and storefronts leads to path collisions and session hijacking across subdomains.
-- *Remediation in V2:* Nine explicit logical experience shells mapped to verified subdomains with strict cookie scoping and CORS policies (`chandraprakash.social`, `admin.*`, `staff.*`, `pos.*`, `api.*`, `{slug}.stores.*`).
+- *Remediation in V2:* Nine explicit logical experience shells mapped to verified subdomains with strict cookie scoping and CORS policies (`chandraprakash.codes`, `admin.*`, `staff.*`, `pos.*`, `api.*`, `{slug}.stores.*`).
 
 ---
 
@@ -62,15 +62,15 @@ A rigorous architectural red-team critique evaluated Architecture V1 across five
 ```mermaid
 flowchart TD
     subgraph Public_Internet["Public Internet & Edge"]
-        Marketing["Public Landing<br/>chandraprakash.social"]
-        Storefront["Customer Storefront<br/>{slug}.stores.chandraprakash.social"]
-        AdminPortal["Merchant Admin<br/>admin.chandraprakash.social"]
-        PosPortal["Cashier POS PWA<br/>pos.chandraprakash.social"]
-        StaffPortal["Staff Portal<br/>staff.chandraprakash.social"]
+        Marketing["Public Landing<br/>chandraprakash.codes"]
+        Storefront["Customer Storefront<br/>{slug}.stores.chandraprakash.codes"]
+        AdminPortal["Merchant Admin<br/>admin.chandraprakash.codes"]
+        PosPortal["Cashier POS PWA<br/>pos.chandraprakash.codes"]
+        StaffPortal["Staff Portal<br/>staff.chandraprakash.codes"]
     end
 
     subgraph API_Gateway["API Gateway & Reverse Proxy"]
-        Gateway["Logical Host Router & TLS Terminator<br/>api.chandraprakash.social"]
+        Gateway["Logical Host Router & TLS Terminator<br/>api.chandraprakash.codes"]
         AuthMiddleware["Auth & Scope Enforcement<br/>(JWT, Tenant, Counter, Role)"]
     end
 
@@ -174,7 +174,7 @@ flowchart TD
 #### ADR-007 — Dedicated POS Portal Architecture & Counter Session Isolation
 - **Status:** ACCEPTED
 - **Context:** Cashier billing operations require distinct physical device ergonomics, offline cash resilience, and restricted permissions. Co-locating cashier actions inside Merchant Admin violates the principle of least privilege.
-- **Decision:** Cashier billing runs exclusively in a dedicated POS portal (`pos.chandraprakash.social`). Merchant Admin provides a `POS & Counters` workspace strictly for configuring locations, counters, devices, staff assignments, and viewing X/Z closure reports. Cashiers authenticate via PINs scoped to assigned counters.
+- **Decision:** Cashier billing runs exclusively in a dedicated POS portal (`pos.chandraprakash.codes`). Merchant Admin provides a `POS & Counters` workspace strictly for configuring locations, counters, devices, staff assignments, and viewing X/Z closure reports. Cashiers authenticate via PINs scoped to assigned counters.
 - **Consequences:** Eliminates privilege escalation risks; enables independent PWA caching for offline cash sales.
 
 #### ADR-008 — Real Data and Honest Zeros Policy
@@ -203,12 +203,12 @@ flowchart TD
 - **Status:** ACCEPTED
 - **Context:** BillionBiz operates 9 distinct logical experience shells across public marketing, administration, retail POS, staff operations, API, and tenant storefronts.
 - **Decision:** Establish a formal host routing schema:
-  - `chandraprakash.social`: Public marketing landing page.
-  - `admin.chandraprakash.social`: Merchant Admin workspace.
-  - `staff.chandraprakash.social`: Staff personal portal.
-  - `pos.chandraprakash.social`: Dedicated Cashier POS PWA.
-  - `api.chandraprakash.social`: Core backend API gateway.
-  - `{slug}.stores.chandraprakash.social`: Merchant public storefronts.
+  - `chandraprakash.codes`: Public marketing landing page.
+  - `admin.chandraprakash.codes`: Merchant Admin workspace.
+  - `staff.chandraprakash.codes`: Staff personal portal.
+  - `pos.chandraprakash.codes`: Dedicated Cashier POS PWA.
+  - `api.chandraprakash.codes`: Core backend API gateway.
+  - `{slug}.stores.chandraprakash.codes`: Merchant public storefronts.
 - **Consequences:** Logical separation of concerns; simplifies security cookie scoping and CORS policies.
 
 #### ADR-012 — Marketplace Extension Lifecycle and Coming-Soon Integrity
@@ -221,3 +221,4 @@ flowchart TD
 
 ## 6. Sign-off & Task Completion
 Architecture Review Cycle V2 is officially completed. Task `T-003` is marked `VERIFIED`. All 12 ADRs are active and governing subsequent implementation phases.
+

@@ -10,11 +10,11 @@ You are the lead product architect and engineering agent implementing BillionBiz
 5. Produce Architecture V1, adversarial critique, V2, role-based review and final ADRs before major migrations.
 
 ## Build the complete public-to-operational journey
-- Marketing landing at `chandraprakash.social` with visible **Start free** and **Log in**.
+- Marketing landing at `chandraprakash.codes` with visible **Start free** and **Log in**.
 - Secure signup/login, verification, password recovery, MFA and role-aware routing.
 - Initial methods: email/password and Google OIDC. Do not add unnecessary social/phone providers without evidence; never hand-roll OAuth.
 - Signup provisions organization, owner membership, first store shell, default location and guided checklist. The private draft workspace is available immediately; public publish is explicit.
-- Proposed hosts: `admin.chandraprakash.social`, `staff.chandraprakash.social`, `pos.chandraprakash.social`, `api.chandraprakash.social`, `{slug}.stores.chandraprakash.social`. These are targets until DNS/TLS is authorized and verified.
+- Proposed hosts: `admin.chandraprakash.codes`, `staff.chandraprakash.codes`, `pos.chandraprakash.codes`, `api.chandraprakash.codes`, `{slug}.stores.chandraprakash.codes`. These are targets until DNS/TLS is authorized and verified.
 
 ## Merchant Admin shell
 Build a premium consistent shell. Topbar: logo left, workspace/store selector, global Quick Find (`Ctrl/Cmd+K`), notifications and profile. Left navigation expands/collapses groups and shows active parent/child routes, keyboard-accessible controls, capability/permission-aware links and real badges.

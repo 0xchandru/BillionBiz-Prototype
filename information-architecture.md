@@ -4,12 +4,12 @@
 
 | Shell | Host / entry | Users | Purpose |
 |---|---|---|---|
-| Marketing | `chandraprakash.social` | Visitors | Product discovery, Start free, Log in |
-| Merchant Admin | `admin.chandraprakash.social` | Owner, manager, authorized operator | Configure and operate business/store |
-| Staff Portal | `staff.chandraprakash.social` | Service providers and assigned staff | Personal schedule and assigned work |
-| Counter/POS | `pos.chandraprakash.social` | Assigned cashiers | Fast billing, register and receipts |
-| Storefronts | `{store}.stores.chandraprakash.social` or verified custom domain | Customers | Shop, book and customer account |
-| API | `api.chandraprakash.social` | Authorized clients/services | Versioned application APIs |
+| Marketing | `chandraprakash.codes` | Visitors | Product discovery, Start free, Log in |
+| Merchant Admin | `admin.chandraprakash.codes` | Owner, manager, authorized operator | Configure and operate business/store |
+| Staff Portal | `staff.chandraprakash.codes` | Service providers and assigned staff | Personal schedule and assigned work |
+| Counter/POS | `pos.chandraprakash.codes` | Assigned cashiers | Fast billing, register and receipts |
+| Storefronts | `{store}.stores.chandraprakash.codes` or verified custom domain | Customers | Shop, book and customer account |
+| API | `api.chandraprakash.codes` | Authorized clients/services | Versioned application APIs |
 | Platform Operations | Restricted internal host/path | BillionBiz operators | Platform/tenant/support control plane |
 
 These hosts are proposed targets, not live DNS proof. See `domains-routing-architecture.md`.
@@ -103,7 +103,7 @@ Preserve the existing Store Editor: page tree, section canvas, inspector, reusab
 - Receipts and printing
 - POS settings
 
-The **Open POS** action launches the separate POS experience at `pos.chandraprakash.social`. Do not render the cashier billing screen inside the ordinary Merchant Admin shell.
+The **Open POS** action launches the separate POS experience at `pos.chandraprakash.codes`. Do not render the cashier billing screen inside the ordinary Merchant Admin shell.
 
 **Extensions**
 - App marketplace

@@ -25,7 +25,7 @@
 ### Branding and domain architecture
 - Added the supplied logo image to `reference/` and derived common tokens: teal `#064652`, green `#5A9A20`, yellow `#FFBF15`, warm background `#F6F4EE`.
 - Added accessible green `#447515` and documented contrast guidance.
-- Proposed host map for marketing, admin, identity, staff, POS, API, platform operations and tenant storefronts under `chandraprakash.social`.
+- Proposed host map for marketing, admin, identity, staff, POS, API, platform operations and tenant storefronts under `chandraprakash.codes`.
 
 ### Important status
 This is a specification and execution pack, not an implementation. DNS, TLS, OAuth credentials, email sender-domain verification, Razorpay/Shiprocket provider credentials and production cutover are not configured by this archive. New test definitions are not executed. The agent must audit and validate the existing repository before implementation and must not claim completion without evidence.

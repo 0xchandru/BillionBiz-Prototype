@@ -13,20 +13,20 @@ export const identityRouter = Router();
  */
 export function resolvePortalDestination(role: string, isPlatformAdmin = false): { portal: string; url: string; path: string } {
   if (isPlatformAdmin) {
-    return { portal: 'PLATFORM_ADMIN', url: 'https://admin.chandraprakash.social', path: '/platform' };
+    return { portal: 'PLATFORM_ADMIN', url: 'https://admin.chandraprakash.codes', path: '/platform' };
   }
   const normalizedRole = (role || '').toUpperCase();
   switch (normalizedRole) {
     case 'OWNER':
     case 'ADMIN':
     case 'MANAGER':
-      return { portal: 'MERCHANT_ADMIN', url: 'https://admin.chandraprakash.social', path: '/dashboard' };
+      return { portal: 'MERCHANT_ADMIN', url: 'https://admin.chandraprakash.codes', path: '/dashboard' };
     case 'CASHIER':
-      return { portal: 'POS', url: 'https://pos.chandraprakash.social', path: '/pos' };
+      return { portal: 'POS', url: 'https://pos.chandraprakash.codes', path: '/pos' };
     case 'STAFF':
-      return { portal: 'STAFF', url: 'https://staff.chandraprakash.social', path: '/staff' };
+      return { portal: 'STAFF', url: 'https://staff.chandraprakash.codes', path: '/staff' };
     default:
-      return { portal: 'MERCHANT_ADMIN', url: 'https://admin.chandraprakash.social', path: '/dashboard' };
+      return { portal: 'MERCHANT_ADMIN', url: 'https://admin.chandraprakash.codes', path: '/dashboard' };
   }
 }
 
@@ -251,7 +251,7 @@ identityRouter.post('/register', async (req: Request, res: Response) => {
       fullName,
       storeName,
       verifyToken: rawVerifyToken,
-      verifyUrl: `https://admin.chandraprakash.social/verify-email?token=${rawVerifyToken}`
+      verifyUrl: `https://admin.chandraprakash.codes/verify-email?token=${rawVerifyToken}`
     }
   });
 
@@ -372,7 +372,7 @@ identityRouter.post('/forgot-password', async (req: Request, res: Response) => {
           email: user.email,
           fullName: user.full_name,
           resetToken: rawResetToken,
-          resetUrl: `https://admin.chandraprakash.social/reset-password?token=${rawResetToken}`
+          resetUrl: `https://admin.chandraprakash.codes/reset-password?token=${rawResetToken}`
         }
       });
     }

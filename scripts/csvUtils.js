@@ -56,3 +56,4 @@ if (require.main === module) {
   console.log('Generic rows count:', genericRows.length);
   console.log('Generic rows sample:', JSON.stringify(genericRows.slice(0, 3), null, 2));
 }
+

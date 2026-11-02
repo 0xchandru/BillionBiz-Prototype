@@ -13,7 +13,7 @@
 - Dedicated Staff Portal and separate POS cashier portal; Merchant Admin POS & Counters manages resources.
 - People customer section, richer Online Store/Appointments/Catalogue/Team/Extensions hierarchy.
 - Core transactional email and in-app notifications.
-- Proposed chandraprakash.social host map.
+- Proposed chandraprakash.codes host map.
 - Logo-derived shared design tokens.
 - Real-data dashboard/mock-data removal, realtime freshness and complete settings control plane.
 

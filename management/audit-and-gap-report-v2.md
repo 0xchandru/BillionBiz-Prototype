@@ -9,18 +9,18 @@
 
 ## 1. System Overview & Context
 
-BillionBiz V2 transforms the platform from an administrative store builder into an enterprise-grade, multi-tenant commerce and service operation engine. The platform operates as **one unified modular monolith** spanning **nine distinct experience shells** hosted logically under `*.chandraprakash.social`:
+BillionBiz V2 transforms the platform from an administrative store builder into an enterprise-grade, multi-tenant commerce and service operation engine. The platform operates as **one unified modular monolith** spanning **nine distinct experience shells** hosted logically under `*.chandraprakash.codes`:
 
 ```
-                                  chandraprakash.social (Public Landing)
+                                  chandraprakash.codes (Public Landing)
                                             │
                      ┌──────────────────────┴──────────────────────┐
                      ▼                                             ▼
-          admin.chandraprakash.social                   pos.chandraprakash.social
+          admin.chandraprakash.codes                   pos.chandraprakash.codes
         (Merchant Admin & Store Editor)                  (Dedicated Cashier POS)
                      │                                             │
          ┌───────────┴───────────┐                                 ▼
-         ▼                       ▼                     staff.chandraprakash.social
+         ▼                       ▼                     staff.chandraprakash.codes
 {slug}.stores...           api.chandraprakash...            (Staff Operational Queue)
 (Customer Storefront)     (Unified Ingress API)
 ```
@@ -49,7 +49,7 @@ The components across all domains are evaluated and classified into:
 | **Tenancy** | Organization, store, and location hierarchy | `EXISTING_VERIFIED` | PostgreSQL 18 tables `organizations`, `stores`, `store_locations`; verified via `TC-TEN-001`, `TC-TEN-002`. |
 | **Capabilities** | Entitlements and Storefront Mode (`COMMERCE`, `SERVICES`, `BOTH`) | `EXISTING_VERIFIED` | Route guard `enforceCapability` blocks physical checkout in Services mode; verified via `TC-MODE-001`, `TC-MODE-002`. |
 | **Identity** | Email/password login, JWT tokens, cashier PIN login | `EXISTING_VERIFIED` | `/api/v1/auth/login`, `/register`, `/pin-login`; verified via `TC-IAM-001`, `TC-IAM-002`. |
-| **Identity** | Public Marketing Landing (`chandraprakash.social`) with "Start free" / "Log in" | `PROPOSED` | Specified in `platform-experience-architecture.md`; requires dedicated landing router/view. |
+| **Identity** | Public Marketing Landing (`chandraprakash.codes`) with "Start free" / "Log in" | `PROPOSED` | Specified in `platform-experience-architecture.md`; requires dedicated landing router/view. |
 | **Identity** | Google OIDC with PKCE | `PROPOSED` | Specified in `identity-authentication-architecture.md`; adapter structure ready. |
 | **Identity** | Email verification, password recovery, TOTP MFA | `PROPOSED` | Single-use token tables & outbox dispatch specified in `flows/password-recovery-and-mfa.md`. |
 | **Admin Shell** | Merchant Admin Topbar (Logo, Store Switcher, Quick Find `Ctrl+K`, Alerts, Profile) | `PROPOSED` | Specified in `information-architecture.md` & `design-system-architecture.md`. |
@@ -63,17 +63,17 @@ The components across all domains are evaluated and classified into:
 | **Fulfillment** | Carrier tracking and package dispatch | `EXISTING_VERIFIED` | Implemented in `orders.router.ts`; verified via `TC-SHP-001`. |
 | **Appointments**| Offerings, staff shift availability engine, 10-minute hold reservation | `EXISTING_VERIFIED` | Implemented in `appointments.router.ts`; verified via `TC-BOOK-001`, `TC-BOOK-003`. |
 | **Appointments**| Concurrency-safe booking confirmation with balance due | `EXISTING_VERIFIED` | Implemented in `appointments.router.ts`; verified via `TC-BOOK-004`. |
-| **POS** | Dedicated POS Cashier Application (`pos.chandraprakash.social`) | `PROPOSED` | Separation from Merchant Admin; cashier billing screen moved to standalone portal. |
+| **POS** | Dedicated POS Cashier Application (`pos.chandraprakash.codes`) | `PROPOSED` | Separation from Merchant Admin; cashier billing screen moved to standalone portal. |
 | **POS** | Register sessions (Opening float, mid-day X-Report, closing Z-Report with variance) | `EXISTING_VERIFIED` | Implemented in `pos.router.ts`; verified via `TC-POS-001`, `TC-POS-006`, `TC-POS-007`. |
 | **POS** | Product cart checkout and appointment balance settlement | `EXISTING_VERIFIED` | Implemented in `pos.router.ts`; verified via `TC-POS-003`, `TC-POS-008`. |
-| **Staff Portal**| Dedicated Staff Portal (`staff.chandraprakash.social`) for assigned schedules | `PROPOSED` | Specified in `portal-role-and-pos-architecture.md`. |
+| **Staff Portal**| Dedicated Staff Portal (`staff.chandraprakash.codes`) for assigned schedules | `PROPOSED` | Specified in `portal-role-and-pos-architecture.md`. |
 | **Extensions** | Razorpay payment order generation, HMAC verification, webhook inbox deduplication | `EXISTING_VERIFIED` | Implemented in `extensions.router.ts`; verified via `TC-EXT-001`, `TC-EXT-002`, `SEC-026`. |
 | **Extensions** | Shiprocket automated parcel dispatch and AWB generation | `EXISTING_VERIFIED` | Implemented in `extensions.router.ts`; verified via `TC-EXT-003`. |
 | **Extensions** | Email marketing, WhatsApp, Delhivery marketplace cards | `PROPOSED` | Rendered as "Coming Soon" (disabled); zero false claims of active connection. |
 | **Notifications**| Core transactional email and in-app alert service via Outbox | `PROPOSED` | Specified in `notifications-email-architecture.md`; outbox worker and templates. |
 | **Dashboard** | Real database aggregation queries, empty states, honest zeros | `EXISTING_VERIFIED` | Implemented in `dashboard.router.ts`; verified via `TC-DASH-001`. |
 | **Settings** | Grouped Settings Control Plane (15 categories matching specification) | `PROPOSED` | Specified in `settings-control-plane.md`. |
-| **Domains** | Target host routing under `chandraprakash.social` & custom domain lifecycle | `PROPOSED` | Ingress normalization rules specified in `domains-routing-architecture.md`. |
+| **Domains** | Target host routing under `chandraprakash.codes` & custom domain lifecycle | `PROPOSED` | Ingress normalization rules specified in `domains-routing-architecture.md`. |
 
 ---
 
@@ -82,15 +82,15 @@ The components across all domains are evaluated and classified into:
 ### 3.1 Logical Shells & Host Routing Table
 | Experience Shell | Target Host | Primary Routes | Target Principal Roles |
 | :--- | :--- | :--- | :--- |
-| **Public Landing** | `chandraprakash.social` | `/`, `/solutions`, `/pricing`, `/contact` | Visitors, prospective merchants |
-| **Identity & Auth**| `admin.chandraprakash.social` | `/login`, `/register`, `/verify`, `/forgot-password`, `/reset-password` | All authenticating principals |
-| **Merchant Admin** | `admin.chandraprakash.social` | `/admin/home`, `/admin/orders`, `/admin/appointments`, `/admin/catalogue`, `/admin/people`, `/admin/online-store`, `/admin/pos-counters`, `/admin/extensions`, `/admin/team`, `/admin/analytics`, `/admin/settings/*` | Organization Owner, Store Admin, Store Manager |
-| **Store Editor** | `admin.chandraprakash.social` | `/editor/pages/:id`, `/editor/theme`, `/editor/preview` | Owner, Admin, Catalogue/Content Editor |
-| **Staff Portal** | `staff.chandraprakash.social` | `/staff/today`, `/staff/bookings`, `/staff/schedule`, `/staff/availability` | Service Providers, Coordinators |
-| **POS Terminal** | `pos.chandraprakash.social` | `/pos/register`, `/pos/billing`, `/pos/held-bills`, `/pos/close-shift` | Cashiers, Counter Operators |
+| **Public Landing** | `chandraprakash.codes` | `/`, `/solutions`, `/pricing`, `/contact` | Visitors, prospective merchants |
+| **Identity & Auth**| `admin.chandraprakash.codes` | `/login`, `/register`, `/verify`, `/forgot-password`, `/reset-password` | All authenticating principals |
+| **Merchant Admin** | `admin.chandraprakash.codes` | `/admin/home`, `/admin/orders`, `/admin/appointments`, `/admin/catalogue`, `/admin/people`, `/admin/online-store`, `/admin/pos-counters`, `/admin/extensions`, `/admin/team`, `/admin/analytics`, `/admin/settings/*` | Organization Owner, Store Admin, Store Manager |
+| **Store Editor** | `admin.chandraprakash.codes` | `/editor/pages/:id`, `/editor/theme`, `/editor/preview` | Owner, Admin, Catalogue/Content Editor |
+| **Staff Portal** | `staff.chandraprakash.codes` | `/staff/today`, `/staff/bookings`, `/staff/schedule`, `/staff/availability` | Service Providers, Coordinators |
+| **POS Terminal** | `pos.chandraprakash.codes` | `/pos/register`, `/pos/billing`, `/pos/held-bills`, `/pos/close-shift` | Cashiers, Counter Operators |
 | **Public Store** | `{slug}.stores...` | `/`, `/products`, `/products/:handle`, `/services`, `/book`, `/cart`, `/checkout` | Customers |
 | **Customer Portal**| `{slug}.stores...` | `/account`, `/account/orders`, `/account/bookings`, `/account/profile` | Authenticated Store Customers |
-| **API Ingress** | `api.chandraprakash.social` | `/api/v1/*` | Authorized Client Applications |
+| **API Ingress** | `api.chandraprakash.codes` | `/api/v1/*` | Authorized Client Applications |
 
 ### 3.2 Backend API Mapping Matrix
 | Domain / Module | Ingress Endpoint Path | HTTP Method | Authorization Permission | Scoping Context |
@@ -132,8 +132,8 @@ The components across all domains are evaluated and classified into:
 
 ## 4. Gap Analysis & Architecture Deficiencies Identified
 
-1. **Cashier Billing Co-location**: In the prior prototype, POS checkout was accessed as a standard page within the merchant sidebar. V2 strictly mandates that **cashier billing must run in a dedicated POS portal (`pos.chandraprakash.social`)**, with Merchant Admin reserved strictly for configuring locations, counters, devices, policies, and viewing register reports.
-2. **Staff Workflow Isolation**: Staff service providers require their own dedicated portal (`staff.chandraprakash.social`) providing personal schedules and assigned bookings, strictly hiding organizational metrics, customer exports, and settings.
+1. **Cashier Billing Co-location**: In the prior prototype, POS checkout was accessed as a standard page within the merchant sidebar. V2 strictly mandates that **cashier billing must run in a dedicated POS portal (`pos.chandraprakash.codes`)**, with Merchant Admin reserved strictly for configuring locations, counters, devices, policies, and viewing register reports.
+2. **Staff Workflow Isolation**: Staff service providers require their own dedicated portal (`staff.chandraprakash.codes`) providing personal schedules and assigned bookings, strictly hiding organizational metrics, customer exports, and settings.
 3. **Admin Shell Hierarchy & "People" Naming**: The prior sidebar lacked Shopify-style expandable groups and used generic naming; V2 requires the canonical hierarchy: `Home`, `Orders`, `Appointments`, `Catalogue`, `People`, `Online Store`, `POS & Counters`, `Extensions`, `Team`, `Analytics`, and `Settings`.
 4. **Brand Tokens & WCAG Contrast**: Logo green `#5A9A20` has a 3.46:1 contrast on white (failing WCAG AA for normal text). V2 introduces accessible green `#447515` (5.52:1) for text/buttons while reserving `#5A9A20` for decorative accents. Primary buttons use Teal `#064652` (10.47:1) with white text.
 5. **Transactional Email Service**: System emails (welcome, verification, receipts, reminders) were previously unqueued. V2 establishes a dedicated transactional outbox worker and template engine independent of third-party marketplace plugins.
@@ -149,3 +149,4 @@ The components across all domains are evaluated and classified into:
 - **Phase 3 — Dedicated POS & Staff Portals**: Deploy standalone POS cashier portal and Staff personal schedule portal.
 - **Phase 4 — Transactional Email & Settings Control Plane**: Implement Outbox delivery worker, templates, and the 15-category settings control plane.
 - **Phase 5 — Full Test & Security Verification**: Execute comprehensive test suites (`test-cases.csv`, `security-tests.csv`) and update execution logs and checkpoints.
+

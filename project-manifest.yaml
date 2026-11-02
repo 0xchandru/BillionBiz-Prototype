@@ -37,17 +37,17 @@ project:
       - online_courses
       - ticketing
   experience_shells:
-    marketing: https://chandraprakash.social
-    merchant_admin: https://admin.chandraprakash.social
-    identity: https://accounts.chandraprakash.social
-    staff: https://staff.chandraprakash.social
-    pos: https://pos.chandraprakash.social
-    api: https://api.chandraprakash.social
-    platform_operations: https://ops.chandraprakash.social
-    storefront_base: https://stores.chandraprakash.social
-    storefront_pattern: https://{storeSlug}.stores.chandraprakash.social
-    assets_optional: https://assets.chandraprakash.social
-    status_optional: https://status.chandraprakash.social
+    marketing: https://chandraprakash.codes
+    merchant_admin: https://admin.chandraprakash.codes
+    identity: https://accounts.chandraprakash.codes
+    staff: https://staff.chandraprakash.codes
+    pos: https://pos.chandraprakash.codes
+    api: https://api.chandraprakash.codes
+    platform_operations: https://ops.chandraprakash.codes
+    storefront_base: https://stores.chandraprakash.codes
+    storefront_pattern: https://{storeSlug}.stores.chandraprakash.codes
+    assets_optional: https://assets.chandraprakash.codes
+    status_optional: https://status.chandraprakash.codes
     status: PROPOSED_NOT_DNS_VERIFIED
   authentication:
     initial_methods:

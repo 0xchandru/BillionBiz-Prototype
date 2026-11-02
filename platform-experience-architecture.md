@@ -57,7 +57,7 @@ Do not add many social providers just for visual parity. Email/password plus Goo
 5. Send a single-use, time-limited verification message.
 6. Collect business/store display name and available store slug.
 7. In one idempotent transaction create organization, owner membership, store shell, default location, initial capability selection and onboarding checklist.
-8. Assign a draft storefront address such as `https://{slug}.stores.chandraprakash.social` only after the host-routing layer exists.
+8. Assign a draft storefront address such as `https://{slug}.stores.chandraprakash.codes` only after the host-routing layer exists.
 9. Enqueue account-created and store-workspace-created emails.
 10. Assign the store to the configured no-payment entry tier (exact feature limits are configuration, not hardcoded UI copy); do not collect payment details or start a paid subscription without an explicit, informed choice.
 11. Redirect to the new Merchant Admin workspace with a checklist computed from persisted data.
@@ -70,9 +70,9 @@ Derive every item from persisted domain data, not frontend booleans. Include bus
 ## 4. Login, recovery and role-aware routing
 
 Use one central identity service for merchant, staff, POS and customer identities, with distinct policies and destinations:
-- `admin.chandraprakash.social/login` — merchant admin.
-- `staff.chandraprakash.social/login` — staff portal.
-- `pos.chandraprakash.social/login` — cashier portal.
+- `admin.chandraprakash.codes/login` — merchant admin.
+- `staff.chandraprakash.codes/login` — staff portal.
+- `pos.chandraprakash.codes/login` — cashier portal.
 - Customer sign-in starts from the individual storefront and is scoped to that store/customer relationship.
 
 After authentication:
@@ -114,7 +114,7 @@ Every journey needs a clear next action, progressive disclosure, save/resume whe
 
 ## 8. Internal platform operations console
 
-Provide a separate, restricted operations console (proposed `ops.chandraprakash.social`) for BillionBiz personnel. It is not the merchant admin and must use stronger authentication, least-privilege roles, separate privileged sessions, just-in-time access where feasible, approval/audit for sensitive support actions, and explicit tenant-context banners. Internal operators must not inherit merchant permissions or silently impersonate users. Support access is time-bound, reason-coded and logged. Provide tenant lifecycle/support tools, feature/incident status, job/queue health, email delivery health, provider/webhook health, domain/certificate state, audit search and controlled data export tools.
+Provide a separate, restricted operations console (proposed `ops.chandraprakash.codes`) for BillionBiz personnel. It is not the merchant admin and must use stronger authentication, least-privilege roles, separate privileged sessions, just-in-time access where feasible, approval/audit for sensitive support actions, and explicit tenant-context banners. Internal operators must not inherit merchant permissions or silently impersonate users. Support access is time-bound, reason-coded and logged. Provide tenant lifecycle/support tools, feature/incident status, job/queue health, email delivery health, provider/webhook health, domain/certificate state, audit search and controlled data export tools.
 
 ## 9. Customer account area
 

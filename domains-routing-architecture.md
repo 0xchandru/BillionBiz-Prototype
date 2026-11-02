@@ -2,32 +2,32 @@
 
 ## 1. Proposed domain map
 
-The following is the recommended logical host map for `chandraprakash.social`. It is a target plan, not proof that DNS, certificates or deployments are configured.
+The following is the recommended logical host map for `chandraprakash.codes`. It is a target plan, not proof that DNS, certificates or deployments are configured.
 
 | Hostname | Responsibility |
 |---|---|
-| `chandraprakash.social` | Public BillionBiz landing/marketing site |
-| `www.chandraprakash.social` | Redirect to canonical apex or serve same marketing app |
-| `admin.chandraprakash.social` | Merchant Admin and Store Editor |
-| `accounts.chandraprakash.social` | Central identity/verification/recovery entry, if split-host auth is chosen |
-| `staff.chandraprakash.social` | Staff Portal |
-| `pos.chandraprakash.social` | Dedicated Counter/POS application |
-| `api.chandraprakash.social` | Versioned API ingress |
-| `ops.chandraprakash.social` | Restricted internal platform operations console |
-| `stores.chandraprakash.social` | Reserved tenant storefront base host |
-| `{store-slug}.stores.chandraprakash.social` | Default tenant storefront host |
-| `assets.chandraprakash.social` | Versioned static assets/media if a separate asset host is needed |
-| `status.chandraprakash.social` | Public status page if operated |
+| `chandraprakash.codes` | Public BillionBiz landing/marketing site |
+| `www.chandraprakash.codes` | Redirect to canonical apex or serve same marketing app |
+| `admin.chandraprakash.codes` | Merchant Admin and Store Editor |
+| `accounts.chandraprakash.codes` | Central identity/verification/recovery entry, if split-host auth is chosen |
+| `staff.chandraprakash.codes` | Staff Portal |
+| `pos.chandraprakash.codes` | Dedicated Counter/POS application |
+| `api.chandraprakash.codes` | Versioned API ingress |
+| `ops.chandraprakash.codes` | Restricted internal platform operations console |
+| `stores.chandraprakash.codes` | Reserved tenant storefront base host |
+| `{store-slug}.stores.chandraprakash.codes` | Default tenant storefront host |
+| `assets.chandraprakash.codes` | Versioned static assets/media if a separate asset host is needed |
+| `status.chandraprakash.codes` | Public status page if operated |
 
 Example routes:
-- `https://admin.chandraprakash.social/login`
-- `https://admin.chandraprakash.social/register`
-- `https://admin.chandraprakash.social/onboarding`
-- `https://admin.chandraprakash.social/store/{storeId}/online-store/pages`
-- `https://staff.chandraprakash.social/appointments`
-- `https://pos.chandraprakash.social/counter/{counterId}`
-- `https://{store-slug}.stores.chandraprakash.social/` and `/book` when appointments are enabled.
-- `https://{store-slug}.stores.chandraprakash.social/account` for that store’s customer order/booking account area.
+- `https://admin.chandraprakash.codes/login`
+- `https://admin.chandraprakash.codes/register`
+- `https://admin.chandraprakash.codes/onboarding`
+- `https://admin.chandraprakash.codes/store/{storeId}/online-store/pages`
+- `https://staff.chandraprakash.codes/appointments`
+- `https://pos.chandraprakash.codes/counter/{counterId}`
+- `https://{store-slug}.stores.chandraprakash.codes/` and `/book` when appointments are enabled.
+- `https://{store-slug}.stores.chandraprakash.codes/account` for that store’s customer order/booking account area.
 
 Customer-owned custom domains such as `shop.customer-domain.com` should be supported only after ownership verification and automated certificate lifecycle are implemented.
 

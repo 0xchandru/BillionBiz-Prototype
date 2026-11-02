@@ -47,7 +47,7 @@ Use one ADR per decision. Status is `PROPOSED`, `ACCEPTED`, `REJECTED` or `SUPER
 ## ADR-007 — Dedicated POS Portal Architecture & Counter Session Isolation
 
 - **Status:** ACCEPTED
-- **Decision:** Cashier billing runs exclusively in a dedicated POS portal (`pos.chandraprakash.social`). Merchant Admin provides a `POS & Counters` workspace strictly for configuring locations, counters, devices, staff assignments, and viewing X/Z closure reports. Cashiers authenticate via PINs scoped to assigned counters.
+- **Decision:** Cashier billing runs exclusively in a dedicated POS portal (`pos.chandraprakash.codes`). Merchant Admin provides a `POS & Counters` workspace strictly for configuring locations, counters, devices, staff assignments, and viewing X/Z closure reports. Cashiers authenticate via PINs scoped to assigned counters.
 - **Context:** Cashier billing operations require distinct physical device ergonomics, offline cash resilience, and restricted permissions. Co-locating cashier actions inside Merchant Admin violates the principle of least privilege.
 - **Consequences:** Eliminates privilege escalation risks; enables independent PWA caching for offline cash sales.
 
@@ -80,12 +80,12 @@ Use one ADR per decision. Status is `PROPOSED`, `ACCEPTED`, `REJECTED` or `SUPER
 
 - **Status:** ACCEPTED
 - **Decision:** Establish a formal host routing schema:
-  - `chandraprakash.social`: Public marketing landing page.
-  - `admin.chandraprakash.social`: Merchant Admin workspace.
-  - `staff.chandraprakash.social`: Staff personal portal.
-  - `pos.chandraprakash.social`: Dedicated Cashier POS PWA.
-  - `api.chandraprakash.social`: Core backend API gateway.
-  - `{slug}.stores.chandraprakash.social`: Merchant public storefronts.
+  - `chandraprakash.codes`: Public marketing landing page.
+  - `admin.chandraprakash.codes`: Merchant Admin workspace.
+  - `staff.chandraprakash.codes`: Staff personal portal.
+  - `pos.chandraprakash.codes`: Dedicated Cashier POS PWA.
+  - `api.chandraprakash.codes`: Core backend API gateway.
+  - `{slug}.stores.chandraprakash.codes`: Merchant public storefronts.
 - **Context:** BillionBiz operates 9 distinct logical experience shells across public marketing, administration, retail POS, staff operations, API, and tenant storefronts.
 - **Consequences:** Logical separation of concerns; simplifies security cookie scoping and CORS policies.
 
