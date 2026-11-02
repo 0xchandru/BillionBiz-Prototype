@@ -1038,7 +1038,7 @@ identityRouter.post('/login-unified', async (req: Request, res: Response) => {
 
 // POST /api/v1/auth/register-streamlined (Streamlined Onboarding with Storefront Type & Optional Password)
 identityRouter.post('/register-streamlined', async (req: Request, res: Response) => {
-  const { identifier, storeName, capabilityMode, password, fullName } = req.body;
+  const { identifier, storeName, capabilityMode, password, fullName, slug } = req.body;
   if (!identifier || !storeName) {
     return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'Identifier and store name are required' });
   }
@@ -1063,9 +1063,10 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
 
   const displayName = fullName?.trim() || (isEmail ? value.split('@')[0] : `Merchant ${value.slice(-4)}`);
   const passwordHash = password && password.trim().length >= 6 ? await bcrypt.hash(password.trim(), 10) : null;
-  const storeSlug = storeName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || `store-${uuidv4().substring(0, 6)}`;
+  const rawSlug = (slug || storeName).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  const storeSlug = rawSlug || `store-${uuidv4().substring(0, 6)}`;
 
-  const mode = (capabilityMode || 'BOTH').toUpperCase(); // 'COMMERCE' | 'SERVICES' | 'BOTH'
+  const mode = (capabilityMode || 'COMMERCE').toUpperCase(); // Default to 'COMMERCE' (Ecommerce store)
   const prodEnabled = mode === 'COMMERCE' || mode === 'BOTH';
   const apptEnabled = mode === 'SERVICES' || mode === 'BOTH';
 
@@ -1184,6 +1185,44 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
   });
 
   const portalDestination = resolvePortalDestination('OWNER', false);
+
+  // Send real-time welcome email via Resend if email registration
+  if (isEmail) {
+    try {
+      await sendEmail({
+        to: value,
+        subject: `Welcome to BillionBiz! Your Store "${storeName}" is Ready`,
+        text: `Hello ${displayName},\n\nYour store "${storeName}" has been successfully provisioned on BillionBiz!\n\nYou can access your dashboard anytime at: https://admin.chandraprakash.codes/dashboard\n${!passwordHash ? 'You can log in securely anytime using email verification codes.' : 'You can log in with your password or email verification codes.'}\n\nStorefront Web Address: https://${storeSlug}.stores.chandraprakash.codes\n\nBest regards,\nThe BillionBiz Team`,
+        html: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 32px 16px; color: #0f172a;">
+            <div style="max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+              <span style="display: inline-block; padding: 4px 12px; background: #dcfce7; color: #15803d; border-radius: 99px; font-size: 11px; font-weight: 700; text-transform: uppercase;">Store Activated</span>
+              <h1 style="font-size: 24px; font-weight: 800; color: #0f172a; margin: 12px 0 6px 0;">Welcome, ${displayName}!</h1>
+              <p style="font-size: 15px; color: #64748b; line-height: 1.5; margin: 0 0 20px 0;">
+                Your online store <strong>${storeName}</strong> has been successfully configured.
+              </p>
+
+              <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 24px;">
+                <p style="margin: 0 0 8px 0; font-size: 13px; color: #64748b;"><strong>Merchant Portal:</strong> <a href="https://admin.chandraprakash.codes/dashboard" style="color: #2563eb; text-decoration: none;">admin.chandraprakash.codes/dashboard</a></p>
+                <p style="margin: 0 0 8px 0; font-size: 13px; color: #64748b;"><strong>Storefront Address:</strong> <a href="https://${storeSlug}.stores.chandraprakash.codes" style="color: #2563eb; text-decoration: none;">https://${storeSlug}.stores.chandraprakash.codes</a></p>
+                <p style="margin: 0; font-size: 13px; color: #64748b;"><strong>Login Method:</strong> ${!passwordHash ? 'Instant Email Verification Code / OTP (No password required)' : 'Password or Email OTP'}</p>
+              </div>
+
+              <a href="https://admin.chandraprakash.codes/dashboard" style="display: inline-block; background: #2563eb; color: #ffffff; padding: 12px 24px; border-radius: 8px; font-weight: 700; text-decoration: none; font-size: 14px;">
+                Launch Merchant Dashboard &rarr;
+              </a>
+
+              <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #f1f5f9; font-size: 12px; color: #94a3b8; line-height: 1.5;">
+                <p style="margin: 0;">&copy; ${new Date().getFullYear()} BillionBiz Platform. All rights reserved.</p>
+              </div>
+            </div>
+          </div>
+        `
+      });
+    } catch (err: any) {
+      console.error(`[WELCOME EMAIL] Error dispatching to ${value}:`, err.message);
+    }
+  }
 
   res.status(201).json({
     success: true,
