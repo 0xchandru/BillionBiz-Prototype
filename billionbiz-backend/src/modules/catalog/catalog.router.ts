@@ -140,6 +140,7 @@ catalogRouter.post(
         }
       ];
 
+      const createdVariants: any[] = [];
       for (const v of variantsToCreate) {
         const variantId = `var-${uuidv4()}`;
         const sku = v.sku || `${handle.toUpperCase()}-${uuidv4().substring(0, 4)}`;
@@ -160,9 +161,16 @@ catalogRouter.post(
           ]
         );
 
+        createdVariants.push({
+          id: variantId,
+          sku,
+          priceMinor: v.priceMinor || 0,
+          inventoryQuantity: v.initialStock || v.inventoryQuantity || 0
+        });
+
         // Initialize inventory balance if location exists
         if (defaultLocationId) {
-          const initialQty = parseInt(v.initialStock || '0', 10);
+          const initialQty = parseInt(v.initialStock || v.inventoryQuantity || '0', 10);
           await client.query(
             `INSERT INTO inventory_balances (id, variant_id, location_id, on_hand, reserved, available)
              VALUES ($1, $2, $3, $4, 0, $4)`,
@@ -188,11 +196,12 @@ catalogRouter.post(
         targetId: productId,
         changes: { name, handle, variantsCount: variantsToCreate.length }
       });
-    });
 
-    res.status(201).json({
-      message: 'Product created successfully',
-      productId
+      res.status(201).json({
+        message: 'Product created successfully',
+        productId,
+        variants: createdVariants
+      });
     });
   }
 );

@@ -1,3 +1,4 @@
+import http from 'http';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -12,11 +13,13 @@ import { storefrontRouter } from './modules/storefront/storefront.router.js';
 import { extensionsRouter } from './modules/extensions/extensions.router.js';
 import { dashboardRouter } from './modules/dashboard/dashboard.router.js';
 import { notificationsRouter } from './modules/notifications/notifications.router.js';
+import { realtimeRouter, realtimeGateway } from './core/realtimeGateway.js';
 import { pool } from './db/pool.js';
 
 dotenv.config();
 
 export const app = express();
+export const server = http.createServer(app);
 const PORT = process.env.PORT || 4000;
 
 app.use(cors({ origin: true, credentials: true }));
@@ -32,6 +35,9 @@ if (process.env.NODE_ENV !== 'test') {
     next();
   });
 }
+
+// Attach Realtime WebSocket Gateway to HTTP server
+realtimeGateway.init(server);
 
 // Health check endpoints (REQ-OPS-003)
 app.get('/health', async (req, res) => {
@@ -77,6 +83,7 @@ app.use('/api/v1/storefront', storefrontRouter);
 app.use('/api/v1/extensions', extensionsRouter);
 app.use('/api/v1/dashboard', dashboardRouter);
 app.use('/api/v1/notifications', notificationsRouter);
+app.use('/api/v1/realtime', realtimeRouter);
 
 // Global Error Handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -90,8 +97,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 });
 
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
+  server.listen(PORT, () => {
     console.log(`[BillionBiz Platform Server] Running on http://localhost:${PORT}`);
   });
 }
-

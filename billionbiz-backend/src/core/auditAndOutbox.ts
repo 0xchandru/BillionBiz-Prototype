@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { query } from '../db/pool.js';
+import { realtimeGateway } from './realtimeGateway.js';
 
 export interface AuditParams {
   organizationId?: string;
@@ -55,6 +56,23 @@ export async function publishOutboxEvent(
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE)`,
     [id, organizationId, storeId, eventType, aggregateType, aggregateId, JSON.stringify(payload), correlationId || uuidv4()]
   );
+
+  try {
+    realtimeGateway.broadcast({
+      id,
+      type: eventType,
+      channel: aggregateType.toLowerCase(),
+      organizationId,
+      storeId,
+      aggregateType,
+      aggregateId,
+      payload,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    // Non-blocking realtime broadcast
+  }
+
   return id;
 }
 
@@ -82,6 +100,22 @@ export async function enqueueOutbox(params: {
       params.correlationId || uuidv4()
     ]
   );
+
+  try {
+    realtimeGateway.broadcast({
+      id,
+      type: params.eventType,
+      channel: (params.aggregateType || 'SYSTEM').toLowerCase(),
+      organizationId: params.organizationId,
+      storeId: params.storeId,
+      aggregateType: params.aggregateType || 'SYSTEM',
+      aggregateId: params.aggregateId || id,
+      payload: params.payload,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    // Non-blocking realtime broadcast
+  }
+
   return id;
 }
-

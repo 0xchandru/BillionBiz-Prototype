@@ -232,30 +232,37 @@ appointmentsRouter.post(
     const holdToken = `hold-${uuidv4()}`;
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minute TTL
 
-    await withTransaction(async (client) => {
-      // Check for overlapping bookings
-      const conflict = await client.query(
-        `SELECT id FROM bookings
-         WHERE resource_id = $1 AND status NOT IN ('CANCELLED')
-           AND start_time < $3 AND end_time > $2`,
-        [resourceId, startTime, endTime]
-      );
-      if (conflict.rowCount && conflict.rowCount > 0) {
-        throw new Error('SLOT_ALREADY_BOOKED: This slot is no longer available');
+    try {
+      await withTransaction(async (client) => {
+        // Check for overlapping bookings
+        const conflict = await client.query(
+          `SELECT id FROM bookings
+           WHERE resource_id = $1 AND status NOT IN ('CANCELLED')
+             AND start_time < $3 AND end_time > $2`,
+          [resourceId, startTime, endTime]
+        );
+        if (conflict.rowCount && conflict.rowCount > 0) {
+          throw new Error('SLOT_ALREADY_BOOKED: This slot is no longer available');
+        }
+
+        await client.query(
+          `INSERT INTO booking_holds (id, store_id, offering_id, resource_id, start_time, end_time, hold_token, expires_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [`hld-${uuidv4()}`, storeId, offeringId, resourceId, startTime, endTime, holdToken, expiresAt]
+        );
+      });
+
+      res.status(201).json({
+        message: 'Slot held successfully',
+        holdToken,
+        expiresAt: expiresAt.toISOString()
+      });
+    } catch (err: any) {
+      if (err.message?.includes('SLOT_ALREADY_BOOKED')) {
+        return res.status(409).json({ error: 'SLOT_ALREADY_BOOKED', message: err.message });
       }
-
-      await client.query(
-        `INSERT INTO booking_holds (id, store_id, offering_id, resource_id, start_time, end_time, hold_token, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [`hld-${uuidv4()}`, storeId, offeringId, resourceId, startTime, endTime, holdToken, expiresAt]
-      );
-    });
-
-    res.status(201).json({
-      message: 'Slot held successfully',
-      holdToken,
-      expiresAt: expiresAt.toISOString()
-    });
+      return res.status(500).json({ error: 'HOLD_FAILED', message: err.message });
+    }
   }
 );
 
@@ -285,97 +292,110 @@ appointmentsRouter.post(
     const bookingId = `bkg-${uuidv4()}`;
     const bookingNumber = `APT-${Date.now().toString().slice(-6)}`;
 
-    await withTransaction(async (client) => {
-      // 1. Fetch offering for authoritative price
-      const offRes = await client.query(
-        `SELECT price_minor, deposit_required_minor FROM offerings WHERE id = $1 AND store_id = $2`,
-        [offeringId, storeId]
-      );
-      if (offRes.rowCount === 0) {
-        throw new Error('OFFERING_NOT_FOUND');
-      }
-      const { price_minor, deposit_required_minor } = offRes.rows[0];
-
-      // 2. Concurrency-safe overlap check with FOR UPDATE
-      const overlap = await client.query(
-        `SELECT id FROM bookings
-         WHERE resource_id = $1 AND status NOT IN ('CANCELLED')
-           AND start_time < $3 AND end_time > $2
-         FOR UPDATE`,
-        [resourceId, startTime, endTime]
-      );
-      if (overlap.rowCount && overlap.rowCount > 0) {
-        throw new Error('SLOT_UNAVAILABLE: Time slot has been booked by another customer');
-      }
-
-      // 3. Resolve customer
-      let custId = null;
-      if (customerDetails?.email) {
-        const custRes = await client.query(
-          `SELECT id FROM customers WHERE store_id = $1 AND email = $2`,
-          [storeId, customerDetails.email.toLowerCase().trim()]
+    try {
+      await withTransaction(async (client) => {
+        // 1. Fetch offering for authoritative price
+        const offRes = await client.query(
+          `SELECT price_minor, deposit_required_minor FROM offerings WHERE id = $1 AND store_id = $2`,
+          [offeringId, storeId]
         );
-        if (custRes.rowCount && custRes.rowCount > 0) {
-          custId = custRes.rows[0].id;
-        } else {
-          custId = `cust-${uuidv4()}`;
-          await client.query(
-            `INSERT INTO customers (id, store_id, email, phone, first_name, last_name)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
-            [
-              custId,
-              storeId,
-              customerDetails.email.toLowerCase().trim(),
-              customerDetails.phone || null,
-              customerDetails.firstName || 'Client',
-              customerDetails.lastName || ''
-            ]
-          );
+        if (offRes.rowCount === 0) {
+          throw new Error('OFFERING_NOT_FOUND');
         }
-      }
+        const { price_minor, deposit_required_minor } = offRes.rows[0];
 
-      // 4. Insert booking
-      const balanceDue = Math.max(0, price_minor - deposit_required_minor);
-      await client.query(
-        `INSERT INTO bookings (id, store_id, booking_number, offering_id, resource_id, customer_id, start_time, end_time, status, total_minor, deposit_paid_minor, balance_due_minor, intake_notes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'CONFIRMED', $9, $10, $11, $12)`,
-        [
-          bookingId,
+        // 2. Atomic concurrency lock on resource & start time (T-027, REQ-BOOK-012)
+        await client.query(
+          `SELECT pg_advisory_xact_lock(hashtext($1 || $2))`,
+          [resourceId, startTime]
+        );
+
+        // Overlap check with FOR UPDATE
+        const overlap = await client.query(
+          `SELECT id FROM bookings
+           WHERE resource_id = $1 AND status NOT IN ('CANCELLED')
+             AND start_time < $3 AND end_time > $2
+           FOR UPDATE`,
+          [resourceId, startTime, endTime]
+        );
+        if (overlap.rowCount && overlap.rowCount > 0) {
+          throw new Error('SLOT_UNAVAILABLE: Time slot has been booked by another customer');
+        }
+
+        // 3. Resolve customer
+        let custId = null;
+        if (customerDetails?.email) {
+          const custRes = await client.query(
+            `SELECT id FROM customers WHERE store_id = $1 AND email = $2`,
+            [storeId, customerDetails.email.toLowerCase().trim()]
+          );
+          if (custRes.rowCount && custRes.rowCount > 0) {
+            custId = custRes.rows[0].id;
+          } else {
+            custId = `cust-${uuidv4()}`;
+            await client.query(
+              `INSERT INTO customers (id, store_id, email, phone, first_name, last_name)
+               VALUES ($1, $2, $3, $4, $5, $6)`,
+              [
+                custId,
+                storeId,
+                customerDetails.email.toLowerCase().trim(),
+                customerDetails.phone || null,
+                customerDetails.firstName || 'Client',
+                customerDetails.lastName || ''
+              ]
+            );
+          }
+        }
+
+        // 4. Insert booking
+        const balanceDue = Math.max(0, price_minor - deposit_required_minor);
+        await client.query(
+          `INSERT INTO bookings (id, store_id, booking_number, offering_id, resource_id, customer_id, start_time, end_time, status, total_minor, deposit_paid_minor, balance_due_minor, intake_notes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'CONFIRMED', $9, $10, $11, $12)`,
+          [
+            bookingId,
+            storeId,
+            bookingNumber,
+            offeringId,
+            resourceId,
+            custId,
+            startTime,
+            endTime,
+            price_minor,
+            deposit_required_minor,
+            balanceDue,
+            intakeNotes || ''
+          ]
+        );
+
+        // 5. Release hold if present
+        if (holdToken) {
+          await client.query(`DELETE FROM booking_holds WHERE hold_token = $1`, [holdToken]);
+        }
+
+        await recordAudit({
+          organizationId: req.tenant?.organizationId,
           storeId,
-          bookingNumber,
-          offeringId,
-          resourceId,
-          custId,
-          startTime,
-          endTime,
-          price_minor,
-          deposit_required_minor,
-          balanceDue,
-          intakeNotes || ''
-        ]
-      );
-
-      // 5. Release hold if present
-      if (holdToken) {
-        await client.query(`DELETE FROM booking_holds WHERE hold_token = $1`, [holdToken]);
-      }
-
-      await recordAudit({
-        organizationId: req.tenant?.organizationId,
-        storeId,
-        actorId: req.auth?.userId,
-        action: 'CONFIRM_APPOINTMENT_BOOKING',
-        targetType: 'BOOKING',
-        targetId: bookingId,
-        changes: { bookingNumber, startTime, endTime, totalMinor: price_minor }
+          actorId: req.auth?.userId,
+          action: 'CONFIRM_APPOINTMENT_BOOKING',
+          targetType: 'BOOKING',
+          targetId: bookingId,
+          changes: { bookingNumber, startTime, endTime, totalMinor: price_minor }
+        });
       });
-    });
 
-    res.status(201).json({
-      message: 'Appointment booked successfully',
-      bookingId,
-      bookingNumber
-    });
+      res.status(201).json({
+        message: 'Appointment booked successfully',
+        bookingId,
+        bookingNumber
+      });
+    } catch (err: any) {
+      if (err.message?.includes('SLOT_UNAVAILABLE') || err.message?.includes('conflict')) {
+        return res.status(409).json({ error: 'SLOT_UNAVAILABLE', message: err.message });
+      }
+      return res.status(500).json({ error: 'BOOKING_FAILED', message: err.message });
+    }
   }
 );
 

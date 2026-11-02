@@ -680,3 +680,21 @@ identityRouter.get('/me', requireAuth, async (req: Request, res: Response) => {
     permissions: req.auth?.permissions || []
   });
 });
+
+// GET /api/v1/auth/onboarding-checklist
+identityRouter.get('/onboarding-checklist', requireAuth, async (req: Request, res: Response) => {
+  const storeId = (req.headers['x-store-id'] as string) || req.auth?.storeId;
+  if (!storeId) {
+    return res.status(400).json({ error: 'MISSING_STORE', message: 'Store context required' });
+  }
+
+  const checklistRes = await query(
+    `SELECT id, step_key, title, description, is_completed, completed_at
+     FROM onboarding_checklists
+     WHERE store_id = $1
+     ORDER BY created_at ASC`,
+    [storeId]
+  );
+
+  res.json({ checklist: checklistRes.rows });
+});

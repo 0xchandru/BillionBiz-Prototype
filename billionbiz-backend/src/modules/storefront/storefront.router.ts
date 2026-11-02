@@ -72,6 +72,56 @@ storefrontRouter.get('/pages', requireAuth, resolveTenant, async (req: Request, 
   res.json({ pages: pagesRes.rows });
 });
 
+// POST /api/v1/storefront/pages (Create new page)
+storefrontRouter.post(
+  '/pages',
+  requireAuth,
+  resolveTenant,
+  requirePermission('store.editor.edit'),
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+    const { name, title, path, slug, type = 'custom', category = 'GENERAL', sections = [], pageProps = {} } = req.body;
+    const pageName = name || title || 'New Page';
+    const pagePath = path || `/${slug || pageName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+    const pageId = `page-${uuidv4()}`;
+
+    await withTransaction(async (client) => {
+      await client.query(
+        `INSERT INTO store_pages (id, store_id, name, path, type, category, status, page_props)
+         VALUES ($1, $2, $3, $4, $5, $6, 'draft', $7)`,
+        [pageId, storeId, pageName, pagePath, type, category, JSON.stringify(pageProps)]
+      );
+
+      if (sections.length > 0) {
+        await client.query(
+          `INSERT INTO page_draft_versions (id, page_id, version, sections, page_props, created_by)
+           VALUES ($1, $2, 1, $3, $4, $5)`,
+          [`draft-${uuidv4()}`, pageId, JSON.stringify(sections), JSON.stringify(pageProps), req.auth?.userId]
+        );
+      }
+    });
+
+    res.status(201).json({ message: 'Page created successfully', pageId, path: pagePath });
+  }
+);
+
+// GET /api/v1/storefront/render (Render active storefront or draft preview)
+storefrontRouter.get('/render', resolveTenant, async (req: Request, res: Response) => {
+  const storeId = req.tenant!.storeId;
+  const themeRes = await query(`SELECT * FROM store_themes WHERE store_id = $1`, [storeId]);
+  const pagesRes = await query(`SELECT * FROM store_pages WHERE store_id = $1`, [storeId]);
+  const latestRel = await query(
+    `SELECT snapshot FROM store_releases WHERE store_id = $1 ORDER BY release_number DESC LIMIT 1`,
+    [storeId]
+  );
+
+  res.json({
+    theme: themeRes.rows[0] || { preset_name: 'modern' },
+    pages: pagesRes.rows,
+    activeRelease: latestRel.rows[0]?.snapshot || null
+  });
+});
+
 // PATCH /api/v1/storefront/pages/:id/draft (Save Editor Draft Sections, T-010, REQ-STORE-002)
 storefrontRouter.patch(
   '/pages/:id/draft',
@@ -109,9 +159,9 @@ storefrontRouter.patch(
   }
 );
 
-// POST /api/v1/storefront/publish (Atomic Whole-Store Publish All, T-011, REQ-STORE-006)
+// POST /api/v1/storefront/publish and /releases/publish (Atomic Whole-Store Publish All, T-011, REQ-STORE-006)
 storefrontRouter.post(
-  '/publish',
+  ['/publish', '/releases/publish'],
   requireAuth,
   resolveTenant,
   requirePermission('store.publish'),
