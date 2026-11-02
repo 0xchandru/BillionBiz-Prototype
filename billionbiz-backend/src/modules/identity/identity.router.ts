@@ -704,7 +704,7 @@ identityRouter.get('/onboarding-checklist', requireAuth, async (req: Request, re
  */
 function normalizeIdentifier(raw: string): { isEmail: boolean; value: string } {
   const trimmed = (raw || '').trim();
-  if (trimmed.includes('@')) {
+  if (trimmed.includes('@') || /[a-zA-Z]/.test(trimmed)) {
     return { isEmail: true, value: trimmed.toLowerCase() };
   }
   // Mobile phone number: normalize country code and digits
@@ -722,14 +722,15 @@ identityRouter.post('/otp/send', async (req: Request, res: Response) => {
   const { isEmail, value } = normalizeIdentifier(identifier);
   const otpType = (type || 'REGISTER').toUpperCase();
 
-  // Validate format
+  // Validate format strictly
   if (isEmail) {
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+    if (!/^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/.test(value)) {
       return res.status(400).json({ error: 'INVALID_EMAIL', message: 'Please enter a valid email address' });
     }
   } else {
-    if (!/^\+[0-9]{7,15}$/.test(value)) {
-      return res.status(400).json({ error: 'INVALID_PHONE', message: 'Please enter a valid mobile number with country code' });
+    const digitsOnly = value.replace(/[^0-9]/g, '');
+    if (digitsOnly.length < 10 || digitsOnly.length > 15 || !/^\+[0-9]{10,15}$/.test(value)) {
+      return res.status(400).json({ error: 'INVALID_PHONE', message: 'Please enter a valid 10-digit mobile number' });
     }
   }
 
