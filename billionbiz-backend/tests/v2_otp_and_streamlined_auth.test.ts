@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { app } from '../src/server.js';
+import { query } from '../src/db/pool.js';
 
 function makeRequest(
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
@@ -76,7 +77,6 @@ describe('V2 Streamlined Registration & Phone/Email OTP Authentication', () => {
     expect(res.body.success).toBe(true);
     expect(res.body.channel).toBe('EMAIL');
     expect(res.body.identifier).toBe(testEmail);
-    expect(res.body.devOtpPreview).toBeDefined();
   });
 
   it('sends OTP code to international phone number for registration', async () => {
@@ -88,15 +88,19 @@ describe('V2 Streamlined Registration & Phone/Email OTP Authentication', () => {
     expect(res.body.success).toBe(true);
     expect(res.body.channel).toBe('SMS');
     expect(res.body.identifier).toBe(testPhone);
-    expect(res.body.devOtpPreview).toBeDefined();
   });
 
   it('verifies valid registration OTP code and rejects incorrect code', async () => {
     const sendRes = await makeRequest('POST', '/api/v1/auth/otp/send', {
       body: { identifier: testEmail, type: 'REGISTER' }
     });
+    expect(sendRes.status).toBe(200);
 
-    const code = sendRes.body.devOtpPreview;
+    const otpDb = await query(
+      `SELECT code FROM verification_otps WHERE identifier = $1 ORDER BY created_at DESC LIMIT 1`,
+      [testEmail]
+    );
+    const code = otpDb.rows[0].code;
 
     // Bad code
     const badRes = await makeRequest('POST', '/api/v1/auth/otp/verify', {
@@ -152,7 +156,12 @@ describe('V2 Streamlined Registration & Phone/Email OTP Authentication', () => {
     });
 
     expect(sendRes.status).toBe(200);
-    const otpCode = sendRes.body.devOtpPreview;
+
+    const otpDb = await query(
+      `SELECT code FROM verification_otps WHERE identifier = $1 ORDER BY created_at DESC LIMIT 1`,
+      [testEmail]
+    );
+    const otpCode = otpDb.rows[0].code;
 
     // 2. Submit login with OTP
     const loginRes = await makeRequest('POST', '/api/v1/auth/login-unified', {

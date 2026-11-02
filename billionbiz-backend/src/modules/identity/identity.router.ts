@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { query, withTransaction } from '../../db/pool.js';
 import { generateToken, requireAuth } from '../../middleware/auth.js';
 import { recordAudit, enqueueOutbox } from '../../core/auditAndOutbox.js';
+import { sendEmail } from '../../core/notificationWorker.js';
 
 export const identityRouter = Router();
 
@@ -773,14 +774,59 @@ identityRouter.post('/otp/send', async (req: Request, res: Response) => {
 
   console.log(`[AUTH OTP] Dispatched ${otpType} verification code [${code}] to ${isEmail ? 'email' : 'mobile'} (${value})`);
 
+  // Production Real-Time Email Dispatch via Resend
+  if (isEmail) {
+    try {
+      const emailResult = await sendEmail({
+        to: value,
+        subject: `Your BillionBiz Verification Code: ${code}`,
+        text: `Your BillionBiz verification code is ${code}. It expires in 10 minutes.\n\nIf you did not request this code, please ignore this email.`,
+        html: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 32px 16px; color: #0f172a;">
+            <div style="max-width: 480px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+              <div style="margin-bottom: 20px;">
+                <span style="display: inline-block; padding: 4px 10px; background: #eff6ff; color: #2563eb; border-radius: 99px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Security Verification</span>
+                <h1 style="font-size: 22px; font-weight: 800; color: #0f172a; margin: 12px 0 6px 0; letter-spacing: -0.02em;">
+                  ${otpType === 'LOGIN' ? 'Sign in to BillionBiz' : 'Verify Your Email'}
+                </h1>
+                <p style="font-size: 14px; color: #64748b; line-height: 1.5; margin: 0;">
+                  Use the 6-digit verification code below to complete your ${otpType === 'LOGIN' ? 'sign-in request' : 'store registration'}. This code expires in <strong>10 minutes</strong>.
+                </p>
+              </div>
+              
+              <div style="background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 20px; text-align: center; margin: 24px 0;">
+                <div style="font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; font-size: 36px; font-weight: 800; letter-spacing: 8px; color: #0f172a;">
+                  ${code}
+                </div>
+              </div>
+
+              <p style="font-size: 13px; color: #64748b; line-height: 1.5; margin: 0 0 24px 0;">
+                If you didn't request this verification code, someone may have entered your email by mistake. You can safely ignore this message.
+              </p>
+
+              <div style="padding-top: 16px; border-top: 1px solid #f1f5f9; font-size: 12px; color: #94a3b8; line-height: 1.5;">
+                <p style="margin: 0;">&copy; ${new Date().getFullYear()} BillionBiz Platform. All rights reserved.</p>
+                <p style="margin: 4px 0 0 0;">Secure transactional email delivered via Resend.</p>
+              </div>
+            </div>
+          </div>
+        `
+      });
+
+      if (!emailResult.success) {
+        console.error(`[AUTH OTP] Resend delivery error for ${value}:`, emailResult.error);
+      }
+    } catch (sendErr: any) {
+      console.error(`[AUTH OTP] Exception while sending email via Resend to ${value}:`, sendErr.message);
+    }
+  }
+
   res.json({
     success: true,
     message: isEmail ? `Verification code sent to your email (${value})` : `Verification code sent to your mobile phone (${value})`,
     channel: isEmail ? 'EMAIL' : 'SMS',
     identifier: value,
-    expiresInSeconds: 600,
-    // Provide OTP in response during development for instant testing
-    devOtpPreview: process.env.NODE_ENV !== 'production' ? code : undefined
+    expiresInSeconds: 600
   });
 });
 
