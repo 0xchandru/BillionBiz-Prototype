@@ -1,0 +1,12 @@
+# Dependency and build directories
+node_modules/
+billionbiz-backend/node_modules/
+billionbiz-backend/dist/
+
+# Separate frontend repository (managed and pushed to its own repository)
+billionbiz-frontend/
+
+# Local / OS files
+.DS_Store
+Thumbs.db
+*.log
