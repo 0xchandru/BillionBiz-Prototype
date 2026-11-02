@@ -79,18 +79,10 @@ if ($Foreground) {
     Set-Location $BackendPath
     npm run dev
 } else {
-    Write-Host "[INFO] Launching backend in background. Logs will be redirected to $LogPath..." -ForegroundColor Cyan
+    Write-Host "[INFO] Launching backend in background via detached process..." -ForegroundColor Cyan
     
-    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $startInfo.FileName = "cmd.exe"
-    $startInfo.Arguments = "/c npm run dev > `"$LogPath`" 2>&1"
-    $startInfo.WorkingDirectory = $BackendPath
-    $startInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
-    $startInfo.CreateNoWindow = $true
-    $startInfo.UseShellExecute = $false
-    
-    $process = [System.Diagnostics.Process]::Start($startInfo)
-    Write-Host "[INFO] Process started with wrapper PID $($process.Id)." -ForegroundColor Cyan
+    # Use Start-Process with cmd /k or minimized window to keep background process persistent in Windows
+    Start-Process -FilePath "cmd.exe" -ArgumentList "/c npm run dev" -WorkingDirectory $BackendPath -WindowStyle Minimized
 
     Write-Host "[INFO] Waiting for backend to initialize on port $Port..." -NoNewline
     $maxAttempts = 30

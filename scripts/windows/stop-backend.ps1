@@ -26,15 +26,15 @@ if (!$connections) {
 
 $pids = $connections | Select-Object -ExpandProperty OwningProcess -Unique
 
-foreach ($pId in $pids) {
-    $proc = Get-Process -Id $pId -ErrorAction SilentlyContinue
+foreach ($targetPid in $pids) {
+    $proc = Get-Process -Id $targetPid -ErrorAction SilentlyContinue
     if ($proc) {
-        Write-Host "[INFO] Terminating PID $pId ($($proc.ProcessName))..." -ForegroundColor Yellow
+        Write-Host "[INFO] Terminating PID $targetPid ($($proc.ProcessName))..." -ForegroundColor Yellow
         try {
-            Stop-Process -Id $pId -Force -ErrorAction Stop
-            Write-Host "[OK] Process $pId terminated successfully." -ForegroundColor Green
+            Stop-Process -Id $targetPid -Force -ErrorAction Stop
+            Write-Host "[OK] Process $targetPid terminated successfully." -ForegroundColor Green
         } catch {
-            Write-Host "[ERROR] Failed to terminate PID $pId: $_" -ForegroundColor Red
+            Write-Host "[ERROR] Failed to terminate PID $($targetPid): $_" -ForegroundColor Red
         }
     }
 }
