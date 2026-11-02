@@ -250,6 +250,85 @@ extensionsRouter.post(
   }
 );
 
+// PATCH /api/v1/extensions/connections/:provider/toggle (Enable / Disable installed extension)
+extensionsRouter.patch(
+  '/connections/:provider/toggle',
+  requireAuth,
+  resolveTenant,
+  requirePermission('extensions.manage'),
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+    const providerKey = String(req.params.provider || '').toLowerCase().trim();
+    const { enabled } = req.body;
+    const newStatus = enabled ? 'ACTIVE' : 'DISABLED';
+
+    await query(
+      `UPDATE integration_connections
+       SET status = $1, updated_at = NOW()
+       WHERE store_id = $2 AND provider_key = $3`,
+      [newStatus, storeId, providerKey]
+    );
+
+    res.json({ message: `${providerKey} extension status set to ${newStatus}`, providerKey, status: newStatus });
+  }
+);
+
+// POST /api/v1/extensions/connections/:provider/install (Install extension for store)
+extensionsRouter.post(
+  '/connections/:provider/install',
+  requireAuth,
+  resolveTenant,
+  requirePermission('extensions.manage'),
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+    const organizationId = req.tenant!.organizationId;
+    const providerKey = String(req.params.provider || '').toLowerCase().trim();
+
+    const existing = await query(
+      `SELECT id, status FROM integration_connections WHERE store_id = $1 AND provider_key = $2`,
+      [storeId, providerKey]
+    );
+
+    if (existing.rowCount === 0) {
+      const connId = `conn-${uuidv4()}`;
+      await query(
+        `INSERT INTO integration_connections (
+          id, organization_id, store_id, provider_key, environment, status,
+          account_identifier, ciphertext, iv, tag, key_version, updated_at
+        )
+        VALUES ($1, $2, $3, $4, 'TEST', 'ACTIVE', $5, '', '', '', 1, NOW())`,
+        [connId, organizationId, storeId, providerKey, 'Setup Required']
+      );
+    } else {
+      await query(
+        `UPDATE integration_connections SET status = 'ACTIVE', updated_at = NOW() WHERE store_id = $1 AND provider_key = $2`,
+        [storeId, providerKey]
+      );
+    }
+
+    res.json({ message: `${providerKey} installed successfully`, providerKey, status: 'ACTIVE' });
+  }
+);
+
+// POST /api/v1/extensions/connections/:provider/uninstall (Uninstall extension from store)
+extensionsRouter.post(
+  '/connections/:provider/uninstall',
+  requireAuth,
+  resolveTenant,
+  requirePermission('extensions.manage'),
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+    const providerKey = String(req.params.provider || '').toLowerCase().trim();
+
+    await query(
+      `DELETE FROM integration_connections WHERE store_id = $1 AND provider_key = $2`,
+      [storeId, providerKey]
+    );
+
+    res.json({ message: `${providerKey} uninstalled successfully`, providerKey });
+  }
+);
+
 // POST /api/v1/extensions/razorpay/create-order (T-022, REQ-EXT-001)
 extensionsRouter.post('/razorpay/create-order', requireAuth, resolveTenant, async (req: Request, res: Response) => {
   const storeId = req.tenant!.storeId;
