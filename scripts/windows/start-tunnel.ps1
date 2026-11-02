@@ -126,3 +126,4 @@ if ($UpdateEnv) {
     Write-Host "Tip: Run with -UpdateEnv to automatically update local .env files:" -ForegroundColor Cyan
     Write-Host "  .\scripts\windows\start-tunnel.ps1 -UpdateEnv" -ForegroundColor Cyan
 }
+

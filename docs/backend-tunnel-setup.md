@@ -153,3 +153,4 @@ If you prefer a permanent, unchanging domain (such as `https://api.chandraprakas
 | `ERR_NGROK_6024: browser warning displayed` | Missing bypass header on request. | Ensure `ngrok-skip-browser-warning: true` header is sent. Verify updated `client.ts` in frontend. |
 | `ECONNREFUSED 127.0.0.1:5432` | Local PostgreSQL service is stopped. | Start PostgreSQL in Windows Services (`services.msc`) or run `net start postgresql-x64-16`. |
 | `CORS Error in browser console` | Origin not permitted in backend whitelist. | Verify `CORS_ALLOWED_ORIGINS` in `billionbiz-backend/.env` contains your domain, or restart backend to reload settings. |
+

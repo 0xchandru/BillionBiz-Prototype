@@ -132,3 +132,4 @@ When hosting the frontend on Vercel under `chandraprakash.codes`:
    ```
 3. **CORS Restrictions**: Always verify `CORS_ALLOWED_ORIGINS` in production restricts access solely to `chandraprakash.codes` subdomains.
 4. **Header Enforcement**: All frontend API calls targeting ngrok automatically attach the header `'ngrok-skip-browser-warning': 'true'`. This prevents ngrok's free-tier HTML banner from breaking JSON parsing.
+

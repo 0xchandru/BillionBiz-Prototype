@@ -141,3 +141,4 @@ Once `https://api.chandraprakash.codes/health` responds with `HTTP 200 OK`:
 - [ ] **CORS Lock-Down**: Remove all `localhost` and `ngrok` origins from production `CORS_ALLOWED_ORIGINS`.
 - [ ] **Rate Limiting**: Enable Redis or memory rate-limiting on sensitive endpoints (`/identity/login`, `/identity/register`).
 - [ ] **Health Monitoring**: Configure UptimeRobot, BetterUptime, or Datadog to ping `https://api.chandraprakash.codes/health` every 60 seconds with alerts configured.
+
