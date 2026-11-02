@@ -741,6 +741,24 @@ export async function runMigrations() {
 
     CREATE INDEX IF NOT EXISTS idx_notifications_store_read ON notifications(store_id, is_read);
     CREATE INDEX IF NOT EXISTS idx_checklists_store ON onboarding_checklists(store_id);
+
+    -- 26. Streamlined Registration & Phone/Email OTP Authentication
+    ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
+    ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN NOT NULL DEFAULT FALSE;
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_users_phone ON users(phone) WHERE phone IS NOT NULL AND phone != '';
+
+    CREATE TABLE IF NOT EXISTS verification_otps (
+      id VARCHAR(64) PRIMARY KEY,
+      identifier VARCHAR(255) NOT NULL,
+      code VARCHAR(16) NOT NULL,
+      type VARCHAR(32) NOT NULL DEFAULT 'REGISTER', -- 'REGISTER' | 'LOGIN' | 'RECOVERY'
+      expires_at TIMESTAMPTZ NOT NULL,
+      is_used BOOLEAN NOT NULL DEFAULT FALSE,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_otps_identifier_type ON verification_otps(identifier, type, is_used);
   `);
 
   console.log('[Migration] All migrations completed successfully.');
