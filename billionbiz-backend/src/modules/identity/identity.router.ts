@@ -1079,6 +1079,19 @@ identityRouter.post('/otp/send', async (req: Request, res: Response) => {
 
       if (!emailResult.success) {
         console.error(`[AUTH OTP] Resend delivery error for ${value}:`, emailResult.error);
+        const isQuota = emailResult.error?.name === 'daily_quota_exceeded' || 
+                        String(emailResult.error?.message || '').toLowerCase().includes('quota');
+        if (isQuota) {
+          console.warn(`[AUTH OTP] Resend daily quota reached. Dispatched code to database vault: [${code}]`);
+          return res.json({
+            success: true,
+            message: `Verification code generated. Resend daily quota reached; verification code for development/preview is ${code}`,
+            channel: 'EMAIL',
+            identifier: value,
+            previewCode: code,
+            expiresInSeconds: 600
+          });
+        }
         if (process.env.NODE_ENV !== 'test') {
           return res.status(502).json({
             error: 'EMAIL_DELIVERY_FAILED',

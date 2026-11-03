@@ -32,9 +32,13 @@ app.use(
       if (!origin) return callback(null, true);
       if (
         allowedOrigins.includes(origin) ||
+        origin === 'https://chandraprakash.codes' ||
+        origin === 'http://chandraprakash.codes' ||
         origin.endsWith('.chandraprakash.codes') ||
-        origin.endsWith('.ngrok-free.app') ||
-        origin.endsWith('.ngrok.io') ||
+        origin.includes('chandraprakash.codes') ||
+        origin.includes('ngrok-free.dev') ||
+        origin.includes('ngrok-free.app') ||
+        origin.includes('ngrok.io') ||
         origin.includes('localhost') ||
         origin.includes('127.0.0.1')
       ) {
@@ -51,7 +55,10 @@ app.use(
       'x-store-id',
       'idempotency-key',
       'ngrok-skip-browser-warning',
-      'x-correlation-id'
+      'x-correlation-id',
+      'Accept',
+      'Origin',
+      'X-Requested-With'
     ]
   })
 );
