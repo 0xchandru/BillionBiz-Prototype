@@ -1,6 +1,7 @@
 {
   "name": "billionbiz-backend",
   "version": "1.0.0",
+  "type": "module",
   "description": "BillionBiz Platform Unified Modular Monolith Backend",
   "main": "dist/server.js",
   "scripts": {

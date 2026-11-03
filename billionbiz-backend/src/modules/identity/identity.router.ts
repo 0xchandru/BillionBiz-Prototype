@@ -555,7 +555,7 @@ identityRouter.post('/google', async (req: Request, res: Response) => {
       try {
         const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(tokenToVerify)}`);
         if (!verifyRes.ok) {
-          const errData = await verifyRes.json().catch(() => ({}));
+          const errData = await verifyRes.json().catch(() => ({})) as any;
           return res.status(401).json({
             error: 'INVALID_GOOGLE_TOKEN',
             message: errData.error_description || 'Google ID token verification failed'
@@ -614,7 +614,7 @@ identityRouter.post('/google', async (req: Request, res: Response) => {
         });
 
         if (!tokenRes.ok) {
-          const errData = await tokenRes.json().catch(() => ({}));
+          const errData = await tokenRes.json().catch(() => ({})) as any;
           return res.status(400).json({
             error: 'CODE_EXCHANGE_FAILED',
             message: errData.error_description || 'Failed to exchange authorization code with Google'
