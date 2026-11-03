@@ -23,6 +23,8 @@ const envSchema = z.object({
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().default('noreply@chandraprakash.codes'),
   INTEGRATION_CREDENTIALS_KEK: z.string().optional(),
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
   TUNNEL_URL: z.string().optional()
 });
 

@@ -311,3 +311,57 @@ catalogRouter.post(
   }
 );
 
+// GET /api/v1/catalog/pricelists
+catalogRouter.get('/pricelists', requireAuth, resolveTenant, async (req: Request, res: Response) => {
+  const storeId = req.tenant!.storeId;
+  const plRes = await query(
+    `SELECT id, name, description, currency, tier_type, discount_pct, is_active, created_at, updated_at
+     FROM price_lists
+     WHERE store_id = $1
+     ORDER BY created_at DESC`,
+    [storeId]
+  );
+  res.json({ priceLists: plRes.rows });
+});
+
+// POST /api/v1/catalog/pricelists
+catalogRouter.post(
+  '/pricelists',
+  requireAuth,
+  resolveTenant,
+  requirePermission('catalog.manage'),
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+    const { name, description = '', currency = 'INR', tierType = 'WHOLESALE', discountPct = 0 } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'Price list name is required' });
+    }
+
+    const id = `pl-${uuidv4()}`;
+    await query(
+      `INSERT INTO price_lists (id, store_id, name, description, currency, tier_type, discount_pct, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE)`,
+      [id, storeId, name, description, currency, tierType, parseFloat(discountPct) || 0]
+    );
+
+    res.status(201).json({ message: 'Price list created successfully', id, name, tierType });
+  }
+);
+
+// DELETE /api/v1/catalog/pricelists/:id
+catalogRouter.delete(
+  '/pricelists/:id',
+  requireAuth,
+  resolveTenant,
+  requirePermission('catalog.manage'),
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+    const { id } = req.params;
+
+    await query(`DELETE FROM price_lists WHERE id = $1 AND store_id = $2`, [id, storeId]);
+    res.json({ message: 'Price list deleted successfully' });
+  }
+);
+
+

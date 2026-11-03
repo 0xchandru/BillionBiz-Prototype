@@ -4,4 +4,6 @@ dist/
 .env.local
 .env.*.local
 *.log
+client_secret*.json
+
 

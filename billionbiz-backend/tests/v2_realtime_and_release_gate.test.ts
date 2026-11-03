@@ -319,6 +319,14 @@ describe('V2 Realtime, Concurrency & Release Gate Suite', () => {
   // SECTION 14 & 16: POS Offline Checkout & Idempotency
   // ============================================================
   it('TC-POS-001: Offline POS checkout with Idempotency-Key prevents duplicate orders', async () => {
+    // 0. Ensure an inventory location exists for this tenant
+    await query(
+      `INSERT INTO inventory_locations (id, store_id, name, code, is_default)
+       VALUES ($1, $2, 'POS Test Warehouse', $3, TRUE)
+       ON CONFLICT (id) DO NOTHING`,
+      [`loc-pos-${Date.now()}`, tenantAStoreId, `WH-${Date.now().toString().slice(-4)}`]
+    );
+
     // 1. Create a product and inventory
     const prodRes = await api('POST', '/api/v1/catalog/products', {
       token: tenantAToken,

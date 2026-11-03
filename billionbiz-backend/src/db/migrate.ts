@@ -782,6 +782,85 @@ export async function runMigrations() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_otps_identifier_type ON verification_otps(identifier, type, is_used);
+
+    -- V3 Production Platform Enhancements: Warehouses, Invoices, Returns & Universal Scheduling
+    ALTER TABLE inventory_locations ADD COLUMN IF NOT EXISTS address_line1 TEXT;
+    ALTER TABLE inventory_locations ADD COLUMN IF NOT EXISTS city VARCHAR(128);
+    ALTER TABLE inventory_locations ADD COLUMN IF NOT EXISTS state VARCHAR(128);
+    ALTER TABLE inventory_locations ADD COLUMN IF NOT EXISTS postal_code VARCHAR(32);
+    ALTER TABLE inventory_locations ADD COLUMN IF NOT EXISTS country VARCHAR(8) DEFAULT 'IN';
+    ALTER TABLE inventory_locations ADD COLUMN IF NOT EXISTS contact_phone VARCHAR(32);
+    ALTER TABLE inventory_locations ADD COLUMN IF NOT EXISTS contact_email VARCHAR(255);
+    ALTER TABLE inventory_locations ADD COLUMN IF NOT EXISTS status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE';
+
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS due_date DATE;
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS notes TEXT;
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_terms VARCHAR(64) DEFAULT 'DUE_ON_RECEIPT';
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS items JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255);
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS customer_email VARCHAR(255);
+
+    ALTER TABLE returns ADD COLUMN IF NOT EXISTS store_id VARCHAR(64) REFERENCES stores(id) ON DELETE CASCADE;
+    ALTER TABLE returns ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) REFERENCES customers(id) ON DELETE SET NULL;
+    ALTER TABLE returns ADD COLUMN IF NOT EXISTS refund_status VARCHAR(32) NOT NULL DEFAULT 'PENDING';
+    ALTER TABLE returns ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+
+    ALTER TABLE offerings ADD COLUMN IF NOT EXISTS category VARCHAR(128) DEFAULT 'General';
+    ALTER TABLE offerings ADD COLUMN IF NOT EXISTS service_type VARCHAR(64) DEFAULT 'IN_PERSON';
+    ALTER TABLE offerings ADD COLUMN IF NOT EXISTS pricing_type VARCHAR(64) DEFAULT 'FIXED';
+    ALTER TABLE offerings ADD COLUMN IF NOT EXISTS deposit_type VARCHAR(32) DEFAULT 'FIXED';
+    ALTER TABLE offerings ADD COLUMN IF NOT EXISTS image_url TEXT;
+    ALTER TABLE offerings ADD COLUMN IF NOT EXISTS assigned_staff JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+    ALTER TABLE staff_profiles ADD COLUMN IF NOT EXISTS email VARCHAR(255);
+    ALTER TABLE staff_profiles ADD COLUMN IF NOT EXISTS phone VARCHAR(32);
+    ALTER TABLE staff_profiles ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+    ALTER TABLE staff_profiles ADD COLUMN IF NOT EXISTS assigned_services JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE staff_profiles ADD COLUMN IF NOT EXISTS capacity INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE staff_profiles ADD COLUMN IF NOT EXISTS responsibilities JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+    CREATE TABLE IF NOT EXISTS store_booking_settings (
+      store_id VARCHAR(64) PRIMARY KEY REFERENCES stores(id) ON DELETE CASCADE,
+      confirmation_mode VARCHAR(32) NOT NULL DEFAULT 'AUTOMATIC',
+      cancellation_policy TEXT DEFAULT '24 hours advance notice required for full refund.',
+      rescheduling_policy TEXT DEFAULT 'Permitted up to 12 hours prior to scheduled start.',
+      min_notice_hours INTEGER NOT NULL DEFAULT 2,
+      max_advance_days INTEGER NOT NULL DEFAULT 60,
+      slot_interval_minutes INTEGER NOT NULL DEFAULT 30,
+      buffer_minutes INTEGER NOT NULL DEFAULT 10,
+      timezone VARCHAR(64) NOT NULL DEFAULT 'Asia/Kolkata',
+      deposit_required BOOLEAN NOT NULL DEFAULT FALSE,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS price_lists (
+      id VARCHAR(64) PRIMARY KEY,
+      store_id VARCHAR(64) NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+      name VARCHAR(255) NOT NULL,
+      description TEXT,
+      currency VARCHAR(8) NOT NULL DEFAULT 'INR',
+      tier_type VARCHAR(64) NOT NULL DEFAULT 'WHOLESALE',
+      discount_pct NUMERIC(5,2) NOT NULL DEFAULT 0.00,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS customer_tickets (
+      id VARCHAR(64) PRIMARY KEY,
+      store_id VARCHAR(64) NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+      ticket_number VARCHAR(64) NOT NULL,
+      customer_id VARCHAR(64) REFERENCES customers(id) ON DELETE SET NULL,
+      customer_name VARCHAR(255) NOT NULL,
+      customer_email VARCHAR(255),
+      subject VARCHAR(255) NOT NULL,
+      description TEXT,
+      priority VARCHAR(32) NOT NULL DEFAULT 'MEDIUM',
+      status VARCHAR(32) NOT NULL DEFAULT 'OPEN',
+      assigned_to VARCHAR(64) REFERENCES staff_profiles(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 
   console.log('[Migration] All migrations completed successfully.');

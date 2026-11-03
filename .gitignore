@@ -13,6 +13,7 @@ billionbiz-backend/dist/
 *.env.local
 billionbiz-backend/.env
 billionbiz-backend/.env.local
+client_secret*.json
 *.csv
 api-keys*
 

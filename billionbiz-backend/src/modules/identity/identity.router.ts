@@ -123,7 +123,6 @@ identityRouter.post('/register', async (req: Request, res: Response) => {
   const orgId = `org-${uuidv4()}`;
   const storeId = `str-${uuidv4()}`;
   const locId = `loc-${uuidv4()}`;
-  const invLocId = `inv-${uuidv4()}`;
   const staffProfileId = `stf-${uuidv4()}`;
   const passwordHash = await bcrypt.hash(password, 10);
   const storeSlug = storeName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
@@ -191,17 +190,11 @@ identityRouter.post('/register', async (req: Request, res: Response) => {
       [storeId, mode, mode === 'SERVICES' ? 'BOOKING' : 'LANDING']
     );
 
-    // 6. Default Location & Warehouse
+    // 6. Default Store Location
     await client.query(
       `INSERT INTO store_locations (id, store_id, name, is_primary, is_active)
        VALUES ($1, $2, 'Primary Location', TRUE, TRUE)`,
       [locId, storeId]
-    );
-
-    await client.query(
-      `INSERT INTO inventory_locations (id, store_id, name, code, is_default)
-       VALUES ($1, $2, 'Main Warehouse', 'DEF-WH', TRUE)`,
-      [invLocId, storeId]
     );
 
     // 7. Organization Membership & Staff Profile
@@ -552,80 +545,254 @@ identityRouter.post('/mfa/verify', requireAuth, async (req: Request, res: Respon
 
 // POST /api/v1/auth/google (Google OIDC - T-046)
 identityRouter.post('/google', async (req: Request, res: Response) => {
-  const { googleId, email, fullName, codeVerifier } = req.body;
+  try {
+    let { googleId, email, fullName, credential, idToken, code, redirectUri } = req.body;
 
-  if (!email || !googleId) {
-    return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'Google email and Google ID are required' });
-  }
+    const tokenToVerify = credential || idToken;
 
-  let userRes = await query(`SELECT id, email, full_name, is_platform_admin, email_verified, mfa_enabled FROM users WHERE email = $1`, [email.toLowerCase().trim()]);
+    // 1. If an ID Token is provided (Google Identity Services GIS credential)
+    if (tokenToVerify) {
+      try {
+        const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(tokenToVerify)}`);
+        if (!verifyRes.ok) {
+          const errData = await verifyRes.json().catch(() => ({}));
+          return res.status(401).json({
+            error: 'INVALID_GOOGLE_TOKEN',
+            message: errData.error_description || 'Google ID token verification failed'
+          });
+        }
 
-  let userId: string;
-  let isNewUser = false;
+        const tokenInfo = await verifyRes.json() as any;
+        const expectedClientId = process.env.GOOGLE_CLIENT_ID;
 
-  if (userRes.rowCount === 0) {
-    userId = `usr-${uuidv4()}`;
-    const randomPass = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 10);
-    await query(
-      `INSERT INTO users (id, email, password_hash, full_name, email_verified, google_id)
-       VALUES ($1, $2, $3, $4, TRUE, $5)`,
-      [userId, email.toLowerCase().trim(), randomPass, fullName || 'Google User', googleId]
+        // Verify audience matches our Google Client ID if configured
+        if (expectedClientId && tokenInfo.aud !== expectedClientId) {
+          return res.status(401).json({
+            error: 'AUDIENCE_MISMATCH',
+            message: 'Google token was not issued for this application'
+          });
+        }
+
+        if (tokenInfo.email_verified !== 'true' && tokenInfo.email_verified !== true) {
+          return res.status(400).json({
+            error: 'UNVERIFIED_EMAIL',
+            message: 'Google account email is not verified'
+          });
+        }
+
+        googleId = tokenInfo.sub;
+        email = tokenInfo.email;
+        fullName = tokenInfo.name || `${tokenInfo.given_name || ''} ${tokenInfo.family_name || ''}`.trim() || 'Google User';
+      } catch (err: any) {
+        return res.status(500).json({
+          error: 'GOOGLE_VERIFY_ERROR',
+          message: 'Unable to communicate with Google authentication servers'
+        });
+      }
+    } else if (code) {
+      // 2. Authorization code exchange
+      const clientId = process.env.GOOGLE_CLIENT_ID;
+      const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+      if (!clientId || !clientSecret) {
+        return res.status(500).json({
+          error: 'OAUTH_CONFIG_ERROR',
+          message: 'Google OAuth client credentials are not configured on the server'
+        });
+      }
+
+      try {
+        const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            code,
+            client_id: clientId,
+            client_secret: clientSecret,
+            redirect_uri: redirectUri || 'postmessage',
+            grant_type: 'authorization_code'
+          })
+        });
+
+        if (!tokenRes.ok) {
+          const errData = await tokenRes.json().catch(() => ({}));
+          return res.status(400).json({
+            error: 'CODE_EXCHANGE_FAILED',
+            message: errData.error_description || 'Failed to exchange authorization code with Google'
+          });
+        }
+
+        const tokenData = await tokenRes.json() as any;
+        if (tokenData.id_token) {
+          const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(tokenData.id_token)}`);
+          const tokenInfo = await verifyRes.json() as any;
+          googleId = tokenInfo.sub;
+          email = tokenInfo.email;
+          fullName = tokenInfo.name || 'Google User';
+        }
+      } catch (err: any) {
+        return res.status(500).json({
+          error: 'GOOGLE_OAUTH_FAILED',
+          message: 'OAuth authorization exchange failed'
+        });
+      }
+    }
+
+    if (!email || !googleId) {
+      return res.status(400).json({
+        error: 'VALIDATION_FAILED',
+        message: 'Google email and Google ID are required to complete authentication'
+      });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+
+    let userRes = await query(
+      `SELECT id, email, full_name, is_platform_admin, email_verified, mfa_enabled 
+       FROM users 
+       WHERE email = $1`,
+      [cleanEmail]
     );
-    isNewUser = true;
-  } else {
-    userId = userRes.rows[0].id;
-    await query(`UPDATE users SET google_id = $1, email_verified = TRUE WHERE id = $2`, [googleId, userId]);
-  }
 
-  // Fetch or create org membership
-  let orgsRes = await query(
-    `SELECT o.id as organization_id, o.name as organization_name, om.role,
-            s.id as store_id, s.name as store_name, s.slug as store_slug
-     FROM organization_memberships om
-     JOIN organizations o ON o.id = om.organization_id
-     LEFT JOIN stores s ON s.organization_id = o.id
-     WHERE om.user_id = $1`,
-    [userId]
-  );
+    let userId: string;
+    let isNewUser = false;
 
-  let primaryOrg = orgsRes.rows[0]?.organization_id;
-  let primaryStore = orgsRes.rows[0]?.store_id;
-  let role = orgsRes.rows[0]?.role || 'OWNER';
+    if (userRes.rowCount === 0) {
+      userId = `usr-${uuidv4()}`;
+      const randomPass = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 10);
+      await query(
+        `INSERT INTO users (id, email, password_hash, full_name, email_verified, google_id)
+         VALUES ($1, $2, $3, $4, TRUE, $5)`,
+        [userId, cleanEmail, randomPass, fullName || 'Google User', googleId]
+      );
+      isNewUser = true;
+    } else {
+      userId = userRes.rows[0].id;
+      await query(
+        `UPDATE users 
+         SET google_id = $1, email_verified = TRUE, updated_at = NOW() 
+         WHERE id = $2`,
+        [googleId, userId]
+      );
+    }
 
-  if (isNewUser) {
-    primaryOrg = `org-${uuidv4()}`;
-    primaryStore = `str-${uuidv4()}`;
-    const storeName = `${fullName || 'My Store'}'s Store`;
-    const storeSlug = `store-${uuidv4().substring(0, 8)}`;
+    // Fetch existing organization & store memberships
+    let orgsRes = await query(
+      `SELECT o.id as organization_id, o.name as organization_name, om.role,
+              s.id as store_id, s.name as store_name, s.slug as store_slug
+       FROM organization_memberships om
+       JOIN organizations o ON o.id = om.organization_id
+       LEFT JOIN stores s ON s.organization_id = o.id
+       WHERE om.user_id = $1`,
+      [userId]
+    );
 
-    await withTransaction(async (client) => {
-      await client.query(`INSERT INTO organizations (id, name, slug) VALUES ($1, $2, $3)`, [primaryOrg, `${storeName} Group`, storeSlug]);
-      await client.query(`INSERT INTO stores (id, organization_id, name, slug, status) VALUES ($1, $2, $3, $4, 'DRAFT')`, [primaryStore, primaryOrg, storeName, storeSlug]);
-      await client.query(`INSERT INTO organization_memberships (id, organization_id, user_id, role) VALUES ($1, $2, $3, 'OWNER')`, [`mem-${uuidv4()}`, primaryOrg, userId]);
-      await client.query(`INSERT INTO store_capabilities (store_id, product_commerce_enabled, appointments_enabled) VALUES ($1, TRUE, TRUE)`, [primaryStore]);
-      await client.query(`INSERT INTO store_locations (id, store_id, name, is_primary) VALUES ($1, $2, 'Main Location', TRUE)`, [`loc-${uuidv4()}`, primaryStore]);
-      await client.query(`INSERT INTO store_themes (id, store_id, preset_name) VALUES ($1, $2, 'modern')`, [`thm-${uuidv4()}`, primaryStore]);
+    let primaryOrg = orgsRes.rows[0]?.organization_id;
+    let primaryStore = orgsRes.rows[0]?.store_id;
+    let primaryStoreName = orgsRes.rows[0]?.store_name || `${fullName || 'My Store'}'s Store`;
+    let primaryStoreSlug = orgsRes.rows[0]?.store_slug || 'my-store';
+    let role = orgsRes.rows[0]?.role || 'OWNER';
+
+    // If brand new user with no store yet, provision first tenant workspace
+    if (isNewUser || !primaryOrg || !primaryStore) {
+      primaryOrg = primaryOrg || `org-${uuidv4()}`;
+      primaryStore = primaryStore || `str-${uuidv4()}`;
+      const storeName = `${fullName || 'My Store'}'s Store`;
+      const storeSlug = `store-${uuidv4().substring(0, 8)}`;
+      primaryStoreName = storeName;
+      primaryStoreSlug = storeSlug;
+
+      await withTransaction(async (client) => {
+        await client.query(
+          `INSERT INTO organizations (id, name, slug) 
+           VALUES ($1, $2, $3)
+           ON CONFLICT DO NOTHING`,
+          [primaryOrg, `${storeName} Group`, storeSlug]
+        );
+        await client.query(
+          `INSERT INTO stores (id, organization_id, name, slug, status) 
+           VALUES ($1, $2, $3, $4, 'ACTIVE')
+           ON CONFLICT DO NOTHING`,
+          [primaryStore, primaryOrg, storeName, storeSlug]
+        );
+        await client.query(
+          `INSERT INTO organization_memberships (id, organization_id, user_id, role) 
+           VALUES ($1, $2, $3, 'OWNER')
+           ON CONFLICT DO NOTHING`,
+          [`mem-${uuidv4()}`, primaryOrg, userId]
+        );
+        await client.query(
+          `INSERT INTO store_capabilities (store_id, product_commerce_enabled, appointments_enabled) 
+           VALUES ($1, TRUE, TRUE)
+           ON CONFLICT DO NOTHING`,
+          [primaryStore]
+        );
+        await client.query(
+          `INSERT INTO store_locations (id, store_id, name, is_primary) 
+           VALUES ($1, $2, 'Main Location', TRUE)
+           ON CONFLICT DO NOTHING`,
+          [`loc-${uuidv4()}`, primaryStore]
+        );
+        await client.query(
+          `INSERT INTO store_themes (id, store_id, preset_name) 
+           VALUES ($1, $2, 'modern')
+           ON CONFLICT DO NOTHING`,
+          [`thm-${uuidv4()}`, primaryStore]
+        );
+      });
+
+      // Refetch updated orgs
+      orgsRes = await query(
+        `SELECT o.id as organization_id, o.name as organization_name, om.role,
+                s.id as store_id, s.name as store_name, s.slug as store_slug
+         FROM organization_memberships om
+         JOIN organizations o ON o.id = om.organization_id
+         LEFT JOIN stores s ON s.organization_id = o.id
+         WHERE om.user_id = $1`,
+        [userId]
+      );
+    }
+
+    const token = generateToken({
+      userId,
+      email: cleanEmail,
+      fullName: fullName || 'Google User',
+      isPlatformAdmin: false,
+      organizationId: primaryOrg,
+      storeId: primaryStore,
+      role
+    });
+
+    await recordAudit({
+      organizationId: primaryOrg,
+      storeId: primaryStore,
+      actorId: userId,
+      action: isNewUser ? 'USER_REGISTER_GOOGLE' : 'USER_LOGIN_GOOGLE',
+      targetType: 'USER',
+      targetId: userId,
+      ipAddress: req.ip
+    });
+
+    const portalDestination = resolvePortalDestination(role, false);
+
+    res.json({
+      token,
+      user: {
+        id: userId,
+        email: cleanEmail,
+        fullName: fullName || 'Google User',
+        emailVerified: true
+      },
+      organizations: orgsRes.rows,
+      portalDestination,
+      isNewUser
+    });
+  } catch (err: any) {
+    console.error('[Google OAuth Error]', err);
+    res.status(500).json({
+      error: 'GOOGLE_AUTH_FAILED',
+      message: err.message || 'An unexpected error occurred during Google authentication'
     });
   }
-
-  const token = generateToken({
-    userId,
-    email: email.toLowerCase().trim(),
-    fullName: fullName || 'Google User',
-    isPlatformAdmin: false,
-    organizationId: primaryOrg,
-    storeId: primaryStore,
-    role
-  });
-
-  const portalDestination = resolvePortalDestination(role, false);
-
-  res.json({
-    token,
-    user: { id: userId, email, fullName, emailVerified: true },
-    portalDestination,
-    isNewUser
-  });
 });
 
 // GET /api/v1/auth/portal-route (T-047)
@@ -1117,7 +1284,6 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
   const orgId = `org-${uuidv4()}`;
   const storeId = `str-${uuidv4()}`;
   const locId = `loc-${uuidv4()}`;
-  const invLocId = `inv-${uuidv4()}`;
   const staffProfileId = `stf-${uuidv4()}`;
 
   const displayName = fullName?.trim() || (isEmail ? value.split('@')[0] : `Merchant ${value.slice(-4)}`);
@@ -1188,12 +1354,6 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
       `INSERT INTO store_locations (id, store_id, name, is_primary, is_active)
        VALUES ($1, $2, 'Primary Location', TRUE, TRUE)`,
       [locId, storeId]
-    );
-
-    await client.query(
-      `INSERT INTO inventory_locations (id, store_id, name, code, is_default)
-       VALUES ($1, $2, 'Main Warehouse', 'DEF-WH', TRUE)`,
-      [invLocId, storeId]
     );
 
     // 6. Organization Membership & Staff Profile

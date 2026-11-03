@@ -404,3 +404,57 @@ storefrontRouter.post(
     res.json({ message: 'Store restored to snapshot draft state successfully' });
   }
 );
+
+// GET /api/v1/storefront/navigation
+storefrontRouter.get('/navigation', requireAuth, resolveTenant, async (req: Request, res: Response) => {
+  const storeId = req.tenant!.storeId;
+  const settingsRes = await query(
+    `SELECT navigation_config FROM storefront_settings WHERE store_id = $1`,
+    [storeId]
+  );
+
+  let navConfig = [
+    { id: 'nav-home', label: 'Home', path: '/', target: '_self', is_active: true, menu_type: 'HEADER' },
+    { id: 'nav-shop', label: 'Shop Catalogue', path: '/shop', target: '_self', is_active: true, menu_type: 'HEADER' },
+    { id: 'nav-book', label: 'Book Appointment', path: '/booking', target: '_self', is_active: true, menu_type: 'HEADER' },
+    { id: 'nav-privacy', label: 'Privacy Policy', path: '/privacy', target: '_self', is_active: true, menu_type: 'FOOTER' },
+    { id: 'nav-terms', label: 'Terms of Service', path: '/terms', target: '_self', is_active: true, menu_type: 'FOOTER' },
+    { id: 'nav-contact', label: 'Contact Us', path: '/contact', target: '_self', is_active: true, menu_type: 'FOOTER' }
+  ];
+
+  if (settingsRes.rowCount && settingsRes.rowCount > 0 && settingsRes.rows[0].navigation_config) {
+    const raw = settingsRes.rows[0].navigation_config;
+    if (Array.isArray(raw)) {
+      navConfig = raw;
+    }
+  }
+
+  res.json({ navigation: navConfig });
+});
+
+// PATCH /api/v1/storefront/navigation (Update Store Menus)
+storefrontRouter.patch(
+  '/navigation',
+  requireAuth,
+  resolveTenant,
+  requirePermission('store.editor.edit'),
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+    const { navigation } = req.body;
+
+    if (!Array.isArray(navigation)) {
+      return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'Navigation must be an array of menu items' });
+    }
+
+    await query(
+      `INSERT INTO storefront_settings (store_id, navigation_config, mode, home_page)
+       VALUES ($1, $2, 'BOTH', 'LANDING')
+       ON CONFLICT (store_id) DO UPDATE SET
+         navigation_config = $2,
+         updated_at = NOW()`,
+      [storeId, JSON.stringify(navigation)]
+    );
+
+    res.json({ message: 'Navigation menus updated successfully', navigation });
+  }
+);

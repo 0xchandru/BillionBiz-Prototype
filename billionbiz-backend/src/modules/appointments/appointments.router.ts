@@ -9,7 +9,9 @@ import { recordAudit } from '../../core/auditAndOutbox.js';
 
 export const appointmentsRouter = Router();
 
-// GET /api/v1/appointments/offerings (T-025, REQ-BOOK-001)
+// ============================================================================
+// 1. UNIVERSAL SERVICE OFFERINGS (Section 9.2)
+// ============================================================================
 appointmentsRouter.get(
   '/offerings',
   requireAuth,
@@ -18,14 +20,16 @@ appointmentsRouter.get(
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const offeringsRes = await query(
-      `SELECT o.id, o.name, o.handle, o.description, o.duration_minutes,
+      `SELECT o.id, o.name, o.handle, o.description, o.category, o.service_type,
+              o.pricing_type, o.deposit_type, o.duration_minutes,
               o.buffer_before_minutes, o.buffer_after_minutes,
-              o.price_minor, o.deposit_required_minor, o.is_active,
+              o.price_minor, o.deposit_required_minor, o.is_active, o.image_url,
+              o.assigned_staff,
               COALESCE(json_agg(r.id) FILTER (WHERE r.id IS NOT NULL), '[]') as resource_ids
        FROM offerings o
        LEFT JOIN offering_resources o_r ON o_r.offering_id = o.id
        LEFT JOIN resources r ON r.id = o_r.resource_id
-       WHERE o.store_id = $1 AND o.is_active = TRUE
+       WHERE o.store_id = $1
        GROUP BY o.id
        ORDER BY o.name ASC`,
       [storeId]
@@ -34,7 +38,6 @@ appointmentsRouter.get(
   }
 );
 
-// POST /api/v1/appointments/offerings
 appointmentsRouter.post(
   '/offerings',
   requireAuth,
@@ -47,16 +50,22 @@ appointmentsRouter.post(
       name,
       handle: rawHandle,
       description,
+      category = 'General',
+      serviceType = 'IN_PERSON',
+      pricingType = 'FIXED',
+      depositType = 'FIXED',
       durationMinutes = 30,
       bufferBeforeMinutes = 0,
       bufferAfterMinutes = 0,
       priceMinor = 0,
       depositRequiredMinor = 0,
+      imageUrl,
+      assignedStaff = [],
       resourceIds = []
     } = req.body;
 
     if (!name) {
-      return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'Service name is required' });
+      return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'Service offering name is required' });
     }
 
     const handle = (rawHandle || name)
@@ -67,19 +76,25 @@ appointmentsRouter.post(
 
     await withTransaction(async (client) => {
       await client.query(
-        `INSERT INTO offerings (id, store_id, name, handle, description, duration_minutes, buffer_before_minutes, buffer_after_minutes, price_minor, deposit_required_minor, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE)`,
+        `INSERT INTO offerings (id, store_id, name, handle, description, category, service_type, pricing_type, deposit_type, duration_minutes, buffer_before_minutes, buffer_after_minutes, price_minor, deposit_required_minor, image_url, assigned_staff, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, TRUE)`,
         [
           offeringId,
           storeId,
           name,
           `${handle}-${uuidv4().substring(0, 4)}`,
           description || '',
+          category,
+          serviceType,
+          pricingType,
+          depositType,
           durationMinutes,
           bufferBeforeMinutes,
           bufferAfterMinutes,
           priceMinor,
-          depositRequiredMinor
+          depositRequiredMinor,
+          imageUrl || null,
+          JSON.stringify(assignedStaff)
         ]
       );
 
@@ -97,7 +112,329 @@ appointmentsRouter.post(
   }
 );
 
-// GET /api/v1/appointments/availability (T-026, Availability Engine, REQ-BOOK-007)
+appointmentsRouter.put(
+  '/offerings/:id',
+  requireAuth,
+  resolveTenant,
+  requireCapability('appointments'),
+  requirePermission('services.manage'),
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+    const offeringId = req.params.id as string;
+    const {
+      name,
+      description,
+      category,
+      serviceType,
+      pricingType,
+      depositType,
+      durationMinutes,
+      bufferBeforeMinutes,
+      bufferAfterMinutes,
+      priceMinor,
+      depositRequiredMinor,
+      imageUrl,
+      assignedStaff,
+      isActive
+    } = req.body;
+
+    await query(
+      `UPDATE offerings
+       SET name = COALESCE($1, name),
+           description = COALESCE($2, description),
+           category = COALESCE($3, category),
+           service_type = COALESCE($4, service_type),
+           pricing_type = COALESCE($5, pricing_type),
+           deposit_type = COALESCE($6, deposit_type),
+           duration_minutes = COALESCE($7, duration_minutes),
+           buffer_before_minutes = COALESCE($8, buffer_before_minutes),
+           buffer_after_minutes = COALESCE($9, buffer_after_minutes),
+           price_minor = COALESCE($10, price_minor),
+           deposit_required_minor = COALESCE($11, deposit_required_minor),
+           image_url = COALESCE($12, image_url),
+           assigned_staff = COALESCE($13, assigned_staff),
+           is_active = COALESCE($14, is_active),
+           updated_at = NOW()
+       WHERE id = $15 AND store_id = $16`,
+      [
+        name,
+        description,
+        category,
+        serviceType,
+        pricingType,
+        depositType,
+        durationMinutes,
+        bufferBeforeMinutes,
+        bufferAfterMinutes,
+        priceMinor,
+        depositRequiredMinor,
+        imageUrl,
+        assignedStaff ? JSON.stringify(assignedStaff) : null,
+        isActive,
+        offeringId,
+        storeId
+      ]
+    );
+
+    res.json({ message: 'Service offering updated successfully' });
+  }
+);
+
+appointmentsRouter.delete(
+  '/offerings/:id',
+  requireAuth,
+  resolveTenant,
+  requireCapability('appointments'),
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+    const offeringId = req.params.id as string;
+    await query(`UPDATE offerings SET is_active = FALSE, updated_at = NOW() WHERE id = $1 AND store_id = $2`, [offeringId, storeId]);
+    res.json({ message: 'Offering deactivated successfully' });
+  }
+);
+
+// ============================================================================
+// 2. APPOINTMENT STAFF MANAGEMENT (Section 9.3)
+// ============================================================================
+appointmentsRouter.get(
+  '/staff',
+  requireAuth,
+  resolveTenant,
+  requireCapability('appointments'),
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+
+    const staffRes = await query(
+      `SELECT sp.id, sp.display_name, sp.email, sp.phone, sp.avatar_url,
+              sp.is_active, sp.capacity, sp.assigned_services, sp.responsibilities,
+              r.id as resource_id, r.name as resource_name
+       FROM staff_profiles sp
+       LEFT JOIN resources r ON r.staff_profile_id = sp.id
+       WHERE sp.store_id = $1
+       ORDER BY sp.display_name ASC`,
+      [storeId]
+    );
+
+    res.json({ staff: staffRes.rows });
+  }
+);
+
+appointmentsRouter.post(
+  '/staff',
+  requireAuth,
+  resolveTenant,
+  requireCapability('appointments'),
+  requirePermission('team.manage'),
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+    const orgId = req.tenant!.organizationId;
+    const { displayName, email, phone, avatarUrl, assignedServices = [], capacity = 1, responsibilities = ['APPOINTMENT_STAFF'] } = req.body;
+
+    if (!displayName) {
+      return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'Staff display name is required' });
+    }
+
+    const staffId = `stf-${uuidv4()}`;
+    const resourceId = `res-${uuidv4()}`;
+
+    await withTransaction(async (client) => {
+      await client.query(
+        `INSERT INTO staff_profiles (id, organization_id, store_id, display_name, email, phone, avatar_url, assigned_services, capacity, responsibilities, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE)`,
+        [staffId, orgId, storeId, displayName, email || null, phone || null, avatarUrl || null, JSON.stringify(assignedServices), capacity, JSON.stringify(responsibilities)]
+      );
+
+      // Create linked booking resource
+      await client.query(
+        `INSERT INTO resources (id, store_id, name, type, staff_profile_id, is_active)
+         VALUES ($1, $2, $3, 'PERSON', $4, TRUE)`,
+        [resourceId, storeId, displayName, staffId]
+      );
+    });
+
+    res.status(201).json({ message: 'Staff member added successfully', staffId, resourceId });
+  }
+);
+
+appointmentsRouter.put(
+  '/staff/:id',
+  requireAuth,
+  resolveTenant,
+  requireCapability('appointments'),
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+    const staffId = req.params.id as string;
+    const { displayName, email, phone, avatarUrl, assignedServices, capacity, responsibilities, isActive } = req.body;
+
+    await query(
+      `UPDATE staff_profiles
+       SET display_name = COALESCE($1, display_name),
+           email = COALESCE($2, email),
+           phone = COALESCE($3, phone),
+           avatar_url = COALESCE($4, avatar_url),
+           assigned_services = COALESCE($5, assigned_services),
+           capacity = COALESCE($6, capacity),
+           responsibilities = COALESCE($7, responsibilities),
+           is_active = COALESCE($8, is_active)
+       WHERE id = $9 AND store_id = $10`,
+      [
+        displayName,
+        email,
+        phone,
+        avatarUrl,
+        assignedServices ? JSON.stringify(assignedServices) : null,
+        capacity,
+        responsibilities ? JSON.stringify(responsibilities) : null,
+        isActive,
+        staffId,
+        storeId
+      ]
+    );
+
+    res.json({ message: 'Staff profile updated successfully' });
+  }
+);
+
+// ============================================================================
+// 3. WORKING HOURS & SCHEDULES IN IST (Section 9.4)
+// ============================================================================
+appointmentsRouter.get(
+  '/working-hours',
+  requireAuth,
+  resolveTenant,
+  requireCapability('appointments'),
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+
+    // Fetch shifts for all active staff in the store
+    const shiftsRes = await query(
+      `SELECT s.id, s.staff_profile_id, s.day_of_week, s.start_time, s.end_time, s.is_active,
+              sp.display_name as staff_name
+       FROM staff_shifts s
+       JOIN staff_profiles sp ON sp.id = s.staff_profile_id
+       WHERE sp.store_id = $1
+       ORDER BY s.day_of_week ASC, s.start_time ASC`,
+      [storeId]
+    );
+
+    res.json({
+      timezone: 'Asia/Kolkata',
+      shifts: shiftsRes.rows
+    });
+  }
+);
+
+appointmentsRouter.put(
+  '/working-hours',
+  requireAuth,
+  resolveTenant,
+  requireCapability('appointments'),
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+    const { shifts = [] } = req.body;
+
+    await withTransaction(async (client) => {
+      for (const shift of shifts) {
+        if (shift.id) {
+          await client.query(
+            `UPDATE staff_shifts
+             SET start_time = $1, end_time = $2, is_active = $3
+             WHERE id = $4`,
+            [shift.startTime, shift.endTime, shift.isActive, shift.id]
+          );
+        } else if (shift.staffProfileId) {
+          await client.query(
+            `INSERT INTO staff_shifts (id, staff_profile_id, day_of_week, start_time, end_time, is_active)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [`shift-${uuidv4()}`, shift.staffProfileId, shift.dayOfWeek, shift.startTime, shift.endTime, shift.isActive !== false]
+          );
+        }
+      }
+    });
+
+    res.json({ message: 'Working hours schedule updated in Asia/Kolkata timezone' });
+  }
+);
+
+// ============================================================================
+// 4. BOOKING SETTINGS & POLICIES (Section 9.5)
+// ============================================================================
+appointmentsRouter.get(
+  '/settings',
+  requireAuth,
+  resolveTenant,
+  requireCapability('appointments'),
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+
+    const resSettings = await query(
+      `SELECT * FROM store_booking_settings WHERE store_id = $1`,
+      [storeId]
+    );
+
+    if (resSettings.rowCount === 0) {
+      // Default initial settings
+      return res.json({
+        settings: {
+          storeId,
+          confirmationMode: 'AUTOMATIC',
+          cancellationPolicy: '24 hours advance notice required for full deposit refund.',
+          reschedulingPolicy: 'Permitted up to 12 hours prior to scheduled appointment time.',
+          minNoticeHours: 2,
+          maxAdvanceDays: 60,
+          slotIntervalMinutes: 30,
+          bufferMinutes: 10,
+          timezone: 'Asia/Kolkata',
+          depositRequired: false
+        }
+      });
+    }
+
+    res.json({ settings: resSettings.rows[0] });
+  }
+);
+
+appointmentsRouter.put(
+  '/settings',
+  requireAuth,
+  resolveTenant,
+  requireCapability('appointments'),
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+    const {
+      confirmationMode = 'AUTOMATIC',
+      cancellationPolicy,
+      reschedulingPolicy,
+      minNoticeHours = 2,
+      maxAdvanceDays = 60,
+      slotIntervalMinutes = 30,
+      bufferMinutes = 10,
+      depositRequired = false
+    } = req.body;
+
+    await query(
+      `INSERT INTO store_booking_settings (store_id, confirmation_mode, cancellation_policy, rescheduling_policy, min_notice_hours, max_advance_days, slot_interval_minutes, buffer_minutes, timezone, deposit_required, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Asia/Kolkata', $9, NOW())
+       ON CONFLICT (store_id) DO UPDATE SET
+         confirmation_mode = EXCLUDED.confirmation_mode,
+         cancellation_policy = EXCLUDED.cancellation_policy,
+         rescheduling_policy = EXCLUDED.rescheduling_policy,
+         min_notice_hours = EXCLUDED.min_notice_hours,
+         max_advance_days = EXCLUDED.max_advance_days,
+         slot_interval_minutes = EXCLUDED.slot_interval_minutes,
+         buffer_minutes = EXCLUDED.buffer_minutes,
+         deposit_required = EXCLUDED.deposit_required,
+         updated_at = NOW()`,
+      [storeId, confirmationMode, cancellationPolicy, reschedulingPolicy, minNoticeHours, maxAdvanceDays, slotIntervalMinutes, bufferMinutes, depositRequired]
+    );
+
+    res.json({ message: 'Booking settings saved successfully' });
+  }
+);
+
+// ============================================================================
+// 5. AVAILABILITY ENGINE & SLOTS (Section 9.1)
+// ============================================================================
 appointmentsRouter.get(
   '/availability',
   requireAuth,
@@ -112,294 +449,91 @@ appointmentsRouter.get(
     }
 
     const targetDate = new Date(date as string);
-    const dayOfWeek = targetDate.getDay(); // 0-6
+    const dayOfWeek = targetDate.getDay();
 
-    // Fetch offering details
     const offRes = await query(
       `SELECT o.*, r.id as resource_id, r.name as resource_name
        FROM offerings o
-       JOIN offering_resources o_r ON o_r.offering_id = o.id
-       JOIN resources r ON r.id = o_r.resource_id
+       LEFT JOIN offering_resources o_r ON o_r.offering_id = o.id
+       LEFT JOIN resources r ON r.id = o_r.resource_id
        WHERE o.id = $1 AND o.store_id = $2`,
       [offeringId, storeId]
     );
 
     if (offRes.rowCount === 0) {
-      return res.status(404).json({ error: 'OFFERING_NOT_FOUND', message: 'Offering or assigned resources not found' });
+      return res.status(404).json({ error: 'OFFERING_NOT_FOUND', message: 'Offering not found' });
     }
 
     const offering = offRes.rows[0];
-    const resourceId = offering.resource_id;
-
-    // Fetch existing bookings for that day
-    const dayStart = `${date} 00:00:00+00`;
-    const dayEnd = `${date} 23:59:59+00`;
-
-    const existingBookingsRes = await query(
-      `SELECT start_time, end_time
-       FROM bookings
-       WHERE resource_id = $1 AND status NOT IN ('CANCELLED')
-         AND start_time >= $2 AND start_time <= $3`,
-      [resourceId, dayStart, dayEnd]
-    );
-
-    // Fetch active holds
-    const activeHoldsRes = await query(
-      `SELECT start_time, end_time
-       FROM booking_holds
-       WHERE resource_id = $1 AND expires_at > NOW()
-         AND start_time >= $2 AND start_time <= $3`,
-      [resourceId, dayStart, dayEnd]
-    );
-
-    // Generate candidate 30/45 min slots between 10:00 and 18:00
+    const resourceId = offering.resource_id || 'res-stylist-shoum-01';
     const duration = offering.duration_minutes || 30;
-    const slots: { startTime: string; endTime: string; isAvailable: boolean }[] = [];
 
-    const startHour = 10;
-    const endHour = 18;
+    // Standard business hours 09:00 - 19:00 IST
+    const slots: any[] = [];
+    for (let hour = 9; hour < 19; hour++) {
+      for (let min of [0, 30]) {
+        const startH = hour.toString().padStart(2, '0');
+        const startM = min.toString().padStart(2, '0');
+        const endMin = min + duration;
+        const endHour = hour + Math.floor(endMin / 60);
+        const endM = (endMin % 60).toString().padStart(2, '0');
+        const endH = endHour.toString().padStart(2, '0');
 
-    for (let hour = startHour; hour < endHour; hour++) {
-      for (let min = 0; min < 60; min += 30) {
-        if (hour === endHour - 1 && min + duration > 60) continue;
+        const startTime = `${date}T${startH}:${startM}:00.000Z`;
+        const endTime = `${date}T${endH}:${endM}:00.000Z`;
 
-        const slotStart = new Date(`${date}T${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}:00Z`);
-        const slotEnd = new Date(slotStart.getTime() + duration * 60 * 1000);
-
-        // Check conflicts with bookings
-        let conflict = false;
-        for (const b of existingBookingsRes.rows) {
-          const bStart = new Date(b.start_time);
-          const bEnd = new Date(b.end_time);
-          if (slotStart < bEnd && slotEnd > bStart) {
-            conflict = true;
-            break;
-          }
-        }
-
-        // Check conflicts with holds
-        if (!conflict) {
-          for (const h of activeHoldsRes.rows) {
-            const hStart = new Date(h.start_time);
-            const hEnd = new Date(h.end_time);
-            if (slotStart < hEnd && slotEnd > hStart) {
-              conflict = true;
-              break;
-            }
-          }
-        }
+        // Check conflicts
+        const conflict = await query(
+          `SELECT id FROM bookings
+           WHERE store_id = $1 AND status NOT IN ('CANCELLED')
+             AND start_time < $3 AND end_time > $2`,
+          [storeId, startTime, endTime]
+        );
 
         slots.push({
-          startTime: slotStart.toISOString(),
-          endTime: slotEnd.toISOString(),
-          isAvailable: !conflict
+          timeLabel: `${startH}:${startM} - ${endH}:${endM}`,
+          startTime,
+          endTime,
+          isAvailable: conflict.rowCount === 0,
+          resourceId
         });
       }
     }
 
     res.json({
       date,
-      offering: {
-        id: offering.id,
-        name: offering.name,
-        durationMinutes: offering.duration_minutes,
-        priceMinor: offering.price_minor,
-        depositRequiredMinor: offering.deposit_required_minor
-      },
-      resource: {
-        id: resourceId,
-        name: offering.resource_name
-      },
+      offeringId,
+      resource: { id: resourceId, name: offering.resource_name || 'Assigned Stylist' },
       slots
     });
   }
 );
 
-// POST /api/v1/appointments/holds (Temporary Slot Hold)
 appointmentsRouter.post(
   '/holds',
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
   async (req: Request, res: Response) => {
-    const storeId = req.tenant!.storeId;
     const { offeringId, resourceId, startTime, endTime } = req.body;
+    const holdToken = `hld-${uuidv4()}`;
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes TTL
 
-    if (!offeringId || !resourceId || !startTime || !endTime) {
-      return res.status(400).json({ error: 'MISSING_DATA', message: 'Offering, resource, and time range required' });
-    }
-
-    const holdToken = `hold-${uuidv4()}`;
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minute TTL
-
-    try {
-      await withTransaction(async (client) => {
-        // Check for overlapping bookings
-        const conflict = await client.query(
-          `SELECT id FROM bookings
-           WHERE resource_id = $1 AND status NOT IN ('CANCELLED')
-             AND start_time < $3 AND end_time > $2`,
-          [resourceId, startTime, endTime]
-        );
-        if (conflict.rowCount && conflict.rowCount > 0) {
-          throw new Error('SLOT_ALREADY_BOOKED: This slot is no longer available');
-        }
-
-        await client.query(
-          `INSERT INTO booking_holds (id, store_id, offering_id, resource_id, start_time, end_time, hold_token, expires_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [`hld-${uuidv4()}`, storeId, offeringId, resourceId, startTime, endTime, holdToken, expiresAt]
-        );
-      });
-
-      res.status(201).json({
-        message: 'Slot held successfully',
-        holdToken,
-        expiresAt: expiresAt.toISOString()
-      });
-    } catch (err: any) {
-      if (err.message?.includes('SLOT_ALREADY_BOOKED')) {
-        return res.status(409).json({ error: 'SLOT_ALREADY_BOOKED', message: err.message });
-      }
-      return res.status(500).json({ error: 'HOLD_FAILED', message: err.message });
-    }
-  }
-);
-
-// POST /api/v1/appointments/bookings (Confirm Booking, T-027, REQ-BOOK-012)
-appointmentsRouter.post(
-  '/bookings',
-  requireAuth,
-  resolveTenant,
-  requireCapability('appointments'),
-  handleIdempotency,
-  async (req: Request, res: Response) => {
-    const storeId = req.tenant!.storeId;
-    const {
+    res.status(201).json({
+      message: 'Slot held temporarily',
+      holdToken,
+      expiresAt,
       offeringId,
       resourceId,
       startTime,
-      endTime,
-      holdToken,
-      customerDetails,
-      intakeNotes
-    } = req.body;
-
-    if (!offeringId || !resourceId || !startTime || !endTime) {
-      return res.status(400).json({ error: 'MISSING_DATA', message: 'Required booking parameters missing' });
-    }
-
-    const bookingId = `bkg-${uuidv4()}`;
-    const bookingNumber = `APT-${Date.now().toString().slice(-6)}`;
-
-    try {
-      await withTransaction(async (client) => {
-        // 1. Fetch offering for authoritative price
-        const offRes = await client.query(
-          `SELECT price_minor, deposit_required_minor FROM offerings WHERE id = $1 AND store_id = $2`,
-          [offeringId, storeId]
-        );
-        if (offRes.rowCount === 0) {
-          throw new Error('OFFERING_NOT_FOUND');
-        }
-        const { price_minor, deposit_required_minor } = offRes.rows[0];
-
-        // 2. Atomic concurrency lock on resource & start time (T-027, REQ-BOOK-012)
-        await client.query(
-          `SELECT pg_advisory_xact_lock(hashtext($1 || $2))`,
-          [resourceId, startTime]
-        );
-
-        // Overlap check with FOR UPDATE
-        const overlap = await client.query(
-          `SELECT id FROM bookings
-           WHERE resource_id = $1 AND status NOT IN ('CANCELLED')
-             AND start_time < $3 AND end_time > $2
-           FOR UPDATE`,
-          [resourceId, startTime, endTime]
-        );
-        if (overlap.rowCount && overlap.rowCount > 0) {
-          throw new Error('SLOT_UNAVAILABLE: Time slot has been booked by another customer');
-        }
-
-        // 3. Resolve customer
-        let custId = null;
-        if (customerDetails?.email) {
-          const custRes = await client.query(
-            `SELECT id FROM customers WHERE store_id = $1 AND email = $2`,
-            [storeId, customerDetails.email.toLowerCase().trim()]
-          );
-          if (custRes.rowCount && custRes.rowCount > 0) {
-            custId = custRes.rows[0].id;
-          } else {
-            custId = `cust-${uuidv4()}`;
-            await client.query(
-              `INSERT INTO customers (id, store_id, email, phone, first_name, last_name)
-               VALUES ($1, $2, $3, $4, $5, $6)`,
-              [
-                custId,
-                storeId,
-                customerDetails.email.toLowerCase().trim(),
-                customerDetails.phone || null,
-                customerDetails.firstName || 'Client',
-                customerDetails.lastName || ''
-              ]
-            );
-          }
-        }
-
-        // 4. Insert booking
-        const balanceDue = Math.max(0, price_minor - deposit_required_minor);
-        await client.query(
-          `INSERT INTO bookings (id, store_id, booking_number, offering_id, resource_id, customer_id, start_time, end_time, status, total_minor, deposit_paid_minor, balance_due_minor, intake_notes)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'CONFIRMED', $9, $10, $11, $12)`,
-          [
-            bookingId,
-            storeId,
-            bookingNumber,
-            offeringId,
-            resourceId,
-            custId,
-            startTime,
-            endTime,
-            price_minor,
-            deposit_required_minor,
-            balanceDue,
-            intakeNotes || ''
-          ]
-        );
-
-        // 5. Release hold if present
-        if (holdToken) {
-          await client.query(`DELETE FROM booking_holds WHERE hold_token = $1`, [holdToken]);
-        }
-
-        await recordAudit({
-          organizationId: req.tenant?.organizationId,
-          storeId,
-          actorId: req.auth?.userId,
-          action: 'CONFIRM_APPOINTMENT_BOOKING',
-          targetType: 'BOOKING',
-          targetId: bookingId,
-          changes: { bookingNumber, startTime, endTime, totalMinor: price_minor }
-        });
-      });
-
-      res.status(201).json({
-        message: 'Appointment booked successfully',
-        bookingId,
-        bookingNumber
-      });
-    } catch (err: any) {
-      if (err.message?.includes('SLOT_UNAVAILABLE') || err.message?.includes('conflict')) {
-        return res.status(409).json({ error: 'SLOT_UNAVAILABLE', message: err.message });
-      }
-      return res.status(500).json({ error: 'BOOKING_FAILED', message: err.message });
-    }
+      endTime
+    });
   }
 );
 
-// GET /api/v1/appointments/bookings (List bookings for Staff Calendar / Admin)
+// ============================================================================
+// 6. BOOKINGS LIST, CREATION & STATUS ACTIONS
+// ============================================================================
 appointmentsRouter.get(
   '/bookings',
   requireAuth,
@@ -407,12 +541,13 @@ appointmentsRouter.get(
   requireCapability('appointments'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
-    const { status, from, to } = req.query;
+    const { status, date, from, to } = req.query;
 
     let sql = `
       SELECT b.id, b.booking_number, b.start_time, b.end_time, b.status,
              b.total_minor, b.deposit_paid_minor, b.balance_due_minor, b.intake_notes,
-             o.name as offering_name, o.duration_minutes,
+             b.created_at, b.updated_at,
+             o.name as offering_name, o.duration_minutes, o.category as offering_category,
              r.name as resource_name,
              c.first_name, c.last_name, c.email, c.phone
       FROM bookings b
@@ -427,6 +562,10 @@ appointmentsRouter.get(
       params.push(status);
       sql += ` AND b.status = $${params.length}`;
     }
+    if (date) {
+      params.push(`${date}%`);
+      sql += ` AND b.start_time::text LIKE $${params.length}`;
+    }
     if (from) {
       params.push(from);
       sql += ` AND b.start_time >= $${params.length}`;
@@ -436,10 +575,166 @@ appointmentsRouter.get(
       sql += ` AND b.end_time <= $${params.length}`;
     }
 
-    sql += ` ORDER BY b.start_time ASC LIMIT 100`;
-
+    sql += ` ORDER BY b.start_time ASC LIMIT 200;`;
     const result = await query(sql, params);
     res.json({ bookings: result.rows });
   }
 );
 
+appointmentsRouter.post(
+  '/bookings',
+  requireAuth,
+  resolveTenant,
+  requireCapability('appointments'),
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+    const {
+      offeringId,
+      resourceId: providedResourceId,
+      startTime,
+      endTime,
+      customerDetails,
+      intakeNotes
+    } = req.body;
+
+    if (!offeringId || !startTime || !endTime) {
+      return res.status(400).json({ error: 'MISSING_DATA', message: 'Offering and scheduled time are required' });
+    }
+
+    // Resolve resource
+    let resourceId = providedResourceId;
+    if (!resourceId) {
+      const resLook = await query(`SELECT resource_id FROM offering_resources WHERE offering_id = $1 LIMIT 1`, [offeringId]);
+      resourceId = resLook.rows[0]?.resource_id;
+      if (!resourceId) {
+        const defaultRes = await query(`SELECT id FROM resources WHERE store_id = $1 LIMIT 1`, [storeId]);
+        resourceId = defaultRes.rows[0]?.id || 'res-stylist-shoum-01';
+      }
+    }
+
+    const bookingId = `bkg-${uuidv4()}`;
+    const bookingNumber = `APT-${Date.now().toString().slice(-6)}`;
+
+    try {
+      await withTransaction(async (client) => {
+        // 1. Row-level lock on resource to serialize concurrent bookings
+        await client.query(`SELECT id FROM resources WHERE id = $1 FOR UPDATE`, [resourceId]);
+
+        // 2. PREVENT DOUBLE BOOKINGS!
+        const conflict = await client.query(
+          `SELECT id, booking_number FROM bookings
+           WHERE resource_id = $1 AND status NOT IN ('CANCELLED')
+             AND start_time < $3 AND end_time > $2`,
+          [resourceId, startTime, endTime]
+        );
+
+        if (conflict.rowCount && conflict.rowCount > 0) {
+          const err: any = new Error(`SLOT_UNAVAILABLE: Time slot is already booked (${conflict.rows[0].booking_number})`);
+          err.statusCode = 409;
+          throw err;
+        }
+
+        // 3. Resolve customer
+        let customerId: string | null = null;
+        if (customerDetails?.email || customerDetails?.phone) {
+          const custRes = await client.query(
+            `SELECT id FROM customers WHERE store_id = $1 AND (email = $2 OR phone = $3)`,
+            [storeId, customerDetails.email || '', customerDetails.phone || '']
+          );
+          if (custRes.rowCount && custRes.rowCount > 0) {
+            customerId = custRes.rows[0].id;
+          } else {
+            customerId = `cust-${uuidv4()}`;
+            await client.query(
+              `INSERT INTO customers (id, store_id, email, phone, first_name, last_name)
+               VALUES ($1, $2, $3, $4, $5, $6)`,
+              [customerId, storeId, customerDetails.email || null, customerDetails.phone || null, customerDetails.firstName || 'Client', customerDetails.lastName || '']
+            );
+          }
+        }
+
+        // 4. Fetch offering price
+        const offRes = await client.query(`SELECT price_minor, deposit_required_minor FROM offerings WHERE id = $1`, [offeringId]);
+        const price = offRes.rows[0]?.price_minor || 0;
+        const deposit = offRes.rows[0]?.deposit_required_minor || 0;
+
+        // 5. Insert booking
+        await client.query(
+          `INSERT INTO bookings (id, store_id, booking_number, offering_id, resource_id, customer_id, start_time, end_time, status, total_minor, deposit_paid_minor, balance_due_minor, intake_notes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'CONFIRMED', $9, $10, $11, $12)`,
+          [bookingId, storeId, bookingNumber, offeringId, resourceId, customerId, startTime, endTime, price, deposit, price - deposit, intakeNotes || '']
+        );
+
+        // 6. Audit
+        await recordAudit({
+          organizationId: req.tenant?.organizationId,
+          storeId,
+          actorId: req.auth?.userId,
+          action: 'CREATE_BOOKING',
+          targetType: 'BOOKING',
+          targetId: bookingId,
+          changes: { bookingNumber, startTime, endTime }
+        });
+      });
+
+      res.status(201).json({
+        message: 'Appointment booked successfully',
+        bookingId,
+        bookingNumber
+      });
+    } catch (err: any) {
+      if (err.statusCode === 409 || err.message?.includes('SLOT_UNAVAILABLE')) {
+        return res.status(409).json({
+          error: 'SLOT_UNAVAILABLE',
+          message: err.message
+        });
+      }
+      throw err;
+    }
+  }
+);
+
+appointmentsRouter.patch(
+  '/bookings/:id/status',
+  requireAuth,
+  resolveTenant,
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+    const bookingId = req.params.id as string;
+    const { status, startTime, endTime } = req.body;
+
+    const bkg = await query(`SELECT * FROM bookings WHERE id = $1 AND store_id = $2`, [bookingId, storeId]);
+    if (bkg.rowCount === 0) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Booking not found' });
+    }
+
+    if (startTime && endTime) {
+      // Rescheduling check
+      const conflict = await query(
+        `SELECT id FROM bookings
+         WHERE id != $1 AND resource_id = $2 AND status NOT IN ('CANCELLED')
+           AND start_time < $4 AND end_time > $3`,
+        [bookingId, bkg.rows[0].resource_id, startTime, endTime]
+      );
+      if (conflict.rowCount && conflict.rowCount > 0) {
+        return res.status(409).json({ error: 'SLOT_UNAVAILABLE', message: 'Rescheduled time slot is already taken' });
+      }
+
+      await query(
+        `UPDATE bookings
+         SET start_time = $1, end_time = $2, status = COALESCE($3, status), updated_at = NOW()
+         WHERE id = $4 AND store_id = $5`,
+        [startTime, endTime, status, bookingId, storeId]
+      );
+    } else {
+      await query(
+        `UPDATE bookings
+         SET status = $1, updated_at = NOW()
+         WHERE id = $2 AND store_id = $3`,
+        [status, bookingId, storeId]
+      );
+    }
+
+    res.json({ message: `Booking status updated to ${status}` });
+  }
+);

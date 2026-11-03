@@ -156,7 +156,7 @@ export async function seedDatabase() {
     [locationId, storeId]
   );
 
-  // Inventory Location
+  // Inventory Location (Scoped strictly to test harness seed store)
   const invLocId = 'inv-shoum-warehouse';
   await query(
     `INSERT INTO inventory_locations (id, store_id, name, code, is_default)

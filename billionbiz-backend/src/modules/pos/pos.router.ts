@@ -12,14 +12,66 @@ export const posRouter = Router();
 posRouter.get('/counters', requireAuth, resolveTenant, async (req: Request, res: Response) => {
   const storeId = req.tenant!.storeId;
   const countersRes = await query(
-    `SELECT c.id, c.name, c.code, c.is_active, sl.name as location_name
+    `SELECT c.id, c.name, c.code, c.is_active, COALESCE(sl.name, 'Main Location') as location_name
      FROM counters c
-     JOIN store_locations sl ON sl.id = c.location_id
+     LEFT JOIN store_locations sl ON sl.id = c.location_id
      WHERE c.store_id = $1 AND c.is_active = TRUE
      ORDER BY c.code ASC`,
     [storeId]
   );
   res.json({ counters: countersRes.rows });
+});
+
+// POST /api/v1/pos/counters (Add POS Counter Register)
+posRouter.post('/counters', requireAuth, resolveTenant, requirePermission('pos.register.manage'), async (req: Request, res: Response) => {
+  const storeId = req.tenant!.storeId;
+  const { name, code: rawCode } = req.body;
+  if (!name) {
+    return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'Counter name is required' });
+  }
+
+  // Get or create store location
+  let locRes = await query(`SELECT id FROM store_locations WHERE store_id = $1 LIMIT 1`, [storeId]);
+  let locationId = locRes.rows[0]?.id;
+  if (!locationId) {
+    locationId = `loc-${uuidv4()}`;
+    await query(
+      `INSERT INTO store_locations (id, store_id, name, is_primary, is_active)
+       VALUES ($1, $2, 'Main Store Location', TRUE, TRUE)`,
+      [locationId, storeId]
+    );
+  }
+
+  const code = (rawCode || `POS-${Math.floor(100 + Math.random() * 900)}`).toUpperCase();
+  const counterId = `cnt-${uuidv4()}`;
+
+  await query(
+    `INSERT INTO counters (id, store_id, location_id, name, code, is_active)
+     VALUES ($1, $2, $3, $4, $5, TRUE)`,
+    [counterId, storeId, locationId, name, code]
+  );
+
+  res.status(201).json({ message: 'Counter created successfully', id: counterId, name, code });
+});
+
+// GET /api/v1/pos/shifts (List historical and active register shifts)
+posRouter.get('/shifts', requireAuth, resolveTenant, async (req: Request, res: Response) => {
+  const storeId = req.tenant!.storeId;
+  const shiftsRes = await query(
+    `SELECT rs.id, rs.counter_id, rs.opened_by, rs.closed_by, rs.opening_float_minor,
+            rs.closing_cash_minor, rs.expected_cash_minor, rs.variance_minor, rs.status,
+            rs.opened_at, rs.closed_at,
+            c.name as counter_name, c.code as counter_code,
+            u1.full_name as opened_by_name, u2.full_name as closed_by_name
+     FROM register_sessions rs
+     JOIN counters c ON c.id = rs.counter_id
+     LEFT JOIN users u1 ON u1.id = rs.opened_by
+     LEFT JOIN users u2 ON u2.id = rs.closed_by
+     WHERE c.store_id = $1
+     ORDER BY rs.opened_at DESC`,
+    [storeId]
+  );
+  res.json({ shifts: shiftsRes.rows });
 });
 
 // POST /api/v1/pos/register/open (Open Register Session, T-031, REQ-POS-014)
