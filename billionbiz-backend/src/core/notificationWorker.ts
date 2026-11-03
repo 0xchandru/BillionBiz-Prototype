@@ -1,6 +1,7 @@
 import { query, withTransaction } from '../db/pool.js';
 import { v4 as uuidv4 } from 'uuid';
 import { Resend } from 'resend';
+import nodemailer, { type Transporter } from 'nodemailer';
 import { env } from './env.js';
 
 let resendClient: Resend | null = null;
@@ -12,16 +13,63 @@ function getResendClient(): Resend | null {
   return resendClient;
 }
 
+let smtpTransporter: Transporter | null = null;
+function getSmtpTransporter(): Transporter | null {
+  const host = env.SMTP_HOST || process.env.SMTP_HOST;
+  const user = env.SMTP_USER || process.env.SMTP_USER;
+  const pass = env.SMTP_PASS || process.env.SMTP_PASS;
+  const port = env.SMTP_PORT || (process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : 587);
+  const secure = port === 465;
+
+  if (host && user && pass) {
+    if (!smtpTransporter) {
+      smtpTransporter = nodemailer.createTransport({
+        host,
+        port,
+        secure,
+        auth: { user, pass }
+      });
+    }
+    return smtpTransporter;
+  }
+  return null;
+}
+
 export async function sendEmail(
   message: EmailMessage,
   idempotencyKey?: string
 ): Promise<{ success: boolean; id?: string; error?: any }> {
+  if (process.env.NODE_ENV === 'test') {
+    return { success: true, id: `test-${uuidv4()}` };
+  }
+
+  const fromAddress = env.SMTP_FROM || process.env.SMTP_FROM || 'BillionBiz <noreply@chandraprakash.codes>';
+  const smtp = getSmtpTransporter();
+
+  // 1. Direct SMTP if explicitly configured
+  if (env.EMAIL_PROVIDER === 'smtp' && smtp) {
+    try {
+      const info = await smtp.sendMail({
+        from: fromAddress,
+        to: message.to,
+        subject: message.subject,
+        html: message.html,
+        text: message.text
+      });
+      console.log(`[SMTP Sent] Email dispatched via SMTP: ${info.messageId} to ${message.to}`);
+      return { success: true, id: info.messageId };
+    } catch (smtpErr: any) {
+      console.error('[SMTP Error]', smtpErr);
+      return { success: false, error: smtpErr };
+    }
+  }
+
+  // 2. Resend API
   const apiKey = env.RESEND_API_KEY || process.env.RESEND_API_KEY;
   if ((env.EMAIL_PROVIDER === 'resend' || apiKey) && env.EMAIL_PROVIDER !== 'console') {
     const resend = getResendClient();
     if (resend) {
       try {
-        const fromAddress = env.SMTP_FROM || process.env.SMTP_FROM || 'BillionBiz <noreply@chandraprakash.codes>';
         const { data, error } = await resend.emails.send({
           from: fromAddress,
           to: message.to,
@@ -33,6 +81,25 @@ export async function sendEmail(
 
         if (error) {
           console.error('[Resend Error]', error);
+
+          // If Resend failed (e.g. daily_quota_exceeded) and SMTP is configured, fallback to SMTP
+          if (smtp) {
+            console.warn('[Resend Fallback] Daily quota or error reached; falling back to SMTP...');
+            try {
+              const info = await smtp.sendMail({
+                from: fromAddress,
+                to: message.to,
+                subject: message.subject,
+                html: message.html,
+                text: message.text
+              });
+              console.log(`[SMTP Fallback Sent] Message ID: ${info.messageId} to ${message.to}`);
+              return { success: true, id: info.messageId };
+            } catch (fallbackErr: any) {
+              console.error('[SMTP Fallback Error]', fallbackErr);
+            }
+          }
+
           return { success: false, error };
         }
 
@@ -40,6 +107,20 @@ export async function sendEmail(
         return { success: true, id: data?.id };
       } catch (err: any) {
         console.error('[Resend Exception]', err);
+        if (smtp) {
+          try {
+            const info = await smtp.sendMail({
+              from: fromAddress,
+              to: message.to,
+              subject: message.subject,
+              html: message.html,
+              text: message.text
+            });
+            return { success: true, id: info.messageId };
+          } catch (fallbackErr: any) {
+            console.error('[SMTP Fallback Error]', fallbackErr);
+          }
+        }
         return { success: false, error: err.message };
       }
     }

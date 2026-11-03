@@ -1085,6 +1085,7 @@ identityRouter.post('/otp/send', async (req: Request, res: Response) => {
           console.warn(`[AUTH OTP] Resend daily quota reached. Dispatched code to database vault: [${code}]`);
           return res.json({
             success: true,
+            quotaReached: true,
             message: `Verification code generated. Resend daily quota reached; verification code for development/preview is ${code}`,
             channel: 'EMAIL',
             identifier: value,
