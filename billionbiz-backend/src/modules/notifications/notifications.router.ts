@@ -5,6 +5,36 @@ import { NotificationOutboxService } from '../../core/notificationWorker.js';
 
 export const notificationsRouter = Router();
 
+// GET /api/v1/notifications (Root endpoint for active notifications)
+notificationsRouter.get('/', requireAuth, async (req: Request, res: Response) => {
+  const storeId = req.auth?.storeId;
+  const orgId = req.auth?.organizationId;
+
+  const notifs = await query(
+    `SELECT id, type, title, message, is_read, metadata, created_at
+     FROM notifications
+     WHERE organization_id = $1
+       AND (store_id = $2 OR store_id IS NULL)
+     ORDER BY created_at DESC
+     LIMIT 50`,
+    [orgId, storeId]
+  );
+
+  const unreadCountRes = await query(
+    `SELECT COUNT(*)::int as count
+     FROM notifications
+     WHERE organization_id = $1
+       AND (store_id = $2 OR store_id IS NULL)
+       AND is_read = FALSE`,
+    [orgId, storeId]
+  );
+
+  res.json({
+    unreadCount: unreadCountRes.rows[0]?.count || 0,
+    notifications: notifs.rows
+  });
+});
+
 // GET /api/v1/notifications/inbox
 notificationsRouter.get('/inbox', requireAuth, async (req: Request, res: Response) => {
   const storeId = req.auth?.storeId;
