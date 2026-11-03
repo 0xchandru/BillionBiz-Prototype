@@ -926,6 +926,44 @@ identityRouter.get('/onboarding-checklist', requireAuth, async (req: Request, re
   res.json({ checklist: checklistRes.rows });
 });
 
+// GET /api/v1/auth/check-domain (Real-Time Subdomain Availability Checker)
+identityRouter.get('/check-domain', async (req: Request, res: Response) => {
+  const rawSlug = (req.query.slug as string || req.query.domain as string || '').trim().toLowerCase();
+  const cleanSlug = rawSlug.replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+  if (!cleanSlug || cleanSlug.length < 2) {
+    return res.status(400).json({
+      available: false,
+      slug: cleanSlug,
+      message: 'Domain must be at least 2 characters long'
+    });
+  }
+
+  // Reserved platform subdomains
+  const reserved = ['admin', 'api', 'app', 'pos', 'ops', 'staff', 'accounts', 'stores', 'store', 'www', 'mail', 'auth', 'billing'];
+  if (reserved.includes(cleanSlug)) {
+    return res.json({
+      available: false,
+      slug: cleanSlug,
+      fullDomain: `${cleanSlug}.stores.chandraprakash.codes`,
+      message: `'${cleanSlug}' is a reserved platform domain`
+    });
+  }
+
+  const existing = await query(
+    `SELECT id FROM stores WHERE LOWER(slug) = $1`,
+    [cleanSlug]
+  );
+
+  const available = existing.rowCount === 0;
+  res.json({
+    available,
+    slug: cleanSlug,
+    fullDomain: `${cleanSlug}.stores.chandraprakash.codes`,
+    message: available ? 'Domain is available!' : 'This domain is already taken. Please choose another.'
+  });
+});
+
 /**
  * Normalizes email or international mobile phone number
  */
@@ -1303,6 +1341,14 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
   const rawSlug = (slug || storeName).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
   const storeSlug = rawSlug || `store-${uuidv4().substring(0, 6)}`;
 
+  // Check if store domain/slug already exists (when explicitly requested)
+  if (slug) {
+    const slugCheck = await query(`SELECT id FROM stores WHERE LOWER(slug) = $1`, [storeSlug]);
+    if (slugCheck.rowCount && slugCheck.rowCount > 0) {
+      return res.status(409).json({ error: 'DOMAIN_TAKEN', message: `The store domain '${storeSlug}' is already taken. Please choose another domain.` });
+    }
+  }
+
   const mode = (capabilityMode || 'COMMERCE').toUpperCase(); // Default to 'COMMERCE' (Ecommerce store)
   const prodEnabled = mode === 'COMMERCE' || mode === 'BOTH';
   const apptEnabled = mode === 'SERVICES' || mode === 'BOTH';
@@ -1342,6 +1388,14 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
       `INSERT INTO stores (id, organization_id, name, slug, status)
        VALUES ($1, $2, $3, $4, 'ACTIVE')`,
       [storeId, orgId, storeName, storeSlug]
+    );
+
+    // Register primary store domain
+    await client.query(
+      `INSERT INTO store_domains (id, store_id, domain, is_primary, is_verified, ssl_status)
+       VALUES ($1, $2, $3, TRUE, TRUE, 'ACTIVE')
+       ON CONFLICT (domain) DO UPDATE SET is_primary = TRUE, is_verified = TRUE`,
+      [`dom-${uuidv4()}`, storeId, `${storeSlug}.stores.chandraprakash.codes`]
     );
 
     // 4. Capabilities & Storefront Settings
