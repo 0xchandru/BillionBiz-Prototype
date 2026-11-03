@@ -1041,9 +1041,21 @@ identityRouter.post('/otp/send', async (req: Request, res: Response) => {
 
       if (!emailResult.success) {
         console.error(`[AUTH OTP] Resend delivery error for ${value}:`, emailResult.error);
+        if (env.NODE_ENV !== 'test') {
+          return res.status(502).json({
+            error: 'EMAIL_DELIVERY_FAILED',
+            message: emailResult.error?.message || 'Unable to deliver verification email. Please verify your email address or try again.'
+          });
+        }
       }
     } catch (sendErr: any) {
       console.error(`[AUTH OTP] Exception while sending email via Resend to ${value}:`, sendErr.message);
+      if (env.NODE_ENV !== 'test') {
+        return res.status(502).json({
+          error: 'EMAIL_DELIVERY_FAILED',
+          message: sendErr.message || 'Unable to deliver verification email.'
+        });
+      }
     }
   }
 

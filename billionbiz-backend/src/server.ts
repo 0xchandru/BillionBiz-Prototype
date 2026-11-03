@@ -1,7 +1,8 @@
+import './core/env.js';
 import http from 'http';
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
+import { env } from './core/env.js';
 import { identityRouter } from './modules/identity/identity.router.js';
 import { tenancyRouter } from './modules/tenancy/tenancy.router.js';
 import { teamRouter } from './modules/team/team.router.js';
@@ -16,11 +17,9 @@ import { notificationsRouter } from './modules/notifications/notifications.route
 import { realtimeRouter, realtimeGateway } from './core/realtimeGateway.js';
 import { pool } from './db/pool.js';
 
-dotenv.config();
-
 export const app = express();
 export const server = http.createServer(app);
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
+const PORT = env.PORT || 8080;
 
 const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
   .split(',')

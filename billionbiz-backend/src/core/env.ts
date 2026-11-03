@@ -1,8 +1,25 @@
 import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import { z } from 'zod';
 
-// Load .env file
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Robust multi-path resolution so .env loads whether started from repo root or package dir
+const candidatePaths = [
+  path.resolve(__dirname, '../../.env'),
+  path.resolve(process.cwd(), 'billionbiz-backend/.env'),
+  path.resolve(process.cwd(), '.env')
+];
+
+for (const p of candidatePaths) {
+  if (fs.existsSync(p)) {
+    dotenv.config({ path: p });
+  }
+}
+dotenv.config(); // fallback to default
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),

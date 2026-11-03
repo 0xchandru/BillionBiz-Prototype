@@ -5,8 +5,9 @@ import { env } from './env.js';
 
 let resendClient: Resend | null = null;
 function getResendClient(): Resend | null {
-  if (env.RESEND_API_KEY && !resendClient) {
-    resendClient = new Resend(env.RESEND_API_KEY);
+  const key = env.RESEND_API_KEY || process.env.RESEND_API_KEY;
+  if (key && !resendClient) {
+    resendClient = new Resend(key);
   }
   return resendClient;
 }
@@ -15,12 +16,14 @@ export async function sendEmail(
   message: EmailMessage,
   idempotencyKey?: string
 ): Promise<{ success: boolean; id?: string; error?: any }> {
-  if (env.EMAIL_PROVIDER === 'resend' || (env.RESEND_API_KEY && env.EMAIL_PROVIDER !== 'console')) {
+  const apiKey = env.RESEND_API_KEY || process.env.RESEND_API_KEY;
+  if ((env.EMAIL_PROVIDER === 'resend' || apiKey) && env.EMAIL_PROVIDER !== 'console') {
     const resend = getResendClient();
     if (resend) {
       try {
+        const fromAddress = env.SMTP_FROM || process.env.SMTP_FROM || 'BillionBiz <noreply@chandraprakash.codes>';
         const { data, error } = await resend.emails.send({
-          from: env.SMTP_FROM || 'BillionBiz <noreply@chandraprakash.codes>',
+          from: fromAddress,
           to: message.to,
           subject: message.subject,
           html: message.html,
