@@ -36,6 +36,7 @@ const envSchema = z.object({
   OPS_URL: z.string().default('https://ops.chandraprakash.codes'),
   API_URL: z.string().default('https://api.chandraprakash.codes'),
   STORE_DOMAIN_PATTERN: z.string().default('*.chandraprakash.codes'),
+  STORE_DOMAIN_CNAME_TARGET: z.string().optional(),
   ALLOWED_ORIGINS: z.string().default(
     'https://www.chandraprakash.codes,https://admin.chandraprakash.codes,https://accounts.chandraprakash.codes,https://staff.chandraprakash.codes,https://pos.chandraprakash.codes,https://ops.chandraprakash.codes'
   ),
