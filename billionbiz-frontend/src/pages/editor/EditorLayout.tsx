@@ -79,7 +79,7 @@ const resolvePageId = (rawId: string, pages: PageData[]): string | null => {
   };
   const route = target.startsWith('/') ? target : routeAliases[target];
   if (route) {
-    const matchPath = pages.find((page) => page.path.replace(/\\/+$/, '') === route.replace(/\\/+$/, '') || (route === '/' && page.path === '/'));
+    const matchPath = pages.find((page) => page.path.replace(/\/+$/, '') === route.replace(/\\/+$/, '') || (route === '/' && page.path === '/'));
     if (matchPath) return matchPath.id;
   }
 
