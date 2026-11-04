@@ -382,7 +382,10 @@ export async function provisionDefaultStorefront(options: ProvisionStorefrontOpt
   );
 
   const initialRelease = await client.query(
-    `SELECT id FROM store_releases WHERE store_id = $1 AND release_number = 1 LIMIT 1`,
+    `SELECT id FROM store_releases
+     WHERE store_id = $1
+     ORDER BY release_number DESC
+     LIMIT 1`,
     [storeId]
   );
   const effectiveInitialReleaseId = initialRelease.rows[0]?.id;
