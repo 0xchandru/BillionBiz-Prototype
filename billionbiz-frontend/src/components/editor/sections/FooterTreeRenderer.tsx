@@ -30,6 +30,7 @@ import type { FooterTreeNode } from '../engine/footerTreeTypes';
 import { createDefaultFooterTree } from '../engine/footerTreeEngine';
 import { createDefaultFooterStack } from '../engine/footerPresets';
 import type { FooterRow } from '../engine/types';
+import { sanitizeHtml } from '../../../utils/sanitizeHtml';
 
 // ─── SOCIAL ICONS ─────────────────────────────────────────────
 
@@ -1359,7 +1360,7 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
         return (
           <div
             style={{ width: effectiveWidthMode === 'fill' ? '100%' : 'auto' }}
-            dangerouslySetInnerHTML={{ __html: props.html || '<div>Custom HTML Block</div>' }}
+            dangerouslySetInnerHTML={{ __html: isEditorInteractive ? (props.html || '<div>Custom HTML Block</div>') : sanitizeHtml(props.html || '') }}
           />
         );
 
