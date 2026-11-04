@@ -11,7 +11,7 @@ const makeBlock = (id: string, type: string, settings: Record<string, unknown>) 
   responsiveOverrides: {}
 });
 
-const validHero = () => ({
+const validHero = (): any => ({
   id: 'section-hero',
   type: 'HeroBanner',
   name: 'Hero Banner',
