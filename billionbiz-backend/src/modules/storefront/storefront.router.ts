@@ -816,7 +816,7 @@ storefrontRouter.patch(
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const pageId = req.params.id as string;
-    const { sections, pageProps, expectedVersion } = req.body;
+    const { sections, pageProps, expectedVersion, seoTitle, seoDescription } = req.body;
 
     if (!Array.isArray(sections)) {
       return res.status(400).json({ error: 'INVALID_DRAFT', message: 'Sections must be an array.' });
@@ -832,6 +832,12 @@ storefrontRouter.patch(
     }
     if (pageProps !== undefined && (!pageProps || typeof pageProps !== 'object' || Array.isArray(pageProps))) {
       return res.status(400).json({ error: 'INVALID_DRAFT', message: 'Page properties must be an object.' });
+    }
+    if (seoTitle !== undefined && (typeof seoTitle !== 'string' || seoTitle.length > 70)) {
+      return res.status(400).json({ error: 'INVALID_SEO_TITLE', message: 'SEO title must be text with a maximum length of 70 characters.' });
+    }
+    if (seoDescription !== undefined && (typeof seoDescription !== 'string' || seoDescription.length > 320)) {
+      return res.status(400).json({ error: 'INVALID_SEO_DESCRIPTION', message: 'SEO description must be text with a maximum length of 320 characters.' });
     }
     if (expectedVersion !== undefined && (!Number.isInteger(Number(expectedVersion)) || Number(expectedVersion) < 0)) {
       return res.status(400).json({ error: 'INVALID_DRAFT_VERSION', message: 'Expected draft version must be a non-negative integer.' });
@@ -876,9 +882,13 @@ storefrontRouter.patch(
       );
 
       await client.query(
-        `UPDATE store_pages SET status = 'draft', updated_at = NOW()
-         WHERE id = $1 AND store_id = $2`,
-        [pageId, storeId]
+        `UPDATE store_pages SET
+           status = 'draft',
+           seo_title = COALESCE($1, seo_title),
+           seo_description = COALESCE($2, seo_description),
+           updated_at = NOW()
+         WHERE id = $3 AND store_id = $4`,
+        [seoTitle !== undefined ? seoTitle : null, seoDescription !== undefined ? seoDescription : null, pageId, storeId]
       );
     });
 
