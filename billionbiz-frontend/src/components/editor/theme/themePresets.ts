@@ -855,10 +855,16 @@ export const themePresets: Record<string, GlobalThemeData> = {
       animationStyle: 'smooth',
       animationSpeed: 'normal',
     },
+    spacing: { ...DEFAULT_THEME_SPACING },
   },
 };
 
 export const getDefaultTheme = (): GlobalThemeData => ({
   ...JSON.parse(JSON.stringify(themePresets.Modern)),
   spacing: { ...DEFAULT_THEME_SPACING }
+});
+
+export const getThemeSpacing = (theme?: Partial<GlobalThemeData>): ThemeSpacing => ({
+  ...DEFAULT_THEME_SPACING,
+  ...(theme?.spacing || {})
 });
