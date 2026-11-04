@@ -412,9 +412,6 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
     [store.id]
   );
 
-  // 2. Active theme
-  const themeRes = await query(`SELECT * FROM store_themes WHERE store_id = $1`, [store.id]);
-
   // 3. Public pages always come from the immutable active release.
   let publishedPages = Array.isArray(releaseRes.rows[0]?.snapshot?.pages)
     ? releaseRes.rows[0].snapshot.pages
