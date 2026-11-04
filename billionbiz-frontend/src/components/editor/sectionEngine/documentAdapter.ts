@@ -94,6 +94,17 @@ export function migrateLegacySection(section: LegacySectionData): LegacySectionD
 
 export function sectionInstanceToRendererProps(section: LegacySectionData): Record<string, any> {
   if (!isVersionedSection(section)) {
+    if (section.type === 'HeroBanner') {
+      const migrated = migrateLegacyHeroBanner(section);
+      return {
+        ...(section.props || {}),
+        ...(migrated.settings || {}),
+        blocks: migrated.blocks || [],
+        designOverrides: migrated.designOverrides || {},
+        responsiveOverrides: migrated.responsiveOverrides || {},
+        schemaVersion: migrated.schemaVersion
+      };
+    }
     return { ...(section.props || {}) };
   }
 
