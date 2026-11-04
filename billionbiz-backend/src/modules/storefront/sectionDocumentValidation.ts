@@ -23,7 +23,11 @@ const isSafeColor = (value: unknown): value is string =>
   (
     /^#[0-9a-f]{3,8}$/i.test(value) ||
     /^rgba?\(\s*[0-9.% ,]+\)$/i.test(value) ||
-    /^hsla?\(\s*[0-9.% ,deg]+\)$/i.test(value)
+    /^hsla?\(\s*[0-9.% ,deg]+\)$/i.test(value) ||
+    new Set([
+      'transparent', 'currentcolor', 'white', 'black', 'red', 'blue', 'green',
+      'gray', 'grey', 'navy', 'teal', 'purple', 'orange', 'pink', 'yellow'
+    ]).has(value.toLowerCase())
   );
 
 const allowedTokenReferences = new Set([
