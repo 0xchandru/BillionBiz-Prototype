@@ -21,31 +21,36 @@ export const app = express();
 export const server = http.createServer(app);
 const PORT = env.PORT || 8080;
 
-const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
-  .split(',')
-  .map(s => s.trim())
-  .filter(Boolean);
+// Universal CORS & Preflight Middleware (Reflects origin and requested headers dynamically)
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  
+  const reqHeaders = req.headers['access-control-request-headers'];
+  if (reqHeaders) {
+    res.setHeader('Access-Control-Allow-Headers', reqHeaders);
+  } else {
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, x-organization-id, x-store-id, x-store-slug, x-tenant-id, x-portal-domain, x-client-version, idempotency-key, ngrok-skip-browser-warning, x-correlation-id, Accept, Origin, X-Requested-With, Cache-Control, Pragma'
+    );
+  }
+
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  next();
+});
 
 app.use(
   cors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      if (
-        allowedOrigins.includes(origin) ||
-        origin === 'https://chandraprakash.codes' ||
-        origin === 'http://chandraprakash.codes' ||
-        origin.endsWith('.chandraprakash.codes') ||
-        origin.includes('chandraprakash.codes') ||
-        origin.includes('ngrok-free.dev') ||
-        origin.includes('ngrok-free.app') ||
-        origin.includes('ngrok.io') ||
-        origin.includes('localhost') ||
-        origin.includes('127.0.0.1')
-      ) {
-        return callback(null, true);
-      }
-      return callback(null, true);
-    },
+    origin: (origin, callback) => callback(null, true),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
@@ -53,12 +58,24 @@ app.use(
       'Authorization',
       'x-organization-id',
       'x-store-id',
+      'x-store-slug',
+      'x-tenant-id',
+      'x-portal-domain',
+      'x-client-version',
       'idempotency-key',
       'ngrok-skip-browser-warning',
       'x-correlation-id',
       'Accept',
       'Origin',
-      'X-Requested-With'
+      'X-Requested-With',
+      'Cache-Control',
+      'Pragma'
+    ],
+    exposedHeaders: [
+      'x-correlation-id',
+      'x-store-id',
+      'x-organization-id',
+      'x-store-slug'
     ]
   })
 );
