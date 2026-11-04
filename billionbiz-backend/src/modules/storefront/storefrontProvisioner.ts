@@ -50,7 +50,14 @@ const createStarterFeaturedCollectionSection = () => ({
       showPrice: true,
       showCompareAt: true,
       showVendor: false,
-      showAddToCart: true
+      showDescription: false,
+      showAddToCart: true,
+      imageRatio: 'square',
+      imageFit: 'cover',
+      titleSize: 'medium',
+      addToCartLabel: 'Add to cart',
+      chooseOptionsLabel: 'Choose options',
+      actionStyle: 'primary'
     },
     designOverrides: {},
     responsiveOverrides: {}
