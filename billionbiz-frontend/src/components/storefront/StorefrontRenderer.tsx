@@ -11,6 +11,7 @@ import { AccountPageView } from './pages/AccountPageView';
 import { BookingPageView } from './pages/BookingPageView';
 import { PolicyPageView } from './pages/PolicyPageView';
 import { ContactPageView } from './pages/ContactPageView';
+import { PasswordGateView } from './pages/PasswordGateView';
 import { System404View } from './pages/System404View';
 import { Hammer } from 'lucide-react';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
@@ -23,6 +24,7 @@ export interface StorefrontRendererProps {
     primary_domain?: string;
   };
   brand?: {
+    name?: string;
     brand_name?: string;
     tagline?: string;
     logo_url?: string;
