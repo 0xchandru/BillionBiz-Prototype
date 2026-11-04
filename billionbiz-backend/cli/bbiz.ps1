@@ -80,7 +80,8 @@ function Test-IsAdmin {
 
 function Get-Port8080Process {
     try {
-        $conn = Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+        # Check all connections on port 8080 with valid PID (handles IPv6 [::]:8080 where State may be blank)
+        $conn = Get-NetTCPConnection -LocalPort 8080 -ErrorAction SilentlyContinue | Where-Object { $_.OwningProcess -gt 0 } | Select-Object -First 1
         if ($conn -and $conn.OwningProcess -gt 0) {
             $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
             return $proc
@@ -355,6 +356,9 @@ function Install-Service {
     Push-Location $BackendDir
     npm run build
     Pop-Location
+
+    # Free port 8080 from any temporary standalone processes before registering/starting service
+    Stop-Bbiz
 
     Write-Host "  [2/3] Registering Windows Service '$ServiceName' with SCM..." -ForegroundColor Cyan
     if (Test-IsAdmin) {
