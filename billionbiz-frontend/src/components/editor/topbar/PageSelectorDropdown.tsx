@@ -34,10 +34,10 @@ export const PageSelectorDropdown: React.FC = () => {
 
   // Dynamic title based on active page or panel
   const getContextTitle = () => {
-    if (activePanel === 'design' || activePanel === 'design-experience') return 'Design';
-    if (activePanel === 'brand' || activePanel === 'store-brand') return 'Brand';
-    if (activePanel === 'seo-growth') return 'SEO';
-    if (activePanel === 'settings') return 'Settings';
+    if (activePanel === 'design' || activePanel === 'design-experience') return 'Design system';
+    if (activePanel === 'brand' || activePanel === 'store-brand') return 'Identity';
+    if (activePanel === 'growth' || activePanel === 'seo-growth') return 'Growth';
+    if (activePanel === 'settings') return 'Store setup';
     if (pagesNavLevel === 'list') return 'Editor';
     if (selectedPageId === 'header-global') return 'Global Header';
     if (selectedPageId === 'footer-global') return 'Global Footer';
