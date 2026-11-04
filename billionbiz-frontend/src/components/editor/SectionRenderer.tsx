@@ -629,7 +629,9 @@ export const SectionRenderer: React.FC<{
   isEditorInteractive?: boolean;
   useEditorModel?: boolean;
   onNavigate?: (path: string) => void;
-}> = ({ section, overrideDevice, isEditorInteractive = false, useEditorModel = false, onNavigate }) => {
+  dataContext?: Record<string, any>;
+  currencyCode?: string;
+}> = ({ section, overrideDevice, isEditorInteractive = false, useEditorModel = false, onNavigate, dataContext, currencyCode = 'INR' }) => {
   const device = overrideDevice || 'desktop';
   const sectionDocument = sectionInstanceToRendererProps(section);
   const isEnabled = section.enabled !== false && section.isHidden !== true;
@@ -699,7 +701,10 @@ export const SectionRenderer: React.FC<{
       _layoutWidth: layoutWidth,
       _paddingStyle: paddingStyle,
       _marginStyle: marginStyle,
-      onNavigate
+      onNavigate,
+      sectionType: section.type,
+      dataContext,
+      currencyCode
     }} />
   );
 };
