@@ -70,7 +70,7 @@ export const HeaderNavbarSection: React.FC<HeaderNavbarSectionProps> = ({
   const storeName = settings?.storeName || 'BillionBiz';
 
   const device = passedDevice || storeDevice || 'desktop';
-  const isEditingHeader = selectedPageId === 'header-global' && isRightSidebarOpen;
+  const isEditingHeader = isEditorInteractive && selectedPageId === 'header-global' && isRightSidebarOpen;
 
   // Derive effective rows & settings considering live variant/preset hover preview
   const isPresetPreviewActive = Boolean(
