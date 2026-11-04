@@ -277,6 +277,7 @@ export const EditorLeftSidebar: React.FC = () => {
         return <GrowthPanel />;
       case 'brand':
       case 'store-brand':
+        return <BrandPanel />;
       case 'seo-growth':
         return <GrowthPanel />;
       case 'settings':
