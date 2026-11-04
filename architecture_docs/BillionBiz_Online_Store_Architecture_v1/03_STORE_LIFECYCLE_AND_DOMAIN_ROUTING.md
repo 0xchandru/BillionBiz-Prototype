@@ -40,7 +40,7 @@ Rules:
 
 ## 3. DNS and deployment setup
 
-Platform operations must configure a wildcard host such as `*.stores.chandraprakash.codes` to the shared storefront deployment using the hosting provider's supported wildcard-domain procedure. Verify wildcard certificate and routing before self-service registration is enabled.
+Platform operations must configure a wildcard host such as `*.chandraprakash.codes` to the shared storefront deployment using the hosting provider's supported wildcard-domain procedure. Verify wildcard certificate and routing before self-service registration is enabled.
 
 This is a **platform-level prerequisite**, not something each merchant fixes. If missing, show a platform-operator warning and do not report every newly registered subdomain as live.
 
