@@ -177,6 +177,7 @@ export const WebsitePreview: React.FC<WebsitePreviewProps> = ({
         categories={effectiveCategories}
         offerings={effectiveOfferings}
         previewMode={true}
+        useEditorChrome={true}
         onNavigate={(targetPath) => {
           const matched = pages.find((p) => p.path === targetPath);
           if (matched) {
