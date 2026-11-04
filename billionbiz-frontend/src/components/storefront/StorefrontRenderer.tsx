@@ -14,6 +14,7 @@ import { ContactPageView } from './pages/ContactPageView';
 import { System404View } from './pages/System404View';
 import { PasswordGateView } from './pages/PasswordGateView';
 import { Hammer } from 'lucide-react';
+import { apiClient } from '../../api/client';
 
 export interface StorefrontRendererProps {
   store?: {
@@ -60,8 +61,9 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
   previewMode = false
 }) => {
   const [internalPath, setInternalPath] = useState<string>(currentPath);
+  const passwordSessionKey = `storefront_password_unlocked:${store?.slug || store?.id || 'store'}`;
   const [isPasswordUnlocked, setIsPasswordUnlocked] = useState<boolean>(() => {
-    return typeof window !== 'undefined' && sessionStorage.getItem('storefront_password_unlocked') === 'true';
+    return typeof window !== 'undefined' && sessionStorage.getItem(passwordSessionKey) === 'true';
   });
 
   const activePath = previewMode ? (currentPath || internalPath) : (window.location.pathname || currentPath || '/');
@@ -106,13 +108,16 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
           brandName={brandDisplayName}
           tagline={brand?.tagline}
           onUnlock={async (password) => {
-            // Check password
-            if (password.length > 0) {
-              sessionStorage.setItem('storefront_password_unlocked', 'true');
-              setIsPasswordUnlocked(true);
-              return true;
-            }
-            return false;
+            if (!store?.slug) return false;
+            const result = await apiClient.post<{ verified: boolean }>(
+              `/storefront/by-slug/${encodeURIComponent(store.slug)}/password/verify`,
+              { password }
+            );
+            if (!result.verified) return false;
+
+            sessionStorage.setItem(passwordSessionKey, 'true');
+            setIsPasswordUnlocked(true);
+            return true;
           }}
         />
       </ThemeTokenProvider>
