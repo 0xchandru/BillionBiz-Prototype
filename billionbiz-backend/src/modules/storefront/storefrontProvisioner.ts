@@ -210,13 +210,24 @@ export async function provisionDefaultStorefront(options: ProvisionStorefrontOpt
   const { client, storeId, storeName, storeSlug, mode, userId } = options;
   const platformDomain = `${storeSlug}.${PLATFORM_MAIN_DOMAIN}`;
 
-  // 1. Primary Subdomain Mapping
+  // 1. Primary platform subdomain mapping. Never reassign an existing
+  // hostname to another tenant during a retry or lazy-provisioning request.
   await client.query(
     `INSERT INTO store_domains (id, store_id, domain, is_primary, is_verified, ssl_status)
      VALUES ($1, $2, $3, TRUE, TRUE, 'ACTIVE')
-     ON CONFLICT (domain) DO UPDATE SET is_primary = TRUE, is_verified = TRUE`,
+     ON CONFLICT (domain) DO NOTHING`,
     [`dom-${uuidv4()}`, storeId, platformDomain]
   );
+
+  const domainOwner = await client.query(
+    `SELECT store_id FROM store_domains WHERE LOWER(domain) = LOWER($1) LIMIT 1`,
+    [platformDomain]
+  );
+  if (domainOwner.rowCount === 0 || domainOwner.rows[0].store_id !== storeId) {
+    const error = new Error('The requested platform subdomain is already mapped to another store.');
+    (error as Error & { code?: string }).code = 'STORE_DOMAIN_CONFLICT';
+    throw error;
+  }
 
   // 2. Default Store Navigation
   const defaultNav = [
@@ -323,7 +334,8 @@ export async function provisionDefaultStorefront(options: ProvisionStorefrontOpt
     if (sections.length > 0) {
       await client.query(
         `INSERT INTO page_draft_versions (id, page_id, version, sections, page_props, created_by)
-         VALUES ($1, $2, 1, $3, $4, $5)`,
+         VALUES ($1, $2, 1, $3, $4, $5)
+         ON CONFLICT (page_id, version) DO NOTHING`,
         [`draft-${uuidv4()}`, actualPageId, JSON.stringify(sections), JSON.stringify(pageProps), userId || null]
       );
     }
@@ -369,9 +381,22 @@ export async function provisionDefaultStorefront(options: ProvisionStorefrontOpt
     [initialReleaseId, storeId, contentHash, JSON.stringify(initialSnapshot), userId || null]
   );
 
+  const initialRelease = await client.query(
+    `SELECT id FROM store_releases WHERE store_id = $1 AND release_number = 1 LIMIT 1`,
+    [storeId]
+  );
+  const effectiveInitialReleaseId = initialRelease.rows[0]?.id;
+  if (!effectiveInitialReleaseId) {
+    throw new Error('Initial storefront publication could not be created.');
+  }
+
+  // Retries may repair a missing pointer, but must never roll an existing
+  // store back from a later publication to release 1.
   await client.query(
-    `UPDATE storefront_settings SET active_release_id = $1 WHERE store_id = $2`,
-    [initialReleaseId, storeId]
+    `UPDATE storefront_settings
+     SET active_release_id = COALESCE(active_release_id, $1), updated_at = NOW()
+     WHERE store_id = $2`,
+    [effectiveInitialReleaseId, storeId]
   );
 
   return {
