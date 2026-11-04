@@ -456,10 +456,14 @@ export const api = {
 
   // Storefront & Publishing
   getPages: () => apiClient<{ pages: any[] }>('/storefront/pages'),
-  savePageDraft: (pageId: string, sections: any[], pageProps?: any) =>
-    apiClient(`/storefront/pages/${pageId}/draft`, {
+  savePageDraft: (pageId: string, sections: any[], pageProps?: any, expectedVersion?: number) =>
+    apiClient<{ message: string; pageId: string; version: number }>(`/storefront/pages/${encodeURIComponent(pageId)}/draft`, {
       method: 'PATCH',
-      body: JSON.stringify({ sections, pageProps })
+      body: JSON.stringify({
+        sections,
+        pageProps,
+        ...(expectedVersion !== undefined ? { expectedVersion } : {})
+      })
     }),
   publishStore: (notes?: string) =>
     apiClient<{ message: string; releaseId: string; releaseNumber: number }>('/storefront/publish', {
