@@ -11,6 +11,12 @@ const isRecord = (value: unknown): value is AnyRecord =>
 const isSafeText = (value: unknown, maxLength: number): value is string =>
   typeof value === 'string' && value.length <= maxLength;
 
+const containsControlCharacters = (value: string): boolean =>
+  Array.from(value).some((character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || code === 127;
+  });
+
 const isSafeLink = (value: unknown): value is string =>
   typeof value === 'string' &&
   value.length <= 2000 &&
@@ -101,7 +107,15 @@ function validateHeroBlock(block: unknown, index: number, issues: SectionDocumen
       if (typeof settings.openInNewTab !== 'boolean') issues.push({ path: `${path}.settings.openInNewTab`, message: 'openInNewTab must be boolean.' });
       break;
     case 'image':
-      if (!isSafeText(settings.src, 2000) || (settings.src && (!/^(https?:\\/\\/|\\/)/i.test(settings.src) || /[\\u0000-\\u001f]/.test(settings.src)))) issues.push({ path: `${path}.settings.src`, message: 'Image source must be empty or a valid http(s)/relative URL.' });
+      if (
+        !isSafeText(settings.src, 2000) ||
+        (settings.src && (
+          !(settings.src.startsWith('https://') || settings.src.startsWith('http://') || settings.src.startsWith('/')) ||
+          containsControlCharacters(settings.src)
+        ))
+      ) {
+        issues.push({ path: `${path}.settings.src`, message: 'Image source must be empty or a valid http(s)/relative URL.' });
+      }
       if (!isSafeText(settings.alt, 180)) issues.push({ path: `${path}.settings.alt`, message: 'Image alternative text is limited to 180 characters.' });
       if (!['cover', 'contain'].includes(settings.fit)) issues.push({ path: `${path}.settings.fit`, message: 'Image fit must be cover or contain.' });
       break;
