@@ -12,7 +12,10 @@ import { useSiteStore } from '../../../store/siteStore';
 import { getEditorPath } from '../utils/editorNavigation';
 import type { HeaderRow, HeaderElement, HeaderSlotArrangement, ActionItemConfig } from '../engine/types';
 import { getDefaultActionItems, renderActionIcon } from '../engine/actionIconLibraries';
-import { createDefaultHeaderStack } from '../engine/headerPresets';
+import {
+  createDefaultHeaderStack,
+  createDefaultGlobalSettings as createDefaultHeaderGlobalSettings
+} from '../engine/headerPresets';
 import styles from './HeaderSections.module.css';
 
 interface NormalizedNavItem {
@@ -77,10 +80,14 @@ export const HeaderNavbarSection: React.FC<HeaderNavbarSectionProps> = ({
   const persistedSettings = passedProps?._headerEditor?.globalSettings || passedProps?._headerSettings;
   const effectiveRows = isPresetPreviewActive && store.presetPreview?.previewRows
     ? (store.presetPreview.previewRows as HeaderRow[])
-    : (useEditorModel && store.headerRows.length > 0 ? store.headerRows : (persistedRows || store.headerRows));
+    : (useEditorModel && store.headerRows.length > 0
+      ? store.headerRows
+      : (persistedRows || (isEditorInteractive ? store.headerRows : createDefaultHeaderStack())));
   const effectiveSettings = isPresetPreviewActive && store.presetPreview?.previewSettings
     ? { ...store.headerSettings, ...store.presetPreview.previewSettings }
-    : (useEditorModel ? store.headerSettings : (persistedSettings || store.headerSettings));
+    : (useEditorModel
+      ? store.headerSettings
+      : (persistedSettings || (isEditorInteractive ? store.headerSettings : createDefaultHeaderGlobalSettings())));
 
   // Find row data from store or fallback
   const row: HeaderRow = useMemo(() => {
