@@ -1,7 +1,7 @@
 
 import React from 'react';
 import {
-  Building2, Image, Link2, Globe, PanelLeftClose, PanelLeftOpen,
+  Building2, Image, Globe, PanelLeftClose, PanelLeftOpen,
   ChevronRight, Store, Share2
 } from 'lucide-react';
 import { useLandingEditorStore } from '../../../store/landingEditorStore';
