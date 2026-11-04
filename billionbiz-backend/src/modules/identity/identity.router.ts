@@ -666,47 +666,55 @@ identityRouter.post('/google', async (req: Request, res: Response) => {
       primaryOrg = primaryOrg || `org-${uuidv4()}`;
       primaryStore = primaryStore || `str-${uuidv4()}`;
       const storeName = `${fullName || 'My Store'}'s Store`;
-      const storeSlug = `store-${uuidv4().substring(0, 8)}`;
+      const slugBase = generateCandidateSlug(fullName || cleanEmail.split('@')[0] || 'merchant').slice(0, 44) || 'merchant';
+      const storeSlug = `${slugBase}-${uuidv4().substring(0, 8)}`;
+      const slugValidation = validateSubdomainSlug(storeSlug);
+      if (!slugValidation.isValid) {
+        throw new Error(`Unable to create a valid storefront subdomain: ${slugValidation.error || 'invalid slug'}`);
+      }
       primaryStoreName = storeName;
-      primaryStoreSlug = storeSlug;
+      primaryStoreSlug = slugValidation.normalizedSlug;
 
       await withTransaction(async (client) => {
         await client.query(
-          `INSERT INTO organizations (id, name, slug) 
-           VALUES ($1, $2, $3)
-           ON CONFLICT DO NOTHING`,
-          [primaryOrg, `${storeName} Group`, storeSlug]
+          `INSERT INTO organizations (id, name, slug)
+           VALUES ($1, $2, $3)`,
+          [primaryOrg, `${storeName} Group`, primaryStoreSlug]
         );
         await client.query(
-          `INSERT INTO stores (id, organization_id, name, slug, status) 
-           VALUES ($1, $2, $3, $4, 'ACTIVE')
-           ON CONFLICT DO NOTHING`,
-          [primaryStore, primaryOrg, storeName, storeSlug]
+          `INSERT INTO stores (id, organization_id, name, slug, status)
+           VALUES ($1, $2, $3, $4, 'ACTIVE')`,
+          [primaryStore, primaryOrg, storeName, primaryStoreSlug]
         );
         await client.query(
-          `INSERT INTO organization_memberships (id, organization_id, user_id, role) 
-           VALUES ($1, $2, $3, 'OWNER')
-           ON CONFLICT DO NOTHING`,
+          `INSERT INTO organization_memberships (id, organization_id, user_id, role)
+           VALUES ($1, $2, $3, 'OWNER')`,
           [`mem-${uuidv4()}`, primaryOrg, userId]
         );
         await client.query(
-          `INSERT INTO store_capabilities (store_id, product_commerce_enabled, appointments_enabled) 
+          `INSERT INTO store_capabilities (store_id, product_commerce_enabled, appointments_enabled)
            VALUES ($1, TRUE, TRUE)
-           ON CONFLICT DO NOTHING`,
+           ON CONFLICT (store_id) DO NOTHING`,
           [primaryStore]
         );
         await client.query(
-          `INSERT INTO store_locations (id, store_id, name, is_primary) 
-           VALUES ($1, $2, 'Main Location', TRUE)
+          `INSERT INTO store_locations (id, store_id, name, is_primary, is_active)
+           VALUES ($1, $2, 'Main Location', TRUE, TRUE)
            ON CONFLICT DO NOTHING`,
           [`loc-${uuidv4()}`, primaryStore]
         );
-        await client.query(
-          `INSERT INTO store_themes (id, store_id, preset_name) 
-           VALUES ($1, $2, 'modern')
-           ON CONFLICT DO NOTHING`,
-          [`thm-${uuidv4()}`, primaryStore]
-        );
+
+        // Google-created merchants must receive the same domain, settings,
+        // theme, navigation, page catalog and initial publication as all other
+        // registration paths.
+        await provisionDefaultStorefront({
+          client,
+          storeId: primaryStore,
+          storeName,
+          storeSlug: primaryStoreSlug,
+          mode: 'BOTH',
+          userId
+        });
       });
 
       // Refetch updated orgs
