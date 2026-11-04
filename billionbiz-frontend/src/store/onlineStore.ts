@@ -718,7 +718,8 @@ export const useOnlineStore = create<OnlineStoreState>()(
         theme: {
           ...state.theme,
           typography: JSON.parse(JSON.stringify(preset.typography)),
-        }
+        },
+        hasUnsavedChanges: true
       };
     });
   },
