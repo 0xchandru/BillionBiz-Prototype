@@ -796,9 +796,15 @@ storefrontRouter.patch(
       return res.status(400).json({ error: 'INVALID_DRAFT_VERSION', message: 'Expected draft version must be a non-negative integer.' });
     }
 
-    let pageNotFound = false;
-    let versionConflict: { currentVersion: number } | null = null;
-    let nextVersion = 0;
+    const saveOutcome: {
+      pageNotFound: boolean;
+      versionConflict: { currentVersion: number } | null;
+      nextVersion: number;
+    } = {
+      pageNotFound: false,
+      versionConflict: null,
+      nextVersion: 0
+    };
 
     await withTransaction(async (client) => {
       // Lock the page row so concurrent autosaves allocate distinct versions.
@@ -807,7 +813,7 @@ storefrontRouter.patch(
         [pageId, storeId]
       );
       if (pageRes.rowCount === 0) {
-        pageNotFound = true;
+        saveOutcome.pageNotFound = true;
         return;
       }
 
@@ -817,15 +823,15 @@ storefrontRouter.patch(
       );
       const currentVersion = Number(latestRes.rows[0]?.version || 0);
       if (expectedVersion !== undefined && Number(expectedVersion) !== currentVersion) {
-        versionConflict = { currentVersion };
+        saveOutcome.versionConflict = { currentVersion };
         return;
       }
 
-      nextVersion = currentVersion + 1;
+      saveOutcome.nextVersion = currentVersion + 1;
       await client.query(
         `INSERT INTO page_draft_versions (id, page_id, version, sections, page_props, created_by)
          VALUES ($1, $2, $3, $4, $5, $6)`,
-        [`draft-${uuidv4()}`, pageId, nextVersion, JSON.stringify(sections), JSON.stringify(pageProps || {}), req.auth?.userId]
+        [`draft-${uuidv4()}`, pageId, saveOutcome.nextVersion, JSON.stringify(sections), JSON.stringify(pageProps || {}), req.auth?.userId]
       );
 
       await client.query(
@@ -835,9 +841,10 @@ storefrontRouter.patch(
       );
     });
 
-    if (pageNotFound) {
+    if (saveOutcome.pageNotFound) {
       return res.status(404).json({ error: 'PAGE_NOT_FOUND', message: 'Page not found' });
     }
+    const versionConflict = saveOutcome.versionConflict;
     if (versionConflict) {
       return res.status(409).json({
         error: 'DRAFT_VERSION_CONFLICT',
@@ -846,7 +853,7 @@ storefrontRouter.patch(
       });
     }
 
-    res.json({ message: 'Draft saved successfully', pageId, version: nextVersion });
+    res.json({ message: 'Draft saved successfully', pageId, version: saveOutcome.nextVersion });
   }
 );
 
