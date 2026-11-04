@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ThemeTokenProvider } from './ThemeTokenProvider';
 import { StoreLayout } from './StoreLayout';
 import { HomePageView } from './pages/HomePageView';
@@ -44,6 +44,7 @@ export interface StorefrontRendererProps {
   onNavigate?: (path: string) => void;
   previewMode?: boolean;
   useEditorChrome?: boolean;
+  device?: 'desktop' | 'tablet' | 'mobile';
 }
 
 export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
@@ -58,8 +59,24 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
   offerings = [],
   onNavigate,
   previewMode = false,
-  useEditorChrome = false
+  useEditorChrome = false,
+  device
 }) => {
+  const [runtimeDevice, setRuntimeDevice] = useState<'desktop' | 'tablet' | 'mobile'>(device || 'desktop');
+
+  useEffect(() => {
+    if (device) {
+      setRuntimeDevice(device);
+      return;
+    }
+    const updateDevice = () => {
+      const width = window.innerWidth;
+      setRuntimeDevice(width <= 600 ? 'mobile' : width <= 900 ? 'tablet' : 'desktop');
+    };
+    updateDevice();
+    window.addEventListener('resize', updateDevice);
+    return () => window.removeEventListener('resize', updateDevice);
+  }, [device]);
   const [internalPath, setInternalPath] = useState<string>(currentPath);
   const activePath = previewMode ? (currentPath || internalPath) : (window.location.pathname || currentPath || '/');
 
@@ -121,6 +138,7 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
           categories={categories}
           offerings={offerings}
           onNavigate={handleNavigate}
+          device={runtimeDevice}
           sections={homePage?.sections || []}
         />
       );
