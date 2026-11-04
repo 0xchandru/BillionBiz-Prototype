@@ -8,14 +8,14 @@
 }
 
 .inner {
-  width: min(100% - 48px, var(--hero-content-width, 1280px));
+  width: min(100% - 48px, var(--hero-content-width, var(--theme-container-max-width, 1280px)));
   min-height: inherit;
   margin-inline: auto;
-  padding-block: clamp(44px, 7vw, 92px);
+  padding-block: max(28px, min(var(--theme-section-space-y, 72px), 120px));
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 0.92fr);
   align-items: center;
-  gap: clamp(28px, 5vw, 72px);
+  gap: clamp(20px, var(--theme-content-gap, 32px), 72px);
   box-sizing: border-box;
 }
 
