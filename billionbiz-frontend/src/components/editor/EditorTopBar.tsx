@@ -55,7 +55,6 @@ export const EditorTopBar: React.FC = () => {
     hasUnsavedChanges,
     markSaved,
     lastPublishedSnapshots,
-    unpublishPage,
     savePageDraftToBackend,
     saveThemeToBackend,
     saveSettingsToBackend,
@@ -422,18 +421,10 @@ export const EditorTopBar: React.FC = () => {
 
   const handleStatusBadgeClick = () => {
     if (isLive) {
-      const targetId = selectedPageId === 'header-global'
-        ? 'header-global'
-        : selectedPageId === 'footer-global'
-          ? 'footer-global'
-          : activePage?.id;
-      if (targetId) {
-        unpublishPage(targetId);
-        showToast(`"${activeScopeName}" unpublished to draft`);
-      }
-    } else {
-      setIsPublishModalOpen(true);
+      showToast('This release remains live until a new whole-store publication replaces it.');
+      return;
     }
+    setIsPublishModalOpen(true);
   };
 
   const authStoreName = useAuthStore((s) => s.storeName);
@@ -548,7 +539,7 @@ export const EditorTopBar: React.FC = () => {
                 onClick={handleStatusBadgeClick}
                 title={
                   isLive
-                    ? `Status: Live on storefront. Click to unpublish ${activeScopeName}.`
+                    ? `Status: Live on storefront. The currently published snapshot remains live until a new release is activated.`
                     : isSavedDraft
                       ? `Status: Saved to draft. Click to review & publish ${activeScopeName}.`
                       : `Status: Draft / Unsaved changes. Click to publish ${activeScopeName}.`
