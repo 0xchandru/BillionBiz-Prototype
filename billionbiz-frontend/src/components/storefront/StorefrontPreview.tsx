@@ -318,6 +318,7 @@ export const StorefrontPreview: React.FC<StorefrontPreviewProps> = ({
             currentPath={activePath}
             onNavigate={(path) => setActivePath(path)}
             previewMode={true}
+            useEditorChrome={previewMode === 'draft'}
           />
         </StorefrontPreviewViewport>
       )}
