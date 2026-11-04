@@ -45,6 +45,7 @@ export interface StorefrontRendererProps {
   offerings?: any[];
   onNavigate?: (path: string) => void;
   previewMode?: boolean;
+  useEditorChrome?: boolean;
 }
 
 export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
@@ -58,7 +59,8 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
   categories = [],
   offerings = [],
   onNavigate,
-  previewMode = false
+  previewMode = false,
+  useEditorChrome = false
 }) => {
   const [internalPath, setInternalPath] = useState<string>(currentPath);
   const passwordSessionKey = `storefront_password_unlocked:${store?.slug || store?.id || 'store'}`;
@@ -80,6 +82,15 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
   };
 
   const brandDisplayName = brand?.brand_name || brand?.name || store?.name || 'Online Store';
+  const homePageForChrome = pages.find((page: any) => page.path === '/' || page.id === 'landing-page');
+  const headerSectionForChrome = homePageForChrome?.sections?.find((section: any) => section.type === 'Header');
+  const footerSectionForChrome = homePageForChrome?.sections?.find((section: any) =>
+    ['Footer', 'FooterMain'].includes(section.type)
+  );
+  const headerEditorProps = headerSectionForChrome?.props || {};
+  const footerEditorConfig = footerSectionForChrome?.props?._footerEditor || {};
+  const publishedFooterTree = Array.isArray(footerEditorConfig.tree) ? footerEditorConfig.tree : [];
+  const publishedFooterRows = Array.isArray(footerEditorConfig.rows) ? footerEditorConfig.rows : [];
   const maintenanceMode = settings?.maintenance_mode ?? (settings as any)?.maintenanceMode ?? false;
   const passwordEnabled = settings?.password_enabled ?? (settings as any)?.passwordEnabled ?? false;
 
@@ -275,7 +286,7 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
   };
 
   return (
-    <ThemeTokenProvider tokens={themeTokens}>
+    <ThemeTokenProvider theme={themeTokens}>
       <StoreLayout
         brand={{
           name: brandDisplayName,
@@ -286,6 +297,10 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
         }}
         previewMode={previewMode}
         onNavigate={handleNavigate}
+        headerProps={headerEditorProps}
+        footerTree={publishedFooterTree}
+        footerRows={publishedFooterRows}
+        useEditorChrome={useEditorChrome}
         currentPath={activePath}
       >
         {renderPageView()}
