@@ -10,9 +10,31 @@ type TenantResolution = {
 
 const normalizeHost = (value: unknown): string => {
   if (typeof value !== 'string') return '';
+
   // Host is the HTTP authority supplied by the connected peer. Do not accept
   // X-Forwarded-Host here: it is only safe behind an explicitly trusted proxy.
-  return value.split(',')[0].trim().toLowerCase().replace(/:\\d+$/, '');
+  const authority = value.split(',')[0].trim().toLowerCase();
+
+  // IPv6 authorities must be handled before hostname:port parsing. Stripping
+  // ":digits" from "::1" corrupts the address and can route local requests
+  // into public-domain resolution.
+  if (authority.startsWith('[')) {
+    const closingBracket = authority.indexOf(']');
+    if (closingBracket > 0) {
+      return authority.slice(1, closingBracket);
+    }
+  }
+
+  const colonCount = (authority.match(/:/g) || []).length;
+  if (colonCount === 1) {
+    const separator = authority.lastIndexOf(':');
+    const hostname = authority.slice(0, separator);
+    const port = authority.slice(separator + 1);
+    if (/^\d+$/.test(port)) return hostname;
+  }
+
+  // Bare IPv6 literals (including ::1) are preserved unchanged.
+  return authority;
 };
 
 const isLocalHost = (host: string): boolean =>
