@@ -1430,13 +1430,7 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
       [storeId, orgId, storeName, storeSlug]
     );
 
-    // Register primary store domain
-    await client.query(
-      `INSERT INTO store_domains (id, store_id, domain, is_primary, is_verified, ssl_status)
-       VALUES ($1, $2, $3, TRUE, TRUE, 'ACTIVE')
-       ON CONFLICT (domain) DO UPDATE SET is_primary = TRUE, is_verified = TRUE`,
-      [`dom-${uuidv4()}`, storeId, `${storeSlug}.${PLATFORM_MAIN_DOMAIN}`]
-    );
+    // provisionDefaultStorefront owns the single canonical platform-domain mapping.
 
     // 4. Capabilities & Storefront Settings
     await client.query(
