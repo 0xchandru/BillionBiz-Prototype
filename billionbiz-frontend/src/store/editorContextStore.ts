@@ -166,6 +166,7 @@ interface EditorContextState {
   addHeaderElement: (rowId: string, type: HeaderElementType, name: string, defaultProps?: Record<string, any>) => void;
   updateHeaderSettings: (updates: Partial<GlobalHeaderSettings>) => void;
   syncHeaderToSiteStore: () => void;
+  syncFooterToSiteStore: () => void;
 
   // ─── Actions: Footer Editor ───
   updateFooterRow: (rowId: string, updates: Partial<FooterRow>) => void;
@@ -771,7 +772,7 @@ export const useEditorContextStore = create<EditorContextState>()(
       syncHeaderToSiteStore: () => {
         const { headerRows, headerSettings } = get();
         const siteState = useSiteStore.getState();
-        const landingPage = siteState.pages.find((p) => p.id === 'landing-page');
+        const landingPage = siteState.pages.find((p) => p.path === '/') || siteState.pages.find((p) => p.id === 'landing-page');
         if (!landingPage) return;
 
         // Compile header state into landing-page header sections props
@@ -784,6 +785,10 @@ export const useEditorContextStore = create<EditorContextState>()(
         if (headerSection) {
           const updatedProps = {
             ...headerSection.props,
+            _headerEditor: {
+              rows: JSON.parse(JSON.stringify(headerRows)),
+              globalSettings: JSON.parse(JSON.stringify(headerSettings)),
+            },
             logo: logoEl?.props?.text || 'BillionBiz',
             logoType: logoEl?.props?.logoType || 'text',
             logoHeight: logoEl?.props?.desktopWidth ? Math.min(95, Math.floor(logoEl.props.desktopWidth / 2)) : 60,
@@ -829,6 +834,39 @@ export const useEditorContextStore = create<EditorContextState>()(
             textColor: currentBar?.design?.textColor || announcementRow.styling?.textColor,
           });
         }
+      },
+
+      syncFooterToSiteStore: () => {
+        const { footerTree, footerRows, footerSettings } = get();
+        const siteState = useSiteStore.getState();
+        const landingPage = siteState.pages.find((page) => page.path === '/') ||
+          siteState.pages.find((page) => page.id === 'landing-page');
+        if (!landingPage) return;
+
+        let footerSection = landingPage.sections.find((section) =>
+          ['Footer', 'FooterMain'].includes(section.type)
+        );
+
+        if (!footerSection) {
+          siteState.addSection(landingPage.id, 'Footer');
+          const refreshedPage = useSiteStore.getState().pages.find((page) => page.id === landingPage.id);
+          footerSection = refreshedPage?.sections.find((section) =>
+            ['Footer', 'FooterMain'].includes(section.type)
+          );
+        }
+
+        if (!footerSection) {
+          throw new Error('The home page footer section could not be created.');
+        }
+
+        siteState.updateSectionProps(landingPage.id, footerSection.id, {
+          ...footerSection.props,
+          _footerEditor: {
+            tree: JSON.parse(JSON.stringify(footerTree)),
+            rows: JSON.parse(JSON.stringify(footerRows)),
+            globalSettings: JSON.parse(JSON.stringify(footerSettings)),
+          },
+        });
       },
 
       // ──────────────────────────────────────────────────────────
