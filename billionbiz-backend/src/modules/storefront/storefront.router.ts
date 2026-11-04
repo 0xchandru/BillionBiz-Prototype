@@ -559,7 +559,8 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
       // cosmetic draft value. The backend gate and this client flag use the same
       // authoritative setting.
       passwordEnabled: Boolean(settingsRow.password_enabled),
-      maintenanceMode: publishedSettings.maintenanceMode ?? false
+      maintenanceMode: publishedSettings.maintenanceMode ?? false,
+      seoDefaults: publishedSettings.seoDefaults || {}
     }
   });
 });
@@ -988,7 +989,8 @@ storefrontRouter.post(
           homePage: settingsRow.home_page,
           primaryDomain: settingsRow.primary_domain,
           passwordEnabled: settingsRow.password_enabled,
-          maintenanceMode: settingsRow.maintenance_mode
+          maintenanceMode: settingsRow.maintenance_mode,
+          seoDefaults: settingsRow.seo_defaults || {}
         },
         pages: pagesRes.rows,
         publishedAt: new Date().toISOString()
