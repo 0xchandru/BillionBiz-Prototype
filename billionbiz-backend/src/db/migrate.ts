@@ -933,7 +933,23 @@ export async function runMigrations() {
       ON page_draft_versions (page_id, version);
   `);
 
-  // 22. Repair legacy active-release pointers and make domain ownership
+  // 22. Shared rate limits for storefront password verification.
+  await query(`
+    CREATE TABLE IF NOT EXISTS storefront_password_attempts (
+      store_id VARCHAR(64) NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+      ip_hash VARCHAR(64) NOT NULL,
+      window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+      blocked_until TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (store_id, ip_hash)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_storefront_password_attempts_updated
+      ON storefront_password_attempts (updated_at);
+  `);
+
+  // 23. Repair legacy active-release pointers and make domain ownership
   // case-insensitive. Keep the oldest existing mapping if legacy rows differ
   // only by hostname casing.
   await query(`
