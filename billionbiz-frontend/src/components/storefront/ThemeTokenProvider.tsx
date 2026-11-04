@@ -74,12 +74,20 @@ export const ThemeTokenProvider: React.FC<ThemeTokenProviderProps> = ({
       '--theme-secondary': legacyColors.brand?.secondary || p.brand?.secondary || '#71717a',
       '--theme-accent': legacyColors.brand?.accent || p.brand?.accent || '#0284c7',
       '--theme-link': legacyColors.text?.link || p.brand?.link || p.brand?.primary || '#18181b',
+      '--theme-brand-primary': legacyColors.brand?.primary || p.brand?.primary || '#18181b',
+      '--theme-brand-secondary': legacyColors.brand?.secondary || p.brand?.secondary || '#71717a',
+      '--theme-brand-accent': legacyColors.brand?.accent || p.brand?.accent || '#0284c7',
+      '--theme-brand-link': legacyColors.text?.link || p.brand?.link || p.brand?.primary || '#18181b',
 
       /* Backgrounds and surfaces */
       '--theme-bg': legacyColors.surface?.canvas || p.background?.background || '#ffffff',
       '--theme-surface': legacyColors.surface?.page || p.background?.surface || '#f8fafc',
       '--theme-section-bg': legacyColors.surface?.card || p.background?.sectionBg || '#ffffff',
       '--theme-container-bg': legacyColors.surface?.subtle || p.background?.containerBg || '#ffffff',
+      '--theme-bg-background': legacyColors.surface?.canvas || p.background?.background || '#ffffff',
+      '--theme-bg-surface': legacyColors.surface?.page || p.background?.surface || '#f8fafc',
+      '--theme-bg-section': legacyColors.surface?.card || p.background?.sectionBg || '#ffffff',
+      '--theme-bg-container': legacyColors.surface?.subtle || p.background?.containerBg || '#ffffff',
       '--theme-footer-bg': p.background?.footerBg || '#0f172a',
 
       /* Text */
