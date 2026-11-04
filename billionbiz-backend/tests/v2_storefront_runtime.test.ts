@@ -163,12 +163,38 @@ describe('V2 Native Storefront Runtime & Multi-Tenant Isolation Suite (REQ-STORE
 
   it('TC-STORE-002: Unknown host header (*.chandraprakash.codes) returns 404, never a fallback', async () => {
     const res = await request('GET', '/api/v1/storefront/render', {
+      token: storeAToken,
       headers: {
         host: 'bogus-merchant.chandraprakash.codes'
       }
     });
     expect(res.status).toBe(404);
     expect(res.body.error).toBe('STORE_NOT_FOUND');
+  });
+
+  it('TC-STORE-002A: Authenticated store context cannot be overridden by tenant headers', async () => {
+    const res = await request('GET', '/api/v1/storefront/pages', {
+      token: storeAToken,
+      headers: {
+        'x-organization-id': storeAOrgId,
+        'x-store-id': storeBId,
+        'x-store-slug': storeBSlug
+      }
+    });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('CROSS_TENANT_ACCESS_DENIED');
+  });
+
+  it('TC-STORE-002B: Untrusted forwarded host cannot switch an authenticated tenant', async () => {
+    const res = await request('GET', '/api/v1/storefront/pages', {
+      token: storeAToken,
+      headers: {
+        host: 'admin.chandraprakash.codes',
+        'x-forwarded-host': `${storeBSlug}.chandraprakash.codes`
+      }
+    });
+    expect(res.status).toBe(200);
+    expect((res.body.pages || []).every((page: any) => !String(page.id).includes(storeBId))).toBe(true);
   });
 
   it('TC-STORE-003: Storefront resolves active store by slug and returns store metadata & theme', async () => {
