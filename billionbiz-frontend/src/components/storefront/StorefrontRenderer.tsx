@@ -89,8 +89,8 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
   );
   const headerEditorProps = headerSectionForChrome?.props || {};
   const footerEditorConfig = footerSectionForChrome?.props?._footerEditor || {};
-  const publishedFooterTree = Array.isArray(footerEditorConfig.tree) ? footerEditorConfig.tree : [];
-  const publishedFooterRows = Array.isArray(footerEditorConfig.rows) ? footerEditorConfig.rows : [];
+  const publishedFooterTree = Array.isArray(footerEditorConfig.tree) ? footerEditorConfig.tree : undefined;
+  const publishedFooterRows = Array.isArray(footerEditorConfig.rows) ? footerEditorConfig.rows : undefined;
   const maintenanceMode = settings?.maintenance_mode ?? (settings as any)?.maintenanceMode ?? false;
   const passwordEnabled = settings?.password_enabled ?? (settings as any)?.passwordEnabled ?? false;
 
