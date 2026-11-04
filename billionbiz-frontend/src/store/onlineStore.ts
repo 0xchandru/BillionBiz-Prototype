@@ -4,6 +4,7 @@ import { apiClient } from '../api/client';
 import { defaultPropsMap, sectionNameMap } from '../components/editor/SectionRenderer';
 import { getAllPageConfigs } from '../components/editor/pageConfigs';
 import { createHeroBannerInstance } from '../components/editor/sectionEngine/heroBannerDefinition';
+import { createFeaturedCollectionInstance } from '../components/editor/sectionEngine/featuredCollectionDefinition';
 import type { PageCategory } from '../components/editor/pageConfigs/types';
 import { useContentStateStore } from './contentStateStore';
 import {
@@ -120,6 +121,9 @@ const createSectionId = (): string => {
 const createSection = (id: string, type: string, overrides?: Partial<SectionData>): SectionData => {
   if (type === 'HeroBanner' && !overrides) {
     return createHeroBannerInstance(id, sectionNameMap[type] || 'Hero Banner') as SectionData;
+  }
+  if (type === 'FeaturedCollection' && !overrides) {
+    return createFeaturedCollectionInstance(id, sectionNameMap[type] || 'Featured Collection') as SectionData;
   }
 
   return {
