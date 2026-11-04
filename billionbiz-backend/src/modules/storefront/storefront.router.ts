@@ -481,6 +481,66 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
   });
 });
 
+// POST /api/v1/storefront/by-slug/:slug/password/verify
+// Password checks happen on the server; the hash is never exposed to the storefront.
+const passwordAttemptBuckets = new Map<string, { count: number; resetAt: number }>();
+storefrontRouter.post('/by-slug/:slug/password/verify', async (req: Request, res: Response) => {
+  const slug = String(req.params.slug || '').trim().toLowerCase();
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  if (!slug || !password) {
+    return res.status(400).json({ error: 'PASSWORD_REQUIRED', verified: false, message: 'Enter the storefront password.' });
+  }
+
+  const storeRes = await query(
+    `SELECT s.id, ss.password_enabled, ss.password_hash
+     FROM stores s
+     JOIN storefront_settings ss ON ss.store_id = s.id
+     WHERE LOWER(s.slug) = LOWER($1) AND s.status != 'SUSPENDED'
+     LIMIT 1`,
+    [slug]
+  );
+  if (storeRes.rowCount === 0) {
+    return res.status(404).json({ error: 'STORE_NOT_FOUND', verified: false });
+  }
+
+  const store = storeRes.rows[0];
+  if (!store.password_enabled) {
+    return res.json({ verified: true });
+  }
+  if (!store.password_hash) {
+    return res.status(409).json({
+      error: 'PASSWORD_CONFIGURATION_ERROR',
+      verified: false,
+      message: 'Password protection is enabled but no password has been configured.'
+    });
+  }
+
+  const now = Date.now();
+  const attemptKey = `${req.ip || 'unknown'}:${store.id}`;
+  const bucket = passwordAttemptBuckets.get(attemptKey);
+  if (bucket && bucket.resetAt > now && bucket.count >= 10) {
+    return res.status(429).json({
+      error: 'TOO_MANY_ATTEMPTS',
+      verified: false,
+      message: 'Too many password attempts. Please wait before trying again.'
+    });
+  }
+  if (!bucket || bucket.resetAt <= now) {
+    passwordAttemptBuckets.set(attemptKey, { count: 0, resetAt: now + 10 * 60 * 1000 });
+  }
+
+  const verified = await bcrypt.compare(password, store.password_hash);
+  if (!verified) {
+    const activeBucket = passwordAttemptBuckets.get(attemptKey)!;
+    activeBucket.count += 1;
+    passwordAttemptBuckets.set(attemptKey, activeBucket);
+    return res.json({ verified: false, message: 'Incorrect storefront password.' });
+  }
+
+  passwordAttemptBuckets.delete(attemptKey);
+  return res.json({ verified: true });
+});
+
 // GET /api/v1/storefront/render (Render active storefront or draft preview)
 storefrontRouter.get('/render', requireAuth, resolveTenant, async (req: Request, res: Response) => {
   const storeId = req.tenant!.storeId;
