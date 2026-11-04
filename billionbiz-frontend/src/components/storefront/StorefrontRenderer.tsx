@@ -22,6 +22,7 @@ export interface StorefrontRendererProps {
     name?: string;
     slug?: string;
     primary_domain?: string;
+    currency?: string;
   };
   brand?: {
     name?: string;
@@ -140,6 +141,7 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
           products={products}
           categories={categories}
           offerings={offerings}
+          currencyCode={store?.currency || 'INR'}
           onNavigate={handleNavigate}
           device={runtimeDevice}
           sections={homePage?.sections || []}
