@@ -482,7 +482,7 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
 });
 
 // GET /api/v1/storefront/render (Render active storefront or draft preview)
-storefrontRouter.get('/render', requireAuth, resolveTenant, async (req: Request, res: Response) => {
+storefrontRouter.get('/render', resolveTenant, requireAuth, async (req: Request, res: Response) => {
   const storeId = req.tenant!.storeId;
   const storeRes = await query(`SELECT id, name, slug, currency, timezone, status FROM stores WHERE id = $1`, [storeId]);
   const store = storeRes.rows[0];
