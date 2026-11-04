@@ -39,6 +39,7 @@ export function isThemeModified(theme: GlobalThemeData): boolean {
     !isDeepEqual(theme.typography, preset.typography) ||
     !isDeepEqual(theme.buttons, preset.buttons) ||
     !isDeepEqual(theme.effects, preset.effects) ||
+    !isSpacingDefault(theme) ||
     !isDeepEqual(theme.ui, preset.ui) ||
     Boolean(theme.customCss && theme.customCss.trim().length > 0)
   );
