@@ -11,7 +11,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:migrate": "tsx src/db/migrate.ts",
-    "db:seed": "tsx src/db/seed.ts"
+    "db:seed": "tsx src/db/seed.ts",
+    "bbiz": "powershell -NoProfile -ExecutionPolicy Bypass -File cli/bbiz.ps1",
+    "service:install": "powershell -NoProfile -ExecutionPolicy Bypass -File cli/bbiz.ps1 service install",
+    "service:uninstall": "powershell -NoProfile -ExecutionPolicy Bypass -File cli/bbiz.ps1 service uninstall",
+    "service:status": "powershell -NoProfile -ExecutionPolicy Bypass -File cli/bbiz.ps1 status"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -36,6 +40,7 @@
     "@types/pg": "^8.11.10",
     "@types/uuid": "^10.0.0",
     "@types/ws": "^8.18.2",
+    "node-windows": "^1.0.0-beta.8",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vitest": "^3.0.4"

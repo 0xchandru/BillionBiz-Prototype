@@ -1,0 +1,21 @@
+<service>
+  <id>BillionBizBackend</id>
+  <name>BillionBiz Backend Service</name>
+  <description>Authoritative BillionBiz Platform Backend REST API Server</description>
+  <executable>C:\Program Files\nodejs\node.exe</executable>
+  <arguments>dist/server.js</arguments>
+  <workingdirectory>C:\Users\cyber\OneDrive\Desktop\Shoum\BillionBiz-Prototype\billionbiz-backend</workingdirectory>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>false</delayedAutoStart>
+  <depend>postgresql-x64-18</depend>
+  <logpath>C:\Users\cyber\OneDrive\Desktop\Shoum\BillionBiz-Prototype\billionbiz-backend\service\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  <onfailure action="restart" delay="5 sec" />
+  <onfailure action="restart" delay="10 sec" />
+  <resetfailure>1 hour</resetfailure>
+  <env name="NODE_ENV" value="production" />
+  <env name="PORT" value="8080" />
+</service>
