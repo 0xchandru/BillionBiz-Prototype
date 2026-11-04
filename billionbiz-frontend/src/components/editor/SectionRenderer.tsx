@@ -2,6 +2,8 @@ import React from 'react';
 
 import type { SectionData } from '../../store/siteStore';
 import { resolveSectionProps } from './theme/themeResolver';
+import './sectionEngine/builtins';
+import { sectionInstanceToRendererProps } from './sectionEngine/documentAdapter';
 import AnnouncementBarSection from './sections/AnnouncementBarSection';
 import HeaderNavbarSection from './sections/HeaderNavbarSection';
 import UtilityBarSection from './sections/UtilityBarSection';
@@ -626,20 +628,25 @@ export const SectionRenderer: React.FC<{
   overrideDevice?: string;
   isEditorInteractive?: boolean;
   useEditorModel?: boolean;
-}> = ({ section, overrideDevice, isEditorInteractive = false, useEditorModel = false }) => {
+  onNavigate?: (path: string) => void;
+}> = ({ section, overrideDevice, isEditorInteractive = false, useEditorModel = false, onNavigate }) => {
   const device = overrideDevice || 'desktop';
+  const sectionDocument = section.schemaVersion
+    ? sectionInstanceToRendererProps(section)
+    : { ...(section.props || {}) };
+  const isEnabled = section.enabled !== false && section.isHidden !== true;
 
-  if (section.isHidden) return null;
+  if (!isEnabled) return null;
 
-  // Visibility Rules
-  if (section.props.visibility) {
-    if (device === 'desktop' && section.props.visibility.desktop === false) return null;
-    if (device === 'tablet' && section.props.visibility.tablet === false) return null;
-    if (device === 'mobile' && section.props.visibility.mobile === false) return null;
-
-    // Note: Schedule and Audience visibility are not strictly enforced in the visual editor 
-    // to allow the user to see the section they are working on, but they would be enforced on the live site.
+  // Legacy visibility continues to work while new documents use device overrides.
+  const legacyVisibility = section.props?.visibility;
+  const responsiveVisibility = section.responsiveOverrides?.visibility as any;
+  if (legacyVisibility) {
+    if (device === 'desktop' && legacyVisibility.desktop === false) return null;
+    if (device === 'tablet' && legacyVisibility.tablet === false) return null;
+    if (device === 'mobile' && legacyVisibility.mobile === false) return null;
   }
+  if (responsiveVisibility?.[device] === false) return null;
 
   const Component = sectionMap[section.type];
   if (!Component) {
@@ -666,10 +673,10 @@ export const SectionRenderer: React.FC<{
     full: '100%',
   };
 
-  const widthProp = section.props.sectionWidth || section.props.pageWidth || section.props.layout?.width;
+  const widthProp = sectionDocument.sectionWidth || sectionDocument.pageWidth || sectionDocument.layout?.width;
   const layoutWidth = widthProp ? layoutMap[widthProp as keyof typeof layoutMap] || layoutMap['wide'] : layoutMap['wide'];
 
-  const devicePadding = section.props._padding?.[device] || getDefaultPadding(section.type)[device];
+  const devicePadding = sectionDocument._padding?.[device] || getDefaultPadding(section.type)[device];
 
   const paddingStyle: React.CSSProperties = {
     paddingTop: devicePadding.top !== undefined ? `${devicePadding.top}px` : undefined,
@@ -678,12 +685,12 @@ export const SectionRenderer: React.FC<{
     paddingRight: devicePadding.right !== undefined ? `${devicePadding.right}px` : undefined,
   };
 
-  const marginStyle: React.CSSProperties = section.props._margin ? {
-    marginTop: section.props._margin.top !== undefined ? `${section.props._margin.top}px` : undefined,
-    marginBottom: section.props._margin.bottom !== undefined ? `${section.props._margin.bottom}px` : undefined,
+  const marginStyle: React.CSSProperties = sectionDocument._margin ? {
+    marginTop: sectionDocument._margin.top !== undefined ? `${sectionDocument._margin.top}px` : undefined,
+    marginBottom: sectionDocument._margin.bottom !== undefined ? `${sectionDocument._margin.bottom}px` : undefined,
   } : {};
 
-  const resolvedProps = resolveSectionProps(section.props, section.type);
+  const resolvedProps = resolveSectionProps(sectionDocument, section.type);
 
   return (
     <Component props={{
@@ -693,7 +700,8 @@ export const SectionRenderer: React.FC<{
       useEditorModel,
       _layoutWidth: layoutWidth,
       _paddingStyle: paddingStyle,
-      _marginStyle: marginStyle
+      _marginStyle: marginStyle,
+      onNavigate
     }} />
   );
 };
