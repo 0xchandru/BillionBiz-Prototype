@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { app } from '../src/server.js';
 import { query } from '../src/db/pool.js';
 import { generateToken } from '../src/middleware/auth.js';
+import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 
 async function request(
@@ -204,6 +205,33 @@ describe('V2 Native Storefront Runtime & Multi-Tenant Isolation Suite (REQ-STORE
     expect(res.body.store.slug).toBe(storeASlug);
     expect(res.body.theme).toBeDefined();
     expect(Array.isArray(res.body.products)).toBe(true);
+  });
+
+  it('TC-STORE-003A: Password-protected storefront requires the configured password', async () => {
+    const passwordHash = await bcrypt.hash('storefront-secret-2026', 10);
+    await query(
+      `INSERT INTO storefront_settings (store_id, mode, home_page, password_enabled, password_hash)
+       VALUES ($1, 'COMMERCE', 'LANDING', TRUE, $2)
+       ON CONFLICT (store_id) DO UPDATE SET password_enabled = TRUE, password_hash = EXCLUDED.password_hash`,
+      [storeBId, passwordHash]
+    );
+
+    const invalid = await request('POST', `/api/v1/storefront/by-slug/${storeBSlug}/password/verify`, {
+      body: { password: 'incorrect-password' }
+    });
+    expect(invalid.status).toBe(200);
+    expect(invalid.body.verified).toBe(false);
+
+    const valid = await request('POST', `/api/v1/storefront/by-slug/${storeBSlug}/password/verify`, {
+      body: { password: 'storefront-secret-2026' }
+    });
+    expect(valid.status).toBe(200);
+    expect(valid.body.verified).toBe(true);
+
+    await query(
+      `UPDATE storefront_settings SET password_enabled = FALSE, password_hash = NULL WHERE store_id = $1`,
+      [storeBId]
+    );
   });
 
   it('TC-STORE-004: Two test stores render distinct persisted content and active releases (REQ-STOREFRONT-001)', async () => {
