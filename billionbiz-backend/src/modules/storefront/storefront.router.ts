@@ -34,7 +34,15 @@ storefrontRouter.patch(
 
     const updated = await query(
       `INSERT INTO store_themes (id, store_id, preset_name, palette, typography, buttons, effects, custom_css, version, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, NOW())
+       VALUES (
+         $1, $2, COALESCE($3, 'modern'),
+         COALESCE($4, '{}'::jsonb),
+         COALESCE($5, '{}'::jsonb),
+         COALESCE($6, '{}'::jsonb),
+         COALESCE($7, '{}'::jsonb),
+         COALESCE($8, ''),
+         1, NOW()
+       )
        ON CONFLICT (store_id) DO UPDATE SET
          preset_name = COALESCE($3, store_themes.preset_name),
          palette = COALESCE($4, store_themes.palette),
@@ -48,12 +56,12 @@ storefrontRouter.patch(
       [
         `thm-${uuidv4()}`,
         storeId,
-        presetName || 'modern',
-        JSON.stringify(palette || {}),
-        JSON.stringify(typography || {}),
-        JSON.stringify(buttons || {}),
-        JSON.stringify(effects || {}),
-        customCss || ''
+        presetName ?? null,
+        palette === undefined ? null : JSON.stringify(palette),
+        typography === undefined ? null : JSON.stringify(typography),
+        buttons === undefined ? null : JSON.stringify(buttons),
+        effects === undefined ? null : JSON.stringify(effects),
+        customCss === undefined ? null : customCss
       ]
     );
 
@@ -85,8 +93,17 @@ storefrontRouter.get('/pages', requireAuth, resolveTenant, async (req: Request, 
   const storeId = req.tenant!.storeId;
   let pagesRes = await query(
     `SELECT p.*,
-            (SELECT pd.version FROM page_draft_versions pd WHERE pd.page_id = p.id ORDER BY pd.version DESC LIMIT 1) as draft_version
+            COALESCE(pd.sections, '[]'::jsonb) AS sections,
+            COALESCE(pd.page_props, p.page_props) AS draft_page_props,
+            COALESCE(pd.version, 0) AS draft_version
      FROM store_pages p
+     LEFT JOIN LATERAL (
+       SELECT sections, page_props, version
+       FROM page_draft_versions
+       WHERE page_id = p.id
+       ORDER BY version DESC, created_at DESC
+       LIMIT 1
+     ) pd ON TRUE
      WHERE p.store_id = $1
      ORDER BY p.is_system DESC, p.name ASC`,
     [storeId]
@@ -339,10 +356,10 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
 
   // 1. Latest immutable published release snapshot
   const releaseRes = await query(
-    `SELECT id, release_number, snapshot, content_hash, published_by, notes, created_at
-     FROM store_releases
-     WHERE store_id = $1
-     ORDER BY release_number DESC
+    `SELECT r.id, r.release_number, r.snapshot, r.content_hash, r.published_by, r.notes, r.created_at
+     FROM storefront_settings ss
+     JOIN store_releases r ON r.id = ss.active_release_id AND r.store_id = ss.store_id
+     WHERE ss.store_id = $1
      LIMIT 1`,
     [store.id]
   );
@@ -350,32 +367,48 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
   // 2. Active theme
   const themeRes = await query(`SELECT * FROM store_themes WHERE store_id = $1`, [store.id]);
 
-  // 3. Published pages
-  let pagesRes = await query(
-    `SELECT id, name, path, type, category, status, page_props
-     FROM store_pages
-     WHERE store_id = $1 AND status = 'published'
-     ORDER BY (CASE WHEN path = '/' THEN 0 ELSE 1 END), is_system DESC, name ASC`,
-    [store.id]
-  );
+  // 3. Public pages always come from the immutable active release.
+  let publishedPages = Array.isArray(releaseRes.rows[0]?.snapshot?.pages)
+    ? releaseRes.rows[0].snapshot.pages
+    : [];
 
-  if (pagesRes.rowCount === 0) {
-    await withTransaction(async (client) => {
-      await provisionDefaultStorefront({
-        client,
-        storeId: store.id,
-        storeName: store.name || 'Online Store',
-        storeSlug: store.slug,
-        mode: 'COMMERCE'
-      });
-    });
-    pagesRes = await query(
-      `SELECT id, name, path, type, category, status, page_props
-       FROM store_pages
-       WHERE store_id = $1 AND status = 'published'
-       ORDER BY (CASE WHEN path = '/' THEN 0 ELSE 1 END), is_system DESC, name ASC`,
+  // Backfill only stores that have never had their starter pages provisioned.
+  // Never expose mutable page rows as public storefront content.
+  if (!releaseRes.rows[0]) {
+    const existingPages = await query(
+      `SELECT 1 FROM store_pages WHERE store_id = $1 LIMIT 1`,
       [store.id]
     );
+    if (existingPages.rowCount === 0) {
+      await withTransaction(async (client) => {
+        await provisionDefaultStorefront({
+          client,
+          storeId: store.id,
+          storeName: store.name || 'Online Store',
+          storeSlug: store.slug,
+          mode: 'COMMERCE'
+        });
+      });
+      const refreshedRelease = await query(
+        `SELECT r.id, r.release_number, r.snapshot, r.content_hash, r.published_by, r.notes, r.created_at
+         FROM storefront_settings ss
+         JOIN store_releases r ON r.id = ss.active_release_id AND r.store_id = ss.store_id
+         WHERE ss.store_id = $1
+         LIMIT 1`,
+        [store.id]
+      );
+      releaseRes.rows = refreshedRelease.rows;
+      publishedPages = Array.isArray(refreshedRelease.rows[0]?.snapshot?.pages)
+        ? refreshedRelease.rows[0].snapshot.pages
+        : [];
+    }
+  }
+
+  if (!releaseRes.rows[0]) {
+    return res.status(404).json({
+      error: 'STOREFRONT_NOT_PUBLISHED',
+      message: 'This store does not have an active publication yet.'
+    });
   }
 
   // 4. Active products with variants
@@ -419,7 +452,7 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
     activeRelease: releaseRes.rows[0]?.snapshot || null,
     releaseNumber: releaseRes.rows[0]?.release_number || null,
     theme: themeRes.rows[0] || { preset_name: 'modern', palette: {}, typography: {}, buttons: {}, effects: {} },
-    pages: pagesRes.rows,
+    pages: publishedPages,
     products: productsRes.rows,
     offerings: offeringsRes.rows,
     categories: categoriesRes.rows,
@@ -442,7 +475,7 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
 });
 
 // GET /api/v1/storefront/render (Render active storefront or draft preview)
-storefrontRouter.get('/render', resolveTenant, async (req: Request, res: Response) => {
+storefrontRouter.get('/render', requireAuth, resolveTenant, async (req: Request, res: Response) => {
   const storeId = req.tenant!.storeId;
   const storeRes = await query(`SELECT id, name, slug, currency, timezone, status FROM stores WHERE id = $1`, [storeId]);
   const store = storeRes.rows[0];
@@ -452,7 +485,20 @@ storefrontRouter.get('/render', resolveTenant, async (req: Request, res: Respons
   }
 
   let pagesRes = await query(
-    `SELECT * FROM store_pages WHERE store_id = $1 ORDER BY (CASE WHEN path = '/' THEN 0 ELSE 1 END), is_system DESC, name ASC`,
+    `SELECT p.*,
+            COALESCE(pd.sections, '[]'::jsonb) AS sections,
+            COALESCE(pd.page_props, p.page_props) AS draft_page_props,
+            COALESCE(pd.version, 0) AS draft_version
+     FROM store_pages p
+     LEFT JOIN LATERAL (
+       SELECT sections, page_props, version
+       FROM page_draft_versions
+       WHERE page_id = p.id
+       ORDER BY version DESC, created_at DESC
+       LIMIT 1
+     ) pd ON TRUE
+     WHERE p.store_id = $1
+     ORDER BY (CASE WHEN p.path = '/' THEN 0 ELSE 1 END), p.is_system DESC, p.name ASC`,
     [storeId]
   );
   if (pagesRes.rowCount === 0) {
@@ -474,7 +520,11 @@ storefrontRouter.get('/render', resolveTenant, async (req: Request, res: Respons
 
   const themeRes = await query(`SELECT * FROM store_themes WHERE store_id = $1`, [storeId]);
   const latestRel = await query(
-    `SELECT snapshot, release_number, content_hash FROM store_releases WHERE store_id = $1 ORDER BY release_number DESC LIMIT 1`,
+    `SELECT r.id, r.snapshot, r.release_number, r.content_hash
+     FROM storefront_settings ss
+     JOIN store_releases r ON r.id = ss.active_release_id AND r.store_id = ss.store_id
+     WHERE ss.store_id = $1
+     LIMIT 1`,
     [storeId]
   );
 
@@ -546,31 +596,69 @@ storefrontRouter.patch(
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const pageId = req.params.id as string;
-    const { sections, pageProps } = req.body;
+    const { sections, pageProps, expectedVersion } = req.body;
 
-    const pageRes = await query(`SELECT id FROM store_pages WHERE id = $1 AND store_id = $2`, [pageId, storeId]);
-    if (pageRes.rowCount === 0) {
-      return res.status(404).json({ error: 'PAGE_NOT_FOUND', message: 'Page not found' });
+    if (!Array.isArray(sections)) {
+      return res.status(400).json({ error: 'INVALID_DRAFT', message: 'Sections must be an array.' });
+    }
+    if (pageProps !== undefined && (!pageProps || typeof pageProps !== 'object' || Array.isArray(pageProps))) {
+      return res.status(400).json({ error: 'INVALID_DRAFT', message: 'Page properties must be an object.' });
+    }
+    if (expectedVersion !== undefined && (!Number.isInteger(Number(expectedVersion)) || Number(expectedVersion) < 0)) {
+      return res.status(400).json({ error: 'INVALID_DRAFT_VERSION', message: 'Expected draft version must be a non-negative integer.' });
     }
 
-    const nextVerRes = await query(
-      `SELECT COALESCE(MAX(version), 0) + 1 as next_ver FROM page_draft_versions WHERE page_id = $1`,
-      [pageId]
-    );
-    const nextVer = nextVerRes.rows[0].next_ver;
+    let pageNotFound = false;
+    let versionConflict: { currentVersion: number } | null = null;
+    let nextVersion = 0;
 
-    await query(
-      `INSERT INTO page_draft_versions (id, page_id, version, sections, page_props, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [`draft-${uuidv4()}`, pageId, nextVer, JSON.stringify(sections || []), JSON.stringify(pageProps || {}), req.auth?.userId]
-    );
+    await withTransaction(async (client) => {
+      // Lock the page row so concurrent autosaves allocate distinct versions.
+      const pageRes = await client.query(
+        `SELECT id FROM store_pages WHERE id = $1 AND store_id = $2 FOR UPDATE`,
+        [pageId, storeId]
+      );
+      if (pageRes.rowCount === 0) {
+        pageNotFound = true;
+        return;
+      }
 
-    await query(
-      `UPDATE store_pages SET status = 'draft', updated_at = NOW() WHERE id = $1`,
-      [pageId]
-    );
+      const latestRes = await client.query(
+        `SELECT version FROM page_draft_versions WHERE page_id = $1 ORDER BY version DESC LIMIT 1`,
+        [pageId]
+      );
+      const currentVersion = Number(latestRes.rows[0]?.version || 0);
+      if (expectedVersion !== undefined && Number(expectedVersion) !== currentVersion) {
+        versionConflict = { currentVersion };
+        return;
+      }
 
-    res.json({ message: 'Draft saved successfully', pageId, version: nextVer });
+      nextVersion = currentVersion + 1;
+      await client.query(
+        `INSERT INTO page_draft_versions (id, page_id, version, sections, page_props, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [`draft-${uuidv4()}`, pageId, nextVersion, JSON.stringify(sections), JSON.stringify(pageProps || {}), req.auth?.userId]
+      );
+
+      await client.query(
+        `UPDATE store_pages SET status = 'draft', updated_at = NOW()
+         WHERE id = $1 AND store_id = $2`,
+        [pageId, storeId]
+      );
+    });
+
+    if (pageNotFound) {
+      return res.status(404).json({ error: 'PAGE_NOT_FOUND', message: 'Page not found' });
+    }
+    if (versionConflict) {
+      return res.status(409).json({
+        error: 'DRAFT_VERSION_CONFLICT',
+        message: 'This page draft changed in another session. Refresh the draft before saving again.',
+        currentVersion: versionConflict.currentVersion
+      });
+    }
+
+    res.json({ message: 'Draft saved successfully', pageId, version: nextVersion });
   }
 );
 
