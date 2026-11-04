@@ -77,10 +77,12 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
     }
   };
 
-  const brandDisplayName = brand?.brand_name || store?.name || 'Online Store';
+  const brandDisplayName = brand?.brand_name || brand?.name || store?.name || 'Online Store';
+  const maintenanceMode = settings?.maintenance_mode ?? (settings as any)?.maintenanceMode ?? false;
+  const passwordEnabled = settings?.password_enabled ?? (settings as any)?.passwordEnabled ?? false;
 
   // Check Maintenance Mode
-  if (settings?.maintenance_mode && !previewMode) {
+  if (maintenanceMode && !previewMode) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50 dark:bg-slate-950 text-center">
         <div className="max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 space-y-4 shadow-sm">
@@ -97,9 +99,9 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
   }
 
   // Check Password Protection
-  if (settings?.password_enabled && !isPasswordUnlocked && !previewMode) {
+  if (passwordEnabled && !isPasswordUnlocked && !previewMode) {
     return (
-      <ThemeTokenProvider tokens={themeTokens}>
+      <ThemeTokenProvider theme={themeTokens}>
         <PasswordGateView
           brandName={brandDisplayName}
           tagline={brand?.tagline}
@@ -273,9 +275,9 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
         brand={{
           name: brandDisplayName,
           tagline: brand?.tagline,
-          logoUrl: brand?.logo_url,
-          faviconUrl: brand?.favicon_url,
-          socialLinks: brand?.social_links
+          logoUrl: brand?.logo_url || (brand as any)?.logoUrl,
+          faviconUrl: brand?.favicon_url || (brand as any)?.faviconUrl,
+          socialLinks: brand?.social_links || (brand as any)?.socialLinks
         }}
         previewMode={previewMode}
         onNavigate={handleNavigate}
