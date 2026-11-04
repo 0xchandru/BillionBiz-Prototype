@@ -25,6 +25,7 @@ import { getPageConfig } from './pageConfigs';
 import styles from '../../pages/editor/EditorLayout.module.css';
 import type { EditorPanelType } from '../../store/landingEditorStore';
 import { getEditorPath, resolveHeaderRowId } from './utils/editorNavigation';
+import { resolveEditorPage } from './utils/pageIdentity';
 
 // ─── Icon mapping for pages matching user specification ───
 const pageIconMap: Record<string, React.FC<{ size?: number }>> = {
@@ -141,7 +142,7 @@ export const EditorLeftSidebar: React.FC = () => {
     isRightSidebarOpen, setRightSidebarOpen,
   } = useLandingEditorStore();
   const { pages, updatePageProps, removeSection } = useSiteStore();
-  const activePage = pages.find(p => p.id === selectedPageId) || pages[0];
+  const activePage = resolveEditorPage(pages, selectedPageId) || pages[0];
 
   const headerBarTypes = ['AnnouncementBar', 'UtilityBar'];
   const footerBarTypes = ['FooterTrust', 'FooterNewsletter', 'FooterSocial', 'FooterBottom', 'FooterMenu', 'FooterText'];
