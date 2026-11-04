@@ -36,8 +36,8 @@ export const StoreLayout: React.FC<StoreLayoutProps> = ({
   children,
   onNavigate,
   headerProps,
-  footerTree = [],
-  footerRows = [],
+  footerTree,
+  footerRows,
   useEditorChrome = false
 }) => {
   const { items, isOpen, setIsOpen, updateQuantity, removeItem, getSubtotal, getTotalCount } = useStorefrontCartStore();
@@ -69,13 +69,13 @@ export const StoreLayout: React.FC<StoreLayoutProps> = ({
       </main>
 
       {/* 3. Global Storefront Footer */}
-      <footer className="w-full bg-[var(--theme-footer-bg)] text-[var(--theme-footer-text)] mt-auto border-t border-[var(--theme-footer-border)]">
+      <div className="w-full mt-auto">
         <FooterTreeRenderer
           tree={useEditorChrome ? undefined : footerTree}
           rows={useEditorChrome ? undefined : footerRows}
           isEditorInteractive={useEditorChrome}
         />
-      </footer>
+      </div>
 
       {/* 4. Slide-Over Cart Drawer */}
       {isOpen && (
