@@ -179,21 +179,23 @@ export function validateSectionInstance(
       issues.push({ path: `section.blocks[${index}]`, code: 'invalid-shape', message: 'A block needs a string ID and type.' });
       return;
     }
-    if (ids.has(rawBlock.id)) {
+    const blockId = rawBlock.id as string;
+    const blockType = rawBlock.type as string;
+    if (ids.has(blockId)) {
       issues.push({ path: `section.blocks[${index}].id`, code: 'duplicate-id', message: 'Block IDs must be unique within a section.' });
     }
-    ids.add(rawBlock.id);
+    ids.add(blockId);
 
-    if (!definition.allowedBlocks.includes(rawBlock.type)) {
-      issues.push({ path: `section.blocks[${index}].type`, code: 'unknown-block', message: `Block "${rawBlock.type}" is not allowed in ${definition.label}.` });
+    if (!definition.allowedBlocks.includes(blockType)) {
+      issues.push({ path: `section.blocks[${index}].type`, code: 'unknown-block', message: `Block "${blockType}" is not allowed in ${definition.label}.` });
       return;
     }
-    const blockDefinition = blockDefinitions.get(rawBlock.type);
+    const blockDefinition = blockDefinitions.get(blockType);
     if (!blockDefinition || !blockDefinition.allowedSections.includes(instance.type)) {
       issues.push({ path: `section.blocks[${index}].type`, code: 'unknown-block', message: 'No compatible block definition is registered.' });
       return;
     }
-    counts.set(rawBlock.type, (counts.get(rawBlock.type) || 0) + 1);
+    counts.set(blockType, (counts.get(blockType) || 0) + 1);
     issues.push(...validateSettings(
       blockDefinition.settings,
       rawBlock.settings,
