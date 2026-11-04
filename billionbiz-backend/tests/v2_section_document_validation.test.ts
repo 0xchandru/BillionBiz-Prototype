@@ -41,11 +41,66 @@ const validHero = (): any => ({
   props: {}
 });
 
+
+const validFeaturedCollection = (): any => ({
+  id: 'section-featured',
+  type: 'FeaturedCollection',
+  name: 'Featured Collection',
+  isHidden: false,
+  schemaVersion: 1,
+  enabled: true,
+  settings: {
+    heading: 'Featured Collection',
+    description: 'Our latest products',
+    linkText: 'View all',
+    linkUrl: '/shop',
+    layout: 'grid',
+    columns: 4,
+    productLimit: 8,
+    emptyStateText: 'Add and activate products in your catalogue.'
+  },
+  blocks: [
+    makeBlock('product-card-1', 'product-card-template', {
+      showPrice: true,
+      showCompareAt: true,
+      showVendor: false,
+      showAddToCart: true
+    })
+  ],
+  designOverrides: {},
+  responsiveOverrides: {},
+  props: {}
+});
+
 describe('BillionBiz versioned section document validation', () => {
   it('accepts a valid versioned Hero Banner', () => {
     const result = validatePageSectionDocument([validHero()]);
     expect(result.valid).toBe(true);
     expect(result.issues).toHaveLength(0);
+  });
+
+  it('accepts a versioned Featured Collection bound to live catalogue data', () => {
+    const result = validatePageSectionDocument([validFeaturedCollection()]);
+    expect(result.valid).toBe(true);
+    expect(result.issues).toHaveLength(0);
+  });
+
+  it('rejects copied product arrays in Featured Collection settings', () => {
+    const featured = validFeaturedCollection();
+    featured.settings.products = [{ id: 'fake', name: 'Copied product', price_minor: 100 }];
+    const result = validatePageSectionDocument([featured]);
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.path.endsWith('.settings.products'))).toBe(true);
+  });
+
+  it('rejects unsafe links and invalid product card template settings', () => {
+    const featured = validFeaturedCollection();
+    featured.settings.linkUrl = 'javascript:alert(1)';
+    featured.blocks[0].settings.showAddToCart = 'yes';
+    const result = validatePageSectionDocument([featured]);
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.path.endsWith('.settings.linkUrl'))).toBe(true);
+    expect(result.issues.some((issue) => issue.path.endsWith('.settings.showAddToCart'))).toBe(true);
   });
 
   it('continues to accept legacy sections during incremental migration', () => {
