@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, Plus, Trash2, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Trash2, X } from 'lucide-react';
 import { useSiteStore, type SectionData } from '../../../store/siteStore';
 import { getBlockDefinition } from './registry';
 import './builtins';
