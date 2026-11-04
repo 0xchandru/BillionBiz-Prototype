@@ -1244,6 +1244,25 @@ storefrontRouter.patch(
     const storeId = req.tenant!.storeId;
     const { passwordEnabled, password, maintenanceMode, redirects, seoDefaults, primaryDomain } = req.body;
 
+    if (primaryDomain !== undefined && primaryDomain !== null && String(primaryDomain).trim() !== '') {
+      const domainCheck = await query(
+        `SELECT 1
+         FROM store_domains
+         WHERE store_id = $1
+           AND LOWER(domain) = LOWER($2)
+           AND is_verified = TRUE
+           AND UPPER(ssl_status) = 'ACTIVE'
+         LIMIT 1`,
+        [storeId, String(primaryDomain).trim()]
+      );
+      if (domainCheck.rowCount === 0) {
+        return res.status(409).json({
+          error: 'DOMAIN_NOT_READY',
+          message: 'Only a domain mapped to this store with completed verification and active HTTPS can be selected as the primary storefront domain.'
+        });
+      }
+    }
+
     let passwordHash: string | null = null;
     if (password && password.trim().length >= 4) {
       passwordHash = await bcrypt.hash(password.trim(), 10);
