@@ -97,7 +97,7 @@ if (process.env.NODE_ENV !== 'test') {
 realtimeGateway.init(server);
 
 // Health check endpoints (REQ-OPS-003)
-app.get('/health', async (req, res) => {
+app.get(['/health', '/api/v1/health'], async (req, res) => {
   try {
     const dbCheck = await pool.query('SELECT 1;');
     res.json({

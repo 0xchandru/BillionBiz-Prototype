@@ -102,7 +102,7 @@ storefrontRouter.get('/pages', requireAuth, resolveTenant, async (req: Request, 
           storeName: storeInfo.rows[0].name || 'Online Store',
           storeSlug: storeInfo.rows[0].slug || 'store',
           mode: 'COMMERCE',
-          userId: req.tenant?.userId
+          userId: req.auth?.userId
         });
       });
       pagesRes = await query(
@@ -462,7 +462,7 @@ storefrontRouter.get('/render', resolveTenant, async (req: Request, res: Respons
         storeName: store.name || 'Online Store',
         storeSlug: store.slug || 'store',
         mode: 'COMMERCE',
-        userId: req.tenant?.userId
+        userId: req.auth?.userId
       });
     });
     pagesRes = await query(
