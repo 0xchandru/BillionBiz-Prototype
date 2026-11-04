@@ -918,10 +918,10 @@ storefrontRouter.get('/brand', requireAuth, resolveTenant, async (req: Request, 
   );
   const storeRes = await query(`SELECT name FROM stores WHERE id = $1`, [storeId]);
   const s = settingsRes.rows[0] || {};
-  const businessName = storeRes.rows[0]?.name || s.brand_name || 'My Store';
+  const brandDisplayName = s.brand_name || storeRes.rows[0]?.name || 'My Store';
   res.json({
     brand: {
-      name: businessName,
+      name: brandDisplayName,
       tagline: s.tagline || '',
       logoUrl: s.logo_url || '',
       faviconUrl: s.favicon_url || '',
@@ -939,13 +939,13 @@ storefrontRouter.patch(
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const { name, brandName, tagline, logoUrl, faviconUrl, socialLinks } = req.body;
-    const effectiveBrandName = brandName || name;
+    const effectiveBrandName = brandName ?? name;
 
-    if (effectiveBrandName && effectiveBrandName.trim()) {
-      await query(`UPDATE stores SET name = $1, updated_at = NOW() WHERE id = $2`, [effectiveBrandName.trim(), storeId]);
-      if (req.tenant?.organizationId) {
-        await query(`UPDATE organizations SET name = $1, updated_at = NOW() WHERE id = $2`, [effectiveBrandName.trim(), req.tenant.organizationId]);
-      }
+    if (effectiveBrandName !== undefined && (typeof effectiveBrandName !== 'string' || !effectiveBrandName.trim())) {
+      return res.status(400).json({
+        error: 'INVALID_BRAND_NAME',
+        message: 'Brand display name must be a non-empty string.'
+      });
     }
 
     const updated = await query(
