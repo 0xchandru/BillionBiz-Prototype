@@ -4090,3 +4090,236 @@
   box-shadow: 0 12px 24px -4px rgba(0, 0, 0, 0.15);
   z-index: 999;
 }
+
+/* ============================================================
+   STORE CANVAS V2 — five-workspace editor shell
+   ============================================================ */
+:root {
+  --editor-bg: #f4f6f8;
+  --panel-bg: #ffffff;
+  --border-color: #e4e8ee;
+  --text-main: #172033;
+  --text-muted: #687386;
+  --primary: #18794e;
+  --primary-hover: #12623f;
+  --primary-light: rgba(24, 121, 78, 0.09);
+  --radius-sm: 7px;
+  --radius-md: 11px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-md: 0 5px 18px rgba(16, 24, 40, 0.06);
+  --shadow-float: 0 18px 50px rgba(16, 24, 40, 0.12);
+}
+
+.editorWrapper {
+  background: var(--editor-bg);
+  color: var(--text-main);
+}
+
+.topBar {
+  height: 54px;
+  padding: 0 18px;
+  background: rgba(255, 255, 255, 0.96);
+  border-bottom-color: #e6eaf0;
+  box-shadow: 0 1px 0 rgba(16, 24, 40, 0.02);
+}
+
+.leftPanel {
+  width: 292px;
+  min-width: 292px;
+  border-right-color: #e5e9ef;
+  box-shadow: 3px 0 14px rgba(16, 24, 40, 0.025);
+}
+
+.rightPanel {
+  width: 356px;
+  border-left-color: #e5e9ef;
+  box-shadow: -3px 0 14px rgba(16, 24, 40, 0.025);
+}
+
+.rightPanelHidden {
+  transform: translateX(356px);
+}
+
+.horizontalTabBar {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  align-items: stretch;
+  min-height: 62px;
+  padding: 5px 6px 0;
+  gap: 2px;
+  background: #fbfcfd;
+  border-bottom: 1px solid #e8ecf2;
+}
+
+.horizontalTabBtn {
+  min-width: 0;
+  padding: 7px 2px 6px;
+  gap: 4px;
+  color: #758094;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 8px 8px 0 0;
+  font-size: 10px;
+  font-weight: 600;
+  transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
+}
+
+.horizontalTabBtn:hover {
+  color: #172033;
+  background: #f1f5f9;
+}
+
+.horizontalTabBtnActive {
+  color: #126b46;
+  background: #fff;
+  border-bottom-color: #18794e;
+  box-shadow: inset 0 1px 0 #e9f5ef;
+}
+
+.horizontalTabIcon {
+  width: 17px;
+  height: 17px;
+}
+
+.horizontalTabLabel {
+  display: block;
+  max-width: 100%;
+  min-height: 20px;
+  overflow: hidden;
+  font-size: 9.5px;
+  line-height: 1.05;
+  letter-spacing: -0.12px;
+  white-space: normal;
+  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+}
+
+.sidebarPanelBody {
+  background: #fff;
+}
+
+.contextPanelHeader {
+  min-height: 66px;
+  padding: 15px 16px;
+  border-bottom-color: #edf0f4;
+}
+
+.contextPanelTitle {
+  color: #172033;
+  font-size: 13px;
+  letter-spacing: -0.02em;
+}
+
+.contextPanelDesc {
+  color: #788397;
+  font-size: 10.5px;
+}
+
+.navGroup {
+  margin: 10px 9px 16px;
+}
+
+.navGroupTitle {
+  padding: 8px 8px 7px;
+  color: #929bad;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+}
+
+.navItem {
+  min-height: 48px;
+  padding: 8px 9px;
+  border-radius: 9px;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.navItem:hover {
+  background: #f6f8fa;
+}
+
+.navItemActive {
+  background: #eef7f1;
+  box-shadow: inset 2px 0 0 #18794e;
+}
+
+.navItemLabel {
+  color: #344054;
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.navItemLabelActive {
+  color: #126b46;
+}
+
+.navItemPath {
+  color: #8a94a6;
+  font-size: 9.5px;
+  line-height: 1.35;
+}
+
+.panelHeader {
+  min-height: 56px;
+  border-bottom-color: #edf0f4;
+}
+
+.propContent {
+  background: #fff;
+}
+
+@media (max-width: 1280px) {
+  .leftPanel {
+    width: 250px;
+    min-width: 250px;
+  }
+
+  .rightPanel {
+    width: 320px;
+  }
+
+  .rightPanelHidden {
+    transform: translateX(320px);
+  }
+}
+
+@media (max-width: 1024px) {
+  .leftPanel {
+    width: 220px;
+    min-width: 220px;
+  }
+
+  .horizontalTabBar {
+    min-height: 58px;
+    padding-inline: 3px;
+  }
+
+  .horizontalTabBtn {
+    padding-inline: 1px;
+  }
+
+  .horizontalTabLabel {
+    font-size: 8.5px;
+  }
+}
+
+@media (max-width: 760px) {
+  .topBar {
+    height: 48px;
+    padding-inline: 8px;
+  }
+
+  .leftPanel {
+    width: 205px;
+    min-width: 205px;
+  }
+
+  .horizontalTabBar {
+    min-height: 54px;
+  }
+
+  .rightPanel {
+    width: min(88vw, 340px);
+  }
+}
