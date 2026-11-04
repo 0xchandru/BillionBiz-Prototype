@@ -321,6 +321,9 @@ export const StorefrontPreview: React.FC<StorefrontPreviewProps> = ({
           />
         </StorefrontPreviewViewport>
       )}
-
+    </div>
+  );
 };
+
+export default StorefrontPreview;
 
