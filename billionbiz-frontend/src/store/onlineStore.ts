@@ -315,14 +315,14 @@ export const getInitialPages = (): PageData[] => [
 ];
 
 export const getInitialSettings = (): Record<string, any> => {
-  const dynamicStoreName = (typeof window !== 'undefined' ? localStorage.getItem('billionbiz_store_name') : null) || 'Chandru Store';
+  const dynamicStoreName = (typeof window !== 'undefined' ? localStorage.getItem('billionbiz_store_name') : null) || 'Your store';
   return {
     storeName: dynamicStoreName,
     siteName: dynamicStoreName,
-    tagline: 'Handcrafted Quality & Direct Commerce',
-    description: `Official online store for ${dynamicStoreName}.`,
+    tagline: '',
+    description: '',
     language: 'English',
-    announcement: 'Free shipping on orders above $99',
+    announcement: '',
     copyright: `© ${new Date().getFullYear()} ${dynamicStoreName}. All rights reserved.`,
     showBottomNav: true,
     bottomNavLinks: [
