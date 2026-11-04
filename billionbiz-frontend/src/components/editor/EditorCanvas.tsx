@@ -40,7 +40,7 @@ export const EditorCanvas: React.FC = () => {
          scrollPreviewToHeaderSection(targetId || 'header-main');
          return;
       }
-      if (selectedSectionId && selectedPageId === 'landing-page') {
+      if (selectedSectionId && activePage?.path === '/') {
          scrollPreviewToSection(selectedSectionId);
          return;
       }
@@ -49,7 +49,7 @@ export const EditorCanvas: React.FC = () => {
          el.scrollTop = 0;
          el.classList.remove(styles.isScrolled);
       });
-   }, [selectedPageId, pagesNavLevel, activePanel, selectedSectionId, selectedTarget]);
+   }, [selectedPageId, pagesNavLevel, activePanel, selectedSectionId, selectedTarget, activePage?.path]);
 
    // ─── Determine what to render in the canvas ───
    const renderCanvasContent = () => {
