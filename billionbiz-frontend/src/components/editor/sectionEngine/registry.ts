@@ -143,6 +143,7 @@ export function validateSectionInstance(
   }
 
   const issues: ValidationIssue[] = [];
+  const sectionType = instance.type as string;
   if (Number(instance.schemaVersion) !== definition.schemaVersion) {
     issues.push({
       path: 'section.schemaVersion',
@@ -191,7 +192,7 @@ export function validateSectionInstance(
       return;
     }
     const blockDefinition = blockDefinitions.get(blockType);
-    if (!blockDefinition || !blockDefinition.allowedSections.includes(instance.type)) {
+    if (!blockDefinition || !blockDefinition.allowedSections.includes(sectionType)) {
       issues.push({ path: `section.blocks[${index}].type`, code: 'unknown-block', message: 'No compatible block definition is registered.' });
       return;
     }
