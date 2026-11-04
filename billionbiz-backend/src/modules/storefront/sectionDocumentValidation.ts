@@ -212,6 +212,89 @@ function validateVersionedHeroBanner(
   }
 }
 
+function validateVersionedFeaturedCollection(
+  section: AnyRecord,
+  index: number,
+  issues: SectionDocumentValidationResult['issues']
+): void {
+  const path = `sections[${index}]`;
+  if (section.schemaVersion !== 1 || typeof section.enabled !== 'boolean') {
+    issues.push({ path, message: 'Featured Collection must use schema version 1 and an enabled flag.' });
+  }
+
+  const allowedSettings = new Set([
+    'heading', 'description', 'linkText', 'linkUrl', 'layout',
+    'columns', 'productLimit', 'emptyStateText'
+  ]);
+  if (!isRecord(section.settings)) {
+    issues.push({ path: `${path}.settings`, message: 'Featured Collection settings must be an object.' });
+  } else {
+    const settings = section.settings;
+    for (const key of Object.keys(settings)) {
+      if (!allowedSettings.has(key)) {
+        issues.push({ path: `${path}.settings.${key}`, message: 'This setting is not registered. Product data must remain a live catalogue binding.' });
+      }
+    }
+    if (!isSafeText(settings.heading, 100) || !settings.heading.trim()) {
+      issues.push({ path: `${path}.settings.heading`, message: 'Featured Collection heading is required and limited to 100 characters.' });
+    }
+    if (!isSafeText(settings.description, 300)) {
+      issues.push({ path: `${path}.settings.description`, message: 'Featured Collection description is limited to 300 characters.' });
+    }
+    if (!isSafeText(settings.linkText, 30)) {
+      issues.push({ path: `${path}.settings.linkText`, message: 'View-all label is limited to 30 characters.' });
+    }
+    if (!isSafeLink(settings.linkUrl)) {
+      issues.push({ path: `${path}.settings.linkUrl`, message: 'View-all destination must be a safe http(s), relative, anchor, mailto or tel URL.' });
+    }
+    if (!['grid', 'carousel'].includes(settings.layout)) {
+      issues.push({ path: `${path}.settings.layout`, message: 'Featured Collection layout is not registered.' });
+    }
+    if (!Number.isInteger(settings.columns) || settings.columns < 2 || settings.columns > 5) {
+      issues.push({ path: `${path}.settings.columns`, message: 'Desktop columns must be an integer between 2 and 5.' });
+    }
+    if (!Number.isInteger(settings.productLimit) || settings.productLimit < 1 || settings.productLimit > 24) {
+      issues.push({ path: `${path}.settings.productLimit`, message: 'Product limit must be an integer between 1 and 24.' });
+    }
+    if (!isSafeText(settings.emptyStateText, 240)) {
+      issues.push({ path: `${path}.settings.emptyStateText`, message: 'Empty-state text is limited to 240 characters.' });
+    }
+  }
+
+  if (!Array.isArray(section.blocks) || section.blocks.length !== 1) {
+    issues.push({ path: `${path}.blocks`, message: 'Featured Collection requires exactly one product-card-template block.' });
+    return;
+  }
+
+  const block = section.blocks[0];
+  if (!isRecord(block) || typeof block.id !== 'string' || !block.id ||
+      block.type !== 'product-card-template' || block.schemaVersion !== 1 ||
+      typeof block.enabled !== 'boolean' || !isRecord(block.settings)) {
+    issues.push({ path: `${path}.blocks[0]`, message: 'Featured Collection product card template is invalid or unregistered.' });
+    return;
+  }
+
+  for (const key of ['showPrice', 'showCompareAt', 'showVendor', 'showAddToCart']) {
+    if (typeof block.settings[key] !== 'boolean') {
+      issues.push({ path: `${path}.blocks[0].settings.${key}`, message: `"${key}" must be true or false.` });
+    }
+  }
+
+  if (block.designOverrides !== undefined && !isRecord(block.designOverrides)) {
+    issues.push({ path: `${path}.blocks[0].designOverrides`, message: 'Product card design overrides must be an object.' });
+  }
+
+  if (section.designOverrides !== undefined && !isRecord(section.designOverrides)) {
+    issues.push({ path: `${path}.designOverrides`, message: 'Section design overrides must be an object.' });
+  } else if (isRecord(section.designOverrides)) {
+    for (const key of ['sectionBackground', 'headingColor', 'bodyColor', 'cardBackground', 'priceColor', 'linkColor']) {
+      if (section.designOverrides[key] !== undefined) {
+        validateOverride(section.designOverrides[key], `${path}.designOverrides.${key}`, issues);
+      }
+    }
+  }
+}
+
 export function validatePageSectionDocument(sections: unknown): SectionDocumentValidationResult {
   const issues: SectionDocumentValidationResult['issues'] = [];
   if (!Array.isArray(sections)) {
@@ -236,6 +319,8 @@ export function validatePageSectionDocument(sections: unknown): SectionDocumentV
     if (section.schemaVersion === undefined || section.schemaVersion === null) return;
     if (section.type === 'HeroBanner') {
       validateVersionedHeroBanner(section, index, issues);
+    } else if (section.type === 'FeaturedCollection') {
+      validateVersionedFeaturedCollection(section, index, issues);
     } else {
       issues.push({ path: `${path}.type`, message: `Versioned section type "${section.type}" is not registered yet. Keep it in the legacy format until its vertical slice is implemented.` });
     }
