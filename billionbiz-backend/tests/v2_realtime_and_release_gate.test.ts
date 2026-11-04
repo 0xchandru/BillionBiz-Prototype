@@ -42,9 +42,6 @@ describe('V2 Realtime, Concurrency & Release Gate Suite', () => {
     } catch {
       body = text;
     }
-    if (res.status === 404) {
-      console.error('[CI test request returned 404]', method, path, body);
-    }
     return { status: res.status, body };
   }
 
@@ -441,8 +438,8 @@ describe('V2 Realtime, Concurrency & Release Gate Suite', () => {
         title: 'About Us',
         slug: `about-${Date.now()}`,
         sections: [
-          { type: 'hero', heading: 'Our Story', subheading: 'Handcrafted with passion' },
-          { type: 'text', content: 'Serving quality products since 2026.' }
+          { id: 'about-hero', type: 'hero', heading: 'Our Story', subheading: 'Handcrafted with passion' },
+          { id: 'about-copy', type: 'text', content: 'Serving quality products since 2026.' }
         ]
       }
     });
