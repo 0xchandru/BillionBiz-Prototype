@@ -122,7 +122,7 @@ export const FeaturedCollectionInspector: React.FC<FeaturedCollectionInspectorPr
     save({ designOverrides: next });
   };
 
-  const updateCardSetting = (key: string, value: boolean) => {
+  const updateCardSetting = (key: string, value: JsonValue) => {
     if (!cardBlock) return;
     const nextBlocks = blocks.map((block) => block.id === cardBlock.id
       ? { ...block, settings: { ...block.settings, [key]: value } }
@@ -269,14 +269,45 @@ export const FeaturedCollectionInspector: React.FC<FeaturedCollectionInspectorPr
             </div>
             <div style={cardStyle}>
               <div style={{ fontSize: 12, fontWeight: 700 }}>Product card</div>
-              {cardDefinition.settings.map((field) => (
-                <ToggleField
-                  key={field.key}
-                  label={field.label}
-                  checked={cardBlock?.settings[field.key] !== false}
-                  onChange={(value) => updateCardSetting(field.key, value)}
-                />
-              ))}
+              {cardDefinition.settings.map((field) => {
+                const value = cardBlock?.settings[field.key] ?? field.defaultValue;
+                if (field.control === 'toggle') {
+                  return (
+                    <ToggleField
+                      key={field.key}
+                      label={field.label}
+                      checked={value !== false}
+                      onChange={(next) => updateCardSetting(field.key, next)}
+                    />
+                  );
+                }
+                if (field.control === 'select') {
+                  return (
+                    <SelectField
+                      key={field.key}
+                      label={field.label}
+                      value={String(value ?? '')}
+                      options={(field.options || []).map((option) => ({
+                        label: option.label,
+                        value: String(option.value)
+                      }))}
+                      onChange={(next) => updateCardSetting(field.key, next)}
+                    />
+                  );
+                }
+                if (field.control === 'text') {
+                  return (
+                    <Field
+                      key={field.key}
+                      label={field.label}
+                      value={value}
+                      maxLength={field.maxLength}
+                      onChange={(next) => updateCardSetting(field.key, next)}
+                    />
+                  );
+                }
+                return null;
+              })}
             </div>
           </>
         )}
