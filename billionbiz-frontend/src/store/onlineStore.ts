@@ -389,8 +389,11 @@ export const useOnlineStore = create<OnlineStoreState>()(
               type: sp.type || 'standard',
               category: sp.category || (sp.is_system ? 'storefront' : 'custom'),
               status: sp.status === 'published' ? 'published' : 'draft',
-              seoTitle: sp.seo_title || `${sp.name} - Store`,
+              seoTitle: sp.seo_title || '',
               seoDescription: sp.seo_description || '',
+              socialImage: sp.social_image || '',
+              canonicalUrl: sp.canonical_url || '',
+              searchVisibility: sp.search_visibility !== false,
               sections: Array.isArray(sp.sections) ? sp.sections : [],
               pageProps: sp.draft_page_props || sp.page_props || {},
               draftVersion: Number(sp.draft_version || 0),
@@ -501,6 +504,8 @@ export const useOnlineStore = create<OnlineStoreState>()(
           {
             sections: page.sections || [],
             pageProps: page.pageProps || {},
+            seoTitle: page.seoTitle || '',
+            seoDescription: page.seoDescription || '',
             expectedVersion: page.draftVersion ?? 0,
           }
         );
