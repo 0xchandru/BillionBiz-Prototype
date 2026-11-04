@@ -196,6 +196,14 @@ export function validateSectionInstance(
       return;
     }
     counts.set(blockType, (counts.get(blockType) || 0) + 1);
+    if (!isRecord(rawBlock.settings)) {
+      issues.push({
+        path: `section.blocks[${index}].settings`,
+        code: 'invalid-shape',
+        message: 'Block settings must be an object.'
+      });
+      return;
+    }
     issues.push(...validateSettings(
       blockDefinition.settings,
       rawBlock.settings,
