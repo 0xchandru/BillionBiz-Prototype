@@ -933,6 +933,35 @@ export async function runMigrations() {
       ON page_draft_versions (page_id, version);
   `);
 
+  // 22. Repair legacy active-release pointers and make domain ownership
+  // case-insensitive. Keep the oldest existing mapping if legacy rows differ
+  // only by hostname casing.
+  await query(`
+    DELETE FROM store_domains older
+    USING store_domains newer
+    WHERE LOWER(older.domain) = LOWER(newer.domain)
+      AND (
+        older.created_at > newer.created_at
+        OR (older.created_at = newer.created_at AND older.id > newer.id)
+      );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_store_domains_domain_lower
+      ON store_domains (LOWER(domain));
+
+    UPDATE storefront_settings ss
+    SET active_release_id = (
+      SELECT r.id
+      FROM store_releases r
+      WHERE r.store_id = ss.store_id
+      ORDER BY r.release_number DESC
+      LIMIT 1
+    )
+    WHERE ss.active_release_id IS NULL
+      AND EXISTS (
+        SELECT 1 FROM store_releases r WHERE r.store_id = ss.store_id
+      );
+  `);
+
   console.log('[Migration] All migrations completed successfully.');
 }
 
