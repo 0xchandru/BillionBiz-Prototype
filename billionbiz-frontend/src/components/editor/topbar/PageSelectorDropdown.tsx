@@ -22,7 +22,6 @@ export const PageSelectorDropdown: React.FC = () => {
   const { selectedPageId, setSelectedPageId, activePanel, setActivePanel, pagesNavLevel, navigateToPage, setRightSidebarOpen } = useLandingEditorStore();
 
   const activePage = resolveEditorPage(pages, selectedPageId) || pages[0];
-  const homePage = getHomePage(pages);
   const resolvedCurrentPageId = resolveEditorPage(pages, selectedPageId)?.id || null;
 
   const getPageDisplayName = (pageId: string) => {
