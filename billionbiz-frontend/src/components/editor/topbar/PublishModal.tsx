@@ -134,7 +134,9 @@ export const PublishModal: React.FC<PublishModalProps> = ({
     setPublishError(null);
     try {
       if (isHeader || isFooter) {
-        useEditorContextStore.getState().syncHeaderToSiteStore();
+        const editorContext = useEditorContextStore.getState();
+        if (isHeader) editorContext.syncHeaderToSiteStore();
+        if (isFooter) editorContext.syncFooterToSiteStore();
       }
 
       // Header and Footer are stored as part of the shared home-page document.
