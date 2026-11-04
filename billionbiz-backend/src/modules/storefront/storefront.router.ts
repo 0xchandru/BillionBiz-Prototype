@@ -482,7 +482,7 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
 });
 
 // GET /api/v1/storefront/render (Render active storefront or draft preview)
-storefrontRouter.get('/render', resolveTenant, requireAuth, async (req: Request, res: Response) => {
+storefrontRouter.get('/render', requireAuth, resolveTenant, async (req: Request, res: Response) => {
   const storeId = req.tenant!.storeId;
   const storeRes = await query(`SELECT id, name, slug, currency, timezone, status FROM stores WHERE id = $1`, [storeId]);
   const store = storeRes.rows[0];
@@ -699,8 +699,8 @@ storefrontRouter.post(
       const pagesRes = await client.query(
         `SELECT p.id, p.name, p.path, p.type, p.category, p.seo_title, p.seo_description, p.template_key, p.is_system, p.is_locked,
                 COALESCE(
-                  (SELECT pd.sections FROM page_draft_versions pd WHERE pd.page_id = p.id ORDER BY pd.version DESC LIMIT 1),
-                  p.page_props
+                  (SELECT pd.sections FROM page_draft_versions pd WHERE pd.page_id = p.id ORDER BY pd.version DESC, pd.created_at DESC LIMIT 1),
+                  '[]'::jsonb
                 ) as sections,
                 COALESCE(
                   (SELECT pd.page_props FROM page_draft_versions pd WHERE pd.page_id = p.id ORDER BY pd.version DESC LIMIT 1),
