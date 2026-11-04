@@ -40,46 +40,21 @@ export const featuredCollectionConfig: SectionConfig = {
             ],
           },
           {
-            id: 'products',
-            label: 'Products',
+            id: 'data-source',
+            label: 'Catalogue source',
             fields: [
               {
-                key: 'products',
-                label: 'Selected Products',
-                type: 'list',
-                addLabel: 'Add Product',
-                itemLabel: (item: any) => item.name || 'Product',
-                defaultItem: {
-                  name: 'New Product',
-                  price: '$99.00',
-                  image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&h=400&fit=crop'
-                },
-                fields: [
-                  {
-                    key: 'name',
-                    label: 'Product Name',
-                    type: 'text',
-                  },
-                  {
-                    key: 'price',
-                    label: 'Price',
-                    type: 'text',
-                  },
-                  {
-                    key: 'image',
-                    label: 'Image',
-                    type: 'image',
-                  },
-                ],
-                defaultValue: [
-                  { name: 'Artisan Ceramic Vase', price: '$89.00', image: 'https://images.unsplash.com/photo-1578500494198-246f612d3b3d?w=400&h=400&fit=crop' },
-                  { name: 'Handwoven Throw', price: '$129.00', image: 'https://images.unsplash.com/photo-1616627547584-bf28cee262db?w=400&h=400&fit=crop' },
-                  { name: 'Oak Side Table', price: '$249.00', image: 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=400&h=400&fit=crop' },
-                  { name: 'Linen Cushion Set', price: '$67.00', image: 'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=400&h=400&fit=crop' },
-                ],
+                key: 'productLimit',
+                label: 'Number of products',
+                type: 'slider',
+                min: 1,
+                max: 24,
+                step: 1,
+                defaultValue: 8,
               },
             ],
           },
+
         ],
       },
       {
@@ -159,11 +134,5 @@ export const featuredCollectionConfig: SectionConfig = {
     priceColor: 'inherit',
     cardBg: 'inherit',
     linkColor: 'inherit',
-    products: [
-      { name: 'Artisan Ceramic Vase', price: '$89.00', image: 'https://images.unsplash.com/photo-1578500494198-246f612d3b3d?w=400&h=400&fit=crop' },
-      { name: 'Handwoven Throw', price: '$129.00', image: 'https://images.unsplash.com/photo-1616627547584-bf28cee262db?w=400&h=400&fit=crop' },
-      { name: 'Oak Side Table', price: '$249.00', image: 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=400&h=400&fit=crop' },
-      { name: 'Linen Cushion Set', price: '$67.00', image: 'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=400&h=400&fit=crop' },
-    ],
   },
 };
