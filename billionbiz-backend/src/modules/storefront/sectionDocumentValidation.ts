@@ -274,9 +274,41 @@ function validateVersionedFeaturedCollection(
     return;
   }
 
-  for (const key of ['showPrice', 'showCompareAt', 'showVendor', 'showAddToCart']) {
+  const allowedCardSettings = new Set([
+    'showPrice', 'showCompareAt', 'showVendor', 'showDescription', 'showAddToCart',
+    'imageRatio', 'imageFit', 'titleSize', 'addToCartLabel', 'chooseOptionsLabel', 'actionStyle'
+  ]);
+  for (const key of Object.keys(block.settings)) {
+    if (!allowedCardSettings.has(key)) {
+      issues.push({ path: `${path}.blocks[0].settings.${key}`, message: 'This product-card setting is not registered.' });
+    }
+  }
+
+  if (block.enabled !== true) {
+    issues.push({ path: `${path}.blocks[0].enabled`, message: 'The product-card template must remain enabled for a valid collection section.' });
+  }
+
+  for (const key of ['showPrice', 'showCompareAt', 'showVendor', 'showDescription', 'showAddToCart']) {
     if (typeof block.settings[key] !== 'boolean') {
       issues.push({ path: `${path}.blocks[0].settings.${key}`, message: `"${key}" must be true or false.` });
+    }
+  }
+
+  if (!['square', 'portrait', 'tall', 'landscape'].includes(block.settings.imageRatio)) {
+    issues.push({ path: `${path}.blocks[0].settings.imageRatio`, message: 'Product image ratio is not registered.' });
+  }
+  if (!['cover', 'contain'].includes(block.settings.imageFit)) {
+    issues.push({ path: `${path}.blocks[0].settings.imageFit`, message: 'Product image fit is not registered.' });
+  }
+  if (!['small', 'medium', 'large'].includes(block.settings.titleSize)) {
+    issues.push({ path: `${path}.blocks[0].settings.titleSize`, message: 'Product title size is not registered.' });
+  }
+  if (!['primary', 'secondary', 'outline'].includes(block.settings.actionStyle)) {
+    issues.push({ path: `${path}.blocks[0].settings.actionStyle`, message: 'Product action style is not registered.' });
+  }
+  for (const key of ['addToCartLabel', 'chooseOptionsLabel']) {
+    if (!isSafeText(block.settings[key], 24) || !block.settings[key].trim()) {
+      issues.push({ path: `${path}.blocks[0].settings.${key}`, message: `"${key}" must contain 1 to 24 characters.` });
     }
   }
 
