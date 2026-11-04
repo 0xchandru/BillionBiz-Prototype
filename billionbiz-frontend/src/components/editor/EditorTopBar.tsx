@@ -57,6 +57,9 @@ export const EditorTopBar: React.FC = () => {
     lastPublishedSnapshots,
     unpublishPage,
     publishPage,
+    savePageDraftToBackend,
+    saveThemeToBackend,
+    saveSettingsToBackend,
   } = useSiteStore();
   const { canUndo, canRedo } = useThemeHistoryStore();
   const { storeSlug } = useAuthStore();
@@ -149,68 +152,93 @@ export const EditorTopBar: React.FC = () => {
     }, 3200);
   };
 
-  const handleSave = () => {
-    // Sync composable Header state to siteStore
-    try {
-      useEditorContextStore.getState().syncHeaderToSiteStore();
-    } catch (e) {
-      console.warn('Could not sync header state:', e);
+  const [isSaving, setIsSaving] = useState(false);
+  const landingPage = pages.find((page) => page.path === '/') ||
+    pages.find((page) => page.id === 'landing-page') ||
+    pages[0];
+
+  const persistCurrentScope = async () => {
+    if (isTheme) {
+      await saveThemeToBackend(theme);
+      return;
     }
 
-    if (isTheme) {
-      markSaved();
-      showToast('Design system changes saved');
+    if (isStoreBrand || isSettings) {
+      await saveSettingsToBackend(settings);
       return;
     }
-    if (isStoreBrand) {
-      markSaved();
-      showToast('Brand settings saved');
-      return;
-    }
-    if (isSettings) {
-      markSaved();
-      showToast('System settings saved successfully');
-      return;
-    }
+
     if (isPageEditor) {
-      markSaved();
-      showToast(`${activeScopeName} draft saved successfully`);
+      if (selectedPageId === 'header-global' || selectedPageId === 'footer-global') {
+        useEditorContextStore.getState().syncHeaderToSiteStore();
+        if (!landingPage) throw new Error('The home page is not available in the current store.');
+        await savePageDraftToBackend(landingPage.id);
+        return;
+      }
+
+      const page = pages.find((item) => item.id === selectedPageId) || landingPage;
+      if (!page) throw new Error('The selected page is not available in the current store.');
+      await savePageDraftToBackend(page.id);
       return;
     }
-    if (!hasUnsavedChanges) {
-      showToast('All changes already saved to draft');
-      return;
+
+    if (hasUnsavedChanges) {
+      throw new Error('Select a page, brand, design or settings area before saving.');
     }
-    markSaved();
-    showToast('Draft edits saved successfully');
   };
 
-  // Auto-save effect
-  useEffect(() => {
-    if (!hasUnsavedChanges) return;
+  const handleSave = async () => {
+    if (isSaving) return;
+    if (!hasUnsavedChanges) {
+      showToast('All changes are already saved');
+      return;
+    }
 
-    const autoSaveTimer = setTimeout(() => {
-      try {
-        useEditorContextStore.getState().syncHeaderToSiteStore();
-      } catch (e) {
-        console.warn('Could not sync header state:', e);
-      }
+    setIsSaving(true);
+    try {
+      await persistCurrentScope();
       markSaved();
-      if (isTheme) {
-        showToast('Design auto-saved');
-      } else if (isStoreBrand) {
-        showToast('Brand settings auto-saved');
-      } else if (isSettings) {
-        showToast('Settings auto-saved');
-      } else if (isPageEditor) {
+      showToast(`${activeScopeName} saved successfully`);
+    } catch (error: any) {
+      showToast(`Save failed: ${error?.message || 'Please retry.'}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Autosave persists the active editor scope. The dirty state is cleared only
+  // after the server confirms every requested write.
+  useEffect(() => {
+    if (!hasUnsavedChanges || isSaving) return;
+
+    const autoSaveTimer = setTimeout(async () => {
+      setIsSaving(true);
+      try {
+        await persistCurrentScope();
+        markSaved();
         showToast(`${activeScopeName} auto-saved`);
-      } else {
-        showToast('Draft auto-saved');
+      } catch (error: any) {
+        showToast(`Auto-save failed: ${error?.message || 'Changes remain unsaved.'}`);
+      } finally {
+        setIsSaving(false);
       }
     }, 4000);
 
     return () => clearTimeout(autoSaveTimer);
-  }, [hasUnsavedChanges, pages, theme, settings, markSaved, isTheme, isStoreBrand, isSettings, isPageEditor, activeScopeName]);
+  }, [
+    hasUnsavedChanges,
+    pages,
+    theme,
+    settings,
+    markSaved,
+    isTheme,
+    isStoreBrand,
+    isSettings,
+    isPageEditor,
+    activeScopeName,
+    selectedPageId,
+    isSaving
+  ]);
 
   const editorEngineStore = useEditorContextStore();
   const isGlobalHeaderOrFooter = selectedPageId === 'header-global' || selectedPageId === 'footer-global';
@@ -332,26 +360,9 @@ export const EditorTopBar: React.FC = () => {
   ]);
 
   const handlePublish = () => {
-    if (selectedPageId === 'header-global') {
-      try {
-        useEditorContextStore.getState().syncHeaderToSiteStore();
-      } catch (error) {
-        console.warn('Could not sync header state before publish:', error);
-      }
-    }
-    if (selectedPageId === 'landing-page') {
-      setIsPublishModalOpen(true);
-    } else {
-      const targetId = selectedPageId === 'header-global'
-        ? 'header-global'
-        : selectedPageId === 'footer-global'
-          ? 'footer-global'
-          : activePage?.id;
-      if (targetId) {
-        publishPage(targetId);
-        showToast(`Published "${activeScopeName}" to live storefront!`);
-      }
-    }
+    // The backend publishes one atomic whole-store snapshot. Never mark a
+    // page/header/footer as live only in local Zustand state.
+    setIsPublishModalOpen(true);
   };
 
   const handlePreview = () => {
@@ -697,8 +708,8 @@ export const EditorTopBar: React.FC = () => {
               <button
                 className={styles.btnPrimarySave}
                 onClick={handleSave}
-                disabled={!hasUnsavedChanges}
-                style={!hasUnsavedChanges ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+                disabled={!hasUnsavedChanges || isSaving}
+                style={!hasUnsavedChanges || isSaving ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
                 title={hasUnsavedChanges ? "Save theme customizations" : "Theme is up to date"}
               >
                 <Save size={13} />
@@ -732,8 +743,8 @@ export const EditorTopBar: React.FC = () => {
                 <button
                   className={styles.btnGhost}
                   onClick={handleSave}
-                  disabled={!hasUnsavedChanges}
-                  style={!hasUnsavedChanges ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
+                  disabled={!hasUnsavedChanges || isSaving}
+                  style={!hasUnsavedChanges || isSaving ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
                   title={hasUnsavedChanges ? `Save ${activeScopeName} draft (Ctrl+S)` : `All ${activeScopeName} edits saved`}
                 >
                   <Save size={13} />
