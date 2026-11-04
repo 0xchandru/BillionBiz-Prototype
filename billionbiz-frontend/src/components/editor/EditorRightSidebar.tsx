@@ -133,6 +133,7 @@ import { GrowthRightPanel } from './right/GrowthRightPanel';
 import { ColorPickerPopover } from './ui/ColorPickerPopover';
 import { CapabilityInspector } from './engine/CapabilityInspector';
 import { HeroBannerBlockInspector } from './sectionEngine/HeroBannerBlockInspector';
+import { FeaturedCollectionInspector } from './sectionEngine/FeaturedCollectionInspector';
 
 import styles from '../../pages/editor/EditorLayout.module.css';
 
@@ -8301,6 +8302,12 @@ export const EditorRightSidebar: React.FC = () => {
             </div>
           </div>
         </>
+      ) : activeSection?.type === 'FeaturedCollection' ? (
+        <FeaturedCollectionInspector
+          pageId={(isGlobalComponent ? landingPage?.id : activePage?.id) || landingPage?.id || ''}
+          section={activeSection}
+          onClose={closeRightSidebar}
+        />
       ) : activeSection?.type === 'HeroBanner' ? (
         <HeroBannerBlockInspector
           pageId={(isGlobalComponent ? landingPage?.id : activePage?.id) || landingPage?.id || ''}
