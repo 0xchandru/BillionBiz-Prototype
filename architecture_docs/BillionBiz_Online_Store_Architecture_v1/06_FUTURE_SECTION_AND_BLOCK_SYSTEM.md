@@ -1,6 +1,6 @@
 # 06 — Future Shopify-style Section and Block System (Approval-Gated)
 
-> **Do not implement this document in Phase 1.** This is the target design after the user explicitly approves Phase 2. Finish and verify all non-section work first, then stop and ask for approval.
+> **Sequencing update:** The user has explicitly approved implementing the section/block architecture. Architecture addendum 13 now supersedes the old approval gate. Implement one complete section vertical slice at a time, beginning with Hero Banner; do not batch untested sections. The registry is versioned, allowlisted and data-only. This is the target design after the user explicitly approves Phase 2. Finish and verify all non-section work first, then stop and ask for approval.
 
 ## 1. Hierarchy
 
