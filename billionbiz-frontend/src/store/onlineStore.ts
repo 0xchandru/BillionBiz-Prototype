@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import { apiClient } from '../api/client';
 import { defaultPropsMap, sectionNameMap } from '../components/editor/SectionRenderer';
 import { getAllPageConfigs } from '../components/editor/pageConfigs';
+import { createHeroBannerInstance } from '../components/editor/sectionEngine/heroBannerDefinition';
 import type { PageCategory } from '../components/editor/pageConfigs/types';
 import { useContentStateStore } from './contentStateStore';
 import {
@@ -16,6 +17,12 @@ export interface SectionData {
   name: string;
   props: Record<string, any>;
   isHidden: boolean;
+  schemaVersion?: number;
+  enabled?: boolean;
+  settings?: Record<string, any>;
+  blocks?: Array<Record<string, any>>;
+  designOverrides?: Record<string, any>;
+  responsiveOverrides?: Record<string, any>;
 }
 
 export interface PageSnapshot {
@@ -64,6 +71,7 @@ export interface OnlineStoreState {
   markUnsaved: () => void;
   
   updateSectionProps: (pageId: string, sectionId: string, newProps: Record<string, any>) => void;
+  updateSectionInstance: (pageId: string, sectionId: string, patch: Partial<SectionData>) => void;
   reorderSections: (pageId: string, startIndex: number, endIndex: number) => void;
   toggleSectionVisibility: (pageId: string, sectionId: string) => void;
   addSection: (pageId: string, sectionType: string, insertIndex?: number) => void;
@@ -102,14 +110,20 @@ export interface OnlineStoreState {
 export type SiteState = OnlineStoreState;
 
 // Helper to create a section with default props
-const createSection = (id: string, type: string, overrides?: Partial<SectionData>): SectionData => ({
-  id,
-  type,
-  name: sectionNameMap[type] || type.replace(/([A-Z])/g, ' $1').trim(),
-  isHidden: false,
-  props: { ...defaultPropsMap[type] },
-  ...overrides,
-});
+const createSection = (id: string, type: string, overrides?: Partial<SectionData>): SectionData => {
+  if (type === 'HeroBanner' && !overrides) {
+    return createHeroBannerInstance(id, sectionNameMap[type] || 'Hero Banner') as SectionData;
+  }
+
+  return {
+    id,
+    type,
+    name: sectionNameMap[type] || type.replace(/([A-Z])/g, ' $1').trim(),
+    isHidden: false,
+    props: { ...defaultPropsMap[type] },
+    ...overrides,
+  };
+};
 
 // Helper predicate functions for separating Header, Footer, and Homepage scopes
 export const isHeaderComponent = (s: SectionData | { type: string; id?: string }) => {
@@ -502,6 +516,25 @@ export const useOnlineStore = create<OnlineStoreState>()(
         ...page,
         sections: page.sections.map(sec => 
           sec.id === sectionId ? { ...sec, props: { ...sec.props, ...newProps } } : sec
+        )
+      };
+    });
+    return { pages, hasUnsavedChanges: true };
+  }),
+
+  updateSectionInstance: (pageId, sectionId, patch) => set((state) => {
+    const pages = state.pages.map((page) => {
+      if (page.id !== pageId) return page;
+      return {
+        ...page,
+        sections: page.sections.map((section) =>
+          section.id === sectionId
+            ? {
+                ...section,
+                ...patch,
+                props: patch.props ? { ...section.props, ...patch.props } : section.props
+              }
+            : section
         )
       };
     });
