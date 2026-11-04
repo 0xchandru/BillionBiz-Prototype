@@ -2,12 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ChevronRight, CheckCircle2, Circle, Globe2, FileText, Bell,
-  ShieldCheck, Plug, Code, ExternalLink, AlertCircle
+  ShieldCheck, Plug, Code, ExternalLink, AlertCircle, LockKeyhole, Wrench
 } from 'lucide-react';
 import { useLandingEditorStore } from '../../../store/landingEditorStore';
 import { useSiteStore } from '../../../store/siteStore';
 import { useAuthStore } from '../../../store/authStore';
 import { api } from '../../../api/services';
+import { apiClient } from '../../../api/client';
 import { getEditorPath } from '../utils/editorNavigation';
 import styles from '../../../pages/editor/EditorLayout.module.css';
 
@@ -80,7 +81,7 @@ const POLICY_ROUTES = [
 
 export const SettingsRightPanel: React.FC = () => {
   const { settingsSection, closeRightSidebar, navigateToPage, setSelectedPageId } = useLandingEditorStore();
-  const { settings, pages } = useSiteStore();
+  const { settings, pages, updateSettings, markSaved } = useSiteStore();
   const { storeId } = useAuthStore();
   const navigate = useNavigate();
 
@@ -92,6 +93,17 @@ export const SettingsRightPanel: React.FC = () => {
   const [savingRegion, setSavingRegion] = useState(false);
   const [message, setMessage] = useState('');
   const [loadError, setLoadError] = useState('');
+  const [passwordEnabled, setPasswordEnabled] = useState(Boolean(settings.passwordEnabled));
+  const [maintenanceMode, setMaintenanceMode] = useState(Boolean(settings.maintenanceMode));
+  const [newStorefrontPassword, setNewStorefrontPassword] = useState('');
+  const [savingAccess, setSavingAccess] = useState(false);
+  const [accessMessage, setAccessMessage] = useState('');
+  const [accessError, setAccessError] = useState('');
+
+  useEffect(() => {
+    setPasswordEnabled(Boolean(settings.passwordEnabled));
+    setMaintenanceMode(Boolean(settings.maintenanceMode));
+  }, [settings.passwordEnabled, settings.maintenanceMode]);
 
   useEffect(() => {
     if (section !== 'language-region' && section !== 'language') return;
@@ -135,6 +147,29 @@ export const SettingsRightPanel: React.FC = () => {
     }
   };
 
+  const saveStoreAccess = async () => {
+    if (savingAccess) return;
+    setSavingAccess(true);
+    setAccessMessage('');
+    setAccessError('');
+    try {
+      const payload: Record<string, any> = {
+        passwordEnabled,
+        maintenanceMode
+      };
+      if (newStorefrontPassword) payload.password = newStorefrontPassword;
+      await apiClient.patch('/storefront/settings', payload);
+      updateSettings({ passwordEnabled, maintenanceMode });
+      markSaved();
+      setNewStorefrontPassword('');
+      setAccessMessage('Storefront access settings saved.');
+    } catch (error: any) {
+      setAccessError(error.message || 'Storefront access settings could not be saved.');
+    } finally {
+      setSavingAccess(false);
+    }
+  };
+
   const openPage = (pageId: string) => {
     setSelectedPageId(pageId);
     navigateToPage(pageId);
@@ -163,6 +198,7 @@ export const SettingsRightPanel: React.FC = () => {
 
   const title = section === 'language-region' || section === 'language' ? 'Language & region'
     : section.includes('policy') || section === 'policies' ? 'Policies & legal'
+    : section === 'store-access' ? 'Store access'
     : section === 'notifications' ? 'Notifications'
     : section === 'integrations' ? 'Integrations'
     : section === 'api-webhooks' ? 'API & webhooks'
@@ -264,6 +300,63 @@ export const SettingsRightPanel: React.FC = () => {
               Legal text is store-specific. Review policy wording before publishing.
             </p>
           </div>
+        )}
+
+        {section === 'store-access' && (
+          <>
+            <div style={cardStyle}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 700, marginBottom: 10 }}>
+                <LockKeyhole size={16} /> Password protection
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <span>
+                  <strong style={{ display: 'block', fontSize: 11.5, color: '#1e293b' }}>Require a password to visit the store</strong>
+                  <span style={{ display: 'block', marginTop: 3, fontSize: 10, color: '#64748b' }}>Customers must enter the password before browsing.</span>
+                </span>
+                <input type="checkbox" checked={passwordEnabled} onChange={(event) => setPasswordEnabled(event.target.checked)} />
+              </label>
+              {passwordEnabled && (
+                <div style={{ marginTop: 14 }}>
+                  <label style={labelStyle}>Set or replace storefront password</label>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    style={inputStyle}
+                    value={newStorefrontPassword}
+                    minLength={4}
+                    maxLength={128}
+                    onChange={(event) => setNewStorefrontPassword(event.target.value)}
+                    placeholder="At least 4 characters"
+                  />
+                  <p style={{ fontSize: 10, color: '#64748b', margin: '6px 0 0', lineHeight: 1.5 }}>
+                    Leave this blank to keep the existing password. The password is verified on the server and is never included in the public storefront response.
+                  </p>
+                </div>
+              )}
+            </div>
+            <div style={cardStyle}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 700, marginBottom: 10 }}>
+                <Wrench size={16} /> Maintenance mode
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <span>
+                  <strong style={{ display: 'block', fontSize: 11.5, color: '#1e293b' }}>Temporarily hide the storefront</strong>
+                  <span style={{ display: 'block', marginTop: 3, fontSize: 10, color: '#64748b' }}>Visitors see a maintenance screen. Merchant preview stays available.</span>
+                </span>
+                <input type="checkbox" checked={maintenanceMode} onChange={(event) => setMaintenanceMode(event.target.checked)} />
+              </label>
+            </div>
+            <button
+              type="button"
+              onClick={() => void saveStoreAccess()}
+              disabled={savingAccess || (passwordEnabled && newStorefrontPassword.length > 0 && newStorefrontPassword.length < 4)}
+              style={{ width: '100%', padding: '10px 12px', border: 0, borderRadius: 8, background: '#0f172a', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+            >
+              {savingAccess ? 'Saving access settings…' : 'Save access settings'}
+            </button>
+            {accessMessage && <p role="status" style={{ margin: '10px 0 0', color: '#15803d', fontSize: 11 }}>{accessMessage}</p>}
+            {accessError && <p role="alert" style={{ margin: '10px 0 0', color: '#b91c1c', fontSize: 11 }}>{accessError}</p>}
+          </>
         )}
 
         {section === 'notifications' && (
