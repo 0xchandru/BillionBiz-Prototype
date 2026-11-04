@@ -9,6 +9,8 @@ import { handleIdempotency } from '../../middleware/idempotency.js';
 import { recordAudit } from '../../core/auditAndOutbox.js';
 import { provisionDefaultStorefront } from './storefrontProvisioner.js';
 import { PLATFORM_MAIN_DOMAIN } from '../../core/subdomains.js';
+import { env } from '../../core/env.js';
+import { resolveCname } from 'node:dns/promises';
 
 export const storefrontRouter = Router();
 
@@ -1074,12 +1076,16 @@ storefrontRouter.post(
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const { domain } = req.body;
-    if (!domain || typeof domain !== 'string' || !domain.includes('.')) {
+    if (!domain || typeof domain !== 'string') {
       return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'A valid domain hostname is required (e.g. shop.example.com).' });
     }
-    const cleanDomain = domain.toLowerCase().trim();
+    const cleanDomain = domain.trim().toLowerCase().replace(/\\.$/, '');
+    const hostnamePattern = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$/;
+    if (!hostnamePattern.test(cleanDomain) || cleanDomain === PLATFORM_MAIN_DOMAIN || cleanDomain.endsWith(`.${PLATFORM_MAIN_DOMAIN}`)) {
+      return res.status(400).json({ error: 'INVALID_DOMAIN', message: 'Enter a fully qualified custom hostname. Platform subdomains are managed automatically.' });
+    }
 
-    const existing = await query(`SELECT id FROM store_domains WHERE domain = $1`, [cleanDomain]);
+    const existing = await query(`SELECT id FROM store_domains WHERE LOWER(domain) = LOWER($1)`, [cleanDomain]);
     if (existing.rowCount && existing.rowCount > 0) {
       return res.status(409).json({ error: 'DOMAIN_ALREADY_CONNECTED', message: 'This domain is already mapped to a store.' });
     }
@@ -1099,11 +1105,13 @@ storefrontRouter.post(
         isPrimary: false,
         isVerified: false,
         sslStatus: 'PENDING',
-        dnsInstructions: {
-          type: 'CNAME',
-          host: cleanDomain.split('.')[0],
-          target: PLATFORM_MAIN_DOMAIN
-        }
+        dnsInstructions: env.STORE_DOMAIN_CNAME_TARGET
+          ? {
+              type: 'CNAME',
+              host: cleanDomain.split('.')[0],
+              target: env.STORE_DOMAIN_CNAME_TARGET
+            }
+          : null
       }
     });
   }
@@ -1124,13 +1132,46 @@ storefrontRouter.post(
       return res.status(404).json({ error: 'DOMAIN_NOT_FOUND', message: 'Domain not found' });
     }
 
-    // Simulate DNS and SSL verification success
+    // Never mark DNS or SSL as ready without a real check. The hosting
+    // provider's CNAME destination must be configured by the platform operator.
+    const expectedCname = env.STORE_DOMAIN_CNAME_TARGET?.trim().toLowerCase().replace(/\\.$/, '');
+    if (!expectedCname) {
+      return res.status(503).json({
+        error: 'DOMAIN_VERIFICATION_NOT_CONFIGURED',
+        message: 'Custom-domain verification is not configured on this deployment. No verification or SSL status was changed.'
+      });
+    }
+
+    let cnameRecords: string[];
+    try {
+      cnameRecords = await resolveCname(domRes.rows[0].domain);
+    } catch {
+      return res.status(409).json({
+        error: 'DOMAIN_DNS_NOT_READY',
+        message: 'No CNAME record could be resolved for this hostname yet. Check the DNS record and retry.'
+      });
+    }
+
+    const normalizedRecords = cnameRecords.map((record) => record.trim().toLowerCase().replace(/\\.$/, ''));
+    if (!normalizedRecords.includes(expectedCname)) {
+      return res.status(409).json({
+        error: 'DOMAIN_DNS_MISMATCH',
+        message: 'The hostname does not point to the configured BillionBiz storefront target.',
+        expectedTarget: expectedCname,
+        receivedTargets: normalizedRecords
+      });
+    }
+
     await query(
-      `UPDATE store_domains SET is_verified = TRUE, ssl_status = 'ACTIVE' WHERE id = $1`,
-      [domainId]
+      `UPDATE store_domains SET is_verified = TRUE, ssl_status = CASE WHEN ssl_status = 'ACTIVE' THEN ssl_status ELSE 'PENDING' END WHERE id = $1 AND store_id = $2`,
+      [domainId, storeId]
     );
 
-    res.json({ message: 'Domain verified successfully. SSL certificate issued.', isVerified: true, sslStatus: 'ACTIVE' });
+    res.status(202).json({
+      message: 'DNS ownership verified. HTTPS activation is still pending and this domain cannot be made primary yet.',
+      isVerified: true,
+      sslStatus: 'PENDING'
+    });
   }
 );
 
@@ -1144,9 +1185,18 @@ storefrontRouter.post(
     const storeId = req.tenant!.storeId;
     const domainId = req.params.id as string;
 
-    const domRes = await query(`SELECT domain FROM store_domains WHERE id = $1 AND store_id = $2`, [domainId, storeId]);
+    const domRes = await query(
+      `SELECT domain, is_verified, ssl_status FROM store_domains WHERE id = $1 AND store_id = $2`,
+      [domainId, storeId]
+    );
     if (domRes.rowCount === 0) {
       return res.status(404).json({ error: 'DOMAIN_NOT_FOUND', message: 'Domain not found' });
+    }
+    if (!domRes.rows[0].is_verified || String(domRes.rows[0].ssl_status).toUpperCase() !== 'ACTIVE') {
+      return res.status(409).json({
+        error: 'DOMAIN_NOT_READY',
+        message: 'A domain must pass DNS verification and have an active SSL certificate before it can become primary.'
+      });
     }
     const targetDomain = domRes.rows[0].domain;
 
