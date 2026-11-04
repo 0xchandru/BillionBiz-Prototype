@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   ChevronRight, Search, Share2, Globe2, FileText,
-  ExternalLink, Eye, EyeOff, CheckCircle2
+  Eye, EyeOff, CheckCircle2
 } from 'lucide-react';
 import { useLandingEditorStore } from '../../../store/landingEditorStore';
 import { useSiteStore } from '../../../store/siteStore';
