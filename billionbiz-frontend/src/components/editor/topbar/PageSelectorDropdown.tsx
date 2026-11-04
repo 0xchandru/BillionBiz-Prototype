@@ -6,7 +6,7 @@ import { useLandingEditorStore } from '../../../store/landingEditorStore';
 import { EditorSwitchConfirmModal } from '../ui/EditorSwitchConfirmModal';
 import styles from './topbar.module.css';
 import { getEditorPath } from '../utils/editorNavigation';
-import { getHomePage, resolveEditorPage } from '../utils/pageIdentity';
+import { resolveEditorPage } from '../utils/pageIdentity';
 
 export const PageSelectorDropdown: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
