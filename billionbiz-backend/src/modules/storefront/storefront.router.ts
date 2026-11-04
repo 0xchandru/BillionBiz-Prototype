@@ -1079,8 +1079,8 @@ storefrontRouter.post(
     if (!domain || typeof domain !== 'string') {
       return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'A valid domain hostname is required (e.g. shop.example.com).' });
     }
-    const cleanDomain = domain.trim().toLowerCase().replace(/\\.$/, '');
-    const hostnamePattern = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$/;
+    const cleanDomain = domain.trim().toLowerCase().replace(/\.$/, '');
+    const hostnamePattern = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
     if (!hostnamePattern.test(cleanDomain) || cleanDomain === PLATFORM_MAIN_DOMAIN || cleanDomain.endsWith(`.${PLATFORM_MAIN_DOMAIN}`)) {
       return res.status(400).json({ error: 'INVALID_DOMAIN', message: 'Enter a fully qualified custom hostname. Platform subdomains are managed automatically.' });
     }
@@ -1134,7 +1134,7 @@ storefrontRouter.post(
 
     // Never mark DNS or SSL as ready without a real check. The hosting
     // provider's CNAME destination must be configured by the platform operator.
-    const expectedCname = env.STORE_DOMAIN_CNAME_TARGET?.trim().toLowerCase().replace(/\\.$/, '');
+    const expectedCname = env.STORE_DOMAIN_CNAME_TARGET?.trim().toLowerCase().replace(/\.$/, '');
     if (!expectedCname) {
       return res.status(503).json({
         error: 'DOMAIN_VERIFICATION_NOT_CONFIGURED',
@@ -1152,7 +1152,7 @@ storefrontRouter.post(
       });
     }
 
-    const normalizedRecords = cnameRecords.map((record) => record.trim().toLowerCase().replace(/\\.$/, ''));
+    const normalizedRecords = cnameRecords.map((record) => record.trim().toLowerCase().replace(/\.$/, ''));
     if (!normalizedRecords.includes(expectedCname)) {
       return res.status(409).json({
         error: 'DOMAIN_DNS_MISMATCH',
