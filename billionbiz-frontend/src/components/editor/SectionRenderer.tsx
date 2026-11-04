@@ -631,9 +631,7 @@ export const SectionRenderer: React.FC<{
   onNavigate?: (path: string) => void;
 }> = ({ section, overrideDevice, isEditorInteractive = false, useEditorModel = false, onNavigate }) => {
   const device = overrideDevice || 'desktop';
-  const sectionDocument = section.schemaVersion
-    ? sectionInstanceToRendererProps(section)
-    : { ...(section.props || {}) };
+  const sectionDocument = sectionInstanceToRendererProps(section);
   const isEnabled = section.enabled !== false && section.isHidden !== true;
 
   if (!isEnabled) return null;
