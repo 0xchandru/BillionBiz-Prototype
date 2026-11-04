@@ -559,7 +559,8 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
       // cosmetic draft value. The backend gate and this client flag use the same
       // authoritative setting.
       passwordEnabled: Boolean(settingsRow.password_enabled),
-      maintenanceMode: publishedSettings.maintenanceMode ?? false,
+      // Maintenance mode is an immediate operational control, not a draft design token.
+      maintenanceMode: Boolean(settingsRow.maintenance_mode),
       seoDefaults: publishedSettings.seoDefaults || {}
     }
   });
