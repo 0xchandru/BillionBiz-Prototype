@@ -287,6 +287,7 @@ function Restart-Bbiz {
 
 function Show-Logs {
     $follow = $RemainingArgs -contains "-f" -or $RemainingArgs -contains "--follow"
+    $showErr = $RemainingArgs -contains "-e" -or $RemainingArgs -contains "--err" -or $RemainingArgs -contains "--error"
     $lines = 60
 
     for ($i = 0; $i -lt $RemainingArgs.Count; $i++) {
@@ -300,8 +301,12 @@ function Show-Logs {
     $wrapperLog = Join-Path $LogDir "billionbiz-service.wrapper.log"
 
     $logFileToRead = $null
-    if (Test-Path $outLog) {
+    if ($showErr -and (Test-Path $errLog)) {
+        $logFileToRead = $errLog
+    } elseif (Test-Path $outLog) {
         $logFileToRead = $outLog
+    } elseif (Test-Path $errLog) {
+        $logFileToRead = $errLog
     } elseif (Test-Path $wrapperLog) {
         $logFileToRead = $wrapperLog
     }
@@ -352,7 +357,6 @@ function Install-Service {
     Pop-Location
 
     Write-Host "  [2/3] Registering Windows Service '$ServiceName' with SCM..." -ForegroundColor Cyan
-    $installCmd = "& '$ServiceExe' install"
     if (Test-IsAdmin) {
         & $ServiceExe install
     } else {
