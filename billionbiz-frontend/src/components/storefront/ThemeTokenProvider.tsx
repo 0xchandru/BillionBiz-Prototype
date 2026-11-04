@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import type { GlobalThemeData } from '../editor/theme/themePresets';
-import { getDefaultTheme } from '../editor/theme/themePresets';
+import { DEFAULT_THEME_SPACING, getDefaultTheme } from '../editor/theme/themePresets';
 
 interface ThemeTokenProviderProps {
   theme?: GlobalThemeData | Record<string, any>;
@@ -55,6 +55,7 @@ export const ThemeTokenProvider: React.FC<ThemeTokenProviderProps> = ({
       typography: mergeRecord(defaultTheme.typography as ThemeRecord, overrides.typography),
       buttons: mergeRecord(defaultTheme.buttons as ThemeRecord, overrides.buttons),
       effects: mergeRecord(defaultTheme.effects as ThemeRecord, overrides.effects),
+      spacing: mergeRecord(DEFAULT_THEME_SPACING as unknown as ThemeRecord, overrides.spacing),
     } as Record<string, any>;
   }, [defaultTheme, theme, tokens]);
 
@@ -63,6 +64,7 @@ export const ThemeTokenProvider: React.FC<ThemeTokenProviderProps> = ({
     const t: Record<string, any> = resolvedTheme.typography || {};
     const b: Record<string, any> = resolvedTheme.buttons || {};
     const e: Record<string, any> = resolvedTheme.effects || {};
+    const s: Record<string, any> = resolvedTheme.spacing || DEFAULT_THEME_SPACING;
     const legacyColors: Record<string, any> = resolvedTheme.colors || {};
     const baseSize = typeof t.baseSize === 'number'
       ? `${t.baseSize}px`
@@ -122,6 +124,13 @@ export const ThemeTokenProvider: React.FC<ThemeTokenProviderProps> = ({
       '--theme-card-shadow': e.shadows?.card || '0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)',
       '--theme-card-radius': e.radii?.card || '12px',
       '--theme-transition-speed': e.motion?.duration || '200ms',
+
+      /* Layout rhythm */
+      '--theme-section-space-y': `${s.sectionY ?? 72}px`,
+      '--theme-content-gap': `${s.contentGap ?? 32}px`,
+      '--theme-grid-gap': `${s.gridGap ?? 20}px`,
+      '--theme-card-padding': `${s.cardPadding ?? 24}px`,
+      '--theme-container-max-width': `${s.containerMaxWidth ?? 1280}px`,
     } as React.CSSProperties;
   }, [resolvedTheme]);
 
