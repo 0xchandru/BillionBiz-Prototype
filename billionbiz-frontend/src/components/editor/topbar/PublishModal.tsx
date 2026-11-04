@@ -44,35 +44,32 @@ export const PublishModal: React.FC<PublishModalProps> = ({
   const selectedPage = pages.find((p) => p.id === selectedPageId) || landingPage;
   const isHeader = selectedPageId === 'header-global';
   const isFooter = selectedPageId === 'footer-global';
-  const isHomepage = selectedPageId === 'landing-page';
+  const isHomepage = !isHeader && !isFooter && selectedPage?.path === '/';
 
   let scopeName = 'Homepage';
-  let targetId = 'landing-page';
   let snapshotSections: SectionData[] = [];
   let currentSections: SectionData[] = [];
 
   if (isHeader) {
     scopeName = 'Global Header';
-    targetId = 'header-global';
     const snapshot = lastPublishedSnapshots?.['header-global'];
     snapshotSections = snapshot?.sections || [];
     currentSections = (landingPage?.sections || []).filter(isHeaderComponent);
   } else if (isFooter) {
     scopeName = 'Global Footer';
-    targetId = 'footer-global';
     const snapshot = lastPublishedSnapshots?.['footer-global'];
     snapshotSections = snapshot?.sections || [];
     currentSections = (landingPage?.sections || []).filter(isFooterComponent);
   } else if (isHomepage) {
     scopeName = 'Homepage';
-    targetId = 'landing-page';
-    const snapshot = landingPage?.lastPublishedSnapshot || lastPublishedSnapshots?.['landing-page'];
+    const snapshot = landingPage?.lastPublishedSnapshot ||
+      lastPublishedSnapshots?.[landingPage?.id || ''] ||
+      lastPublishedSnapshots?.['landing-page'];
     snapshotSections = snapshot?.sections || [];
     currentSections = (landingPage?.sections || []).filter(isHomepageBodySection);
   } else {
     const activePage = pages.find((p) => p.id === selectedPageId) || landingPage;
     scopeName = activePage.name;
-    targetId = activePage.id;
     const snapshot = activePage.lastPublishedSnapshot || lastPublishedSnapshots?.[activePage.id];
     snapshotSections = snapshot?.sections || [];
     currentSections = activePage.sections || [];
