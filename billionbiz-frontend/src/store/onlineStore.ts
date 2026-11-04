@@ -44,6 +44,7 @@ export interface PageData {
     mobile: boolean;
   };
   lastPublishedSnapshot?: PageSnapshot;
+  draftVersion?: number;
 }
 
 import type { GlobalThemeData } from '../components/editor/theme/themePresets';
@@ -87,6 +88,7 @@ export interface OnlineStoreState {
   fetchLiveStoreData: () => Promise<void>;
   saveSettingsToBackend: (settings: Record<string, any>) => Promise<void>;
   saveThemeToBackend: (theme: Partial<ThemeData>) => Promise<void>;
+  savePageDraftToBackend: (pageId: string) => Promise<any>;
   publishStoreToBackend: (notes?: string) => Promise<any>;
   // Methods for Online Store Editor
   updatePageSettings: (pageId: string, settings: Record<string, any>) => void;
@@ -365,7 +367,8 @@ export const useOnlineStore = create<OnlineStoreState>()(
               seoTitle: sp.seo_title || `${sp.name} - Store`,
               seoDescription: sp.seo_description || '',
               sections: Array.isArray(sp.sections) ? sp.sections : [],
-              pageProps: sp.page_props || {},
+              pageProps: sp.draft_page_props || sp.page_props || {},
+              draftVersion: Number(sp.draft_version || 0),
               visibility: sp.visibility || { desktop: true, tablet: true, mobile: true },
               is_system: sp.is_system,
               is_locked: sp.is_locked,
@@ -424,49 +427,66 @@ export const useOnlineStore = create<OnlineStoreState>()(
       },
 
       saveSettingsToBackend: async (newSettings: Record<string, any>) => {
-        try {
-          const brandFields: any = {};
-          if (newSettings.storeName || newSettings.name) brandFields.name = newSettings.storeName || newSettings.name;
-          if (newSettings.tagline !== undefined) brandFields.tagline = newSettings.tagline;
-          if (newSettings.logoUrl !== undefined) brandFields.logoUrl = newSettings.logoUrl;
-          if (newSettings.faviconUrl !== undefined) brandFields.faviconUrl = newSettings.faviconUrl;
-          if (newSettings.socialLinks !== undefined) brandFields.socialLinks = newSettings.socialLinks;
-
-          const settingFields: any = {};
-          if (newSettings.passwordEnabled !== undefined) settingFields.passwordEnabled = newSettings.passwordEnabled;
-          if (newSettings.password !== undefined) settingFields.password = newSettings.password;
-          if (newSettings.maintenanceMode !== undefined) settingFields.maintenanceMode = newSettings.maintenanceMode;
-          if (newSettings.redirects !== undefined) settingFields.redirects = newSettings.redirects;
-          if (newSettings.seoDefaults !== undefined) settingFields.seoDefaults = newSettings.seoDefaults;
-          if (newSettings.primaryDomain !== undefined) settingFields.primaryDomain = newSettings.primaryDomain;
-
-          const promises: Promise<any>[] = [];
-          if (Object.keys(brandFields).length > 0) {
-            promises.push(apiClient.patch('/storefront/brand', brandFields));
-          }
-          if (Object.keys(settingFields).length > 0) {
-            promises.push(apiClient.patch('/storefront/settings', settingFields));
-          }
-          if (promises.length > 0) {
-            await Promise.allSettled(promises);
-          }
-        } catch (e) {
-          console.warn('[OnlineStore] saveSettingsToBackend error:', e);
+        const brandFields: any = {};
+        if (newSettings.storeName !== undefined || newSettings.name !== undefined) {
+          brandFields.name = newSettings.storeName ?? newSettings.name;
         }
+        if (newSettings.tagline !== undefined) brandFields.tagline = newSettings.tagline;
+        if (newSettings.logoUrl !== undefined) brandFields.logoUrl = newSettings.logoUrl;
+        if (newSettings.faviconUrl !== undefined) brandFields.faviconUrl = newSettings.faviconUrl;
+        if (newSettings.socialLinks !== undefined) brandFields.socialLinks = newSettings.socialLinks;
+
+        const settingFields: any = {};
+        if (newSettings.passwordEnabled !== undefined) settingFields.passwordEnabled = newSettings.passwordEnabled;
+        if (newSettings.password !== undefined) settingFields.password = newSettings.password;
+        if (newSettings.maintenanceMode !== undefined) settingFields.maintenanceMode = newSettings.maintenanceMode;
+        if (newSettings.redirects !== undefined) settingFields.redirects = newSettings.redirects;
+        if (newSettings.seoDefaults !== undefined) settingFields.seoDefaults = newSettings.seoDefaults;
+        if (newSettings.primaryDomain !== undefined) settingFields.primaryDomain = newSettings.primaryDomain;
+
+        const requests: Promise<any>[] = [];
+        if (Object.keys(brandFields).length > 0) {
+          requests.push(apiClient.patch('/storefront/brand', brandFields));
+        }
+        if (Object.keys(settingFields).length > 0) {
+          requests.push(apiClient.patch('/storefront/settings', settingFields));
+        }
+        await Promise.all(requests);
       },
 
       saveThemeToBackend: async (newTheme: Partial<ThemeData>) => {
-        try {
-          await apiClient.patch('/storefront/theme', {
-            presetName: newTheme.presetName || (newTheme as any).id || (newTheme as any).name || 'modern',
-            palette: newTheme.palette,
-            typography: newTheme.typography,
-            buttons: newTheme.buttons,
-            effects: newTheme.effects,
-          });
-        } catch (e) {
-          console.warn('[OnlineStore] saveThemeToBackend error:', e);
+        await apiClient.patch('/storefront/theme', {
+          presetName: newTheme.presetName || (newTheme as any).id || (newTheme as any).name || 'modern',
+          palette: newTheme.palette,
+          typography: newTheme.typography,
+          buttons: newTheme.buttons,
+          effects: newTheme.effects,
+          customCss: (newTheme as any).customCss,
+        });
+      },
+
+      savePageDraftToBackend: async (pageId: string) => {
+        const page = get().pages.find((item) => item.id === pageId);
+        if (!page) {
+          throw new Error('The selected page could not be found in the current store.');
         }
+
+        const response = await apiClient.patch<{ message: string; pageId: string; version: number }>(
+          `/storefront/pages/${encodeURIComponent(page.id)}/draft`,
+          {
+            sections: page.sections || [],
+            pageProps: page.pageProps || {},
+            expectedVersion: page.draftVersion ?? 0,
+          }
+        );
+
+        set((state) => ({
+          pages: state.pages.map((item) =>
+            item.id === pageId ? { ...item, draftVersion: response.version } : item
+          ),
+        }));
+
+        return response;
       },
 
       publishStoreToBackend: async (notes = 'Published from Store Editor') => {
@@ -641,7 +661,6 @@ export const useOnlineStore = create<OnlineStoreState>()(
       }
       return { theme: merged, hasUnsavedChanges: true };
     });
-    get().saveThemeToBackend(get().theme);
   },
 
   resetTheme: () => {
@@ -760,7 +779,6 @@ export const useOnlineStore = create<OnlineStoreState>()(
       settings: { ...state.settings, ...newSettings },
       hasUnsavedChanges: true,
     }));
-    get().saveSettingsToBackend(newSettings);
   },
 
   // --- Pages Editor Methods ---
