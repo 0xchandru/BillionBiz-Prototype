@@ -19,13 +19,43 @@ export const featuredCollectionBlockDefinitions: BlockDefinition[] = [
       { key: 'showPrice', label: 'Show price', control: 'toggle', defaultValue: true },
       { key: 'showCompareAt', label: 'Show compare-at price', control: 'toggle', defaultValue: true },
       { key: 'showVendor', label: 'Show brand', control: 'toggle', defaultValue: false },
-      { key: 'showAddToCart', label: 'Show add-to-cart action', control: 'toggle', defaultValue: true }
+      { key: 'showDescription', label: 'Show product description', control: 'toggle', defaultValue: false },
+      { key: 'showAddToCart', label: 'Show add-to-cart action', control: 'toggle', defaultValue: true },
+      { key: 'imageRatio', label: 'Image ratio', control: 'select', defaultValue: 'square', options: [
+        { label: 'Square · 1:1', value: 'square' },
+        { label: 'Portrait · 4:5', value: 'portrait' },
+        { label: 'Tall · 3:4', value: 'tall' },
+        { label: 'Landscape · 4:3', value: 'landscape' }
+      ] },
+      { key: 'imageFit', label: 'Image fit', control: 'select', defaultValue: 'cover', options: [
+        { label: 'Fill frame', value: 'cover' },
+        { label: 'Fit entire image', value: 'contain' }
+      ] },
+      { key: 'titleSize', label: 'Product title size', control: 'select', defaultValue: 'medium', options: [
+        { label: 'Small', value: 'small' },
+        { label: 'Medium', value: 'medium' },
+        { label: 'Large', value: 'large' }
+      ] },
+      { key: 'addToCartLabel', label: 'Add-to-cart button label', control: 'text', defaultValue: 'Add to cart', maxLength: 24 },
+      { key: 'chooseOptionsLabel', label: 'Variant button label', control: 'text', defaultValue: 'Choose options', maxLength: 24 },
+      { key: 'actionStyle', label: 'Action button style', control: 'select', defaultValue: 'primary', options: [
+        { label: 'Primary', value: 'primary' },
+        { label: 'Secondary', value: 'secondary' },
+        { label: 'Outline', value: 'outline' }
+      ] }
     ],
     defaultSettings: {
       showPrice: true,
       showCompareAt: true,
       showVendor: false,
-      showAddToCart: true
+      showDescription: false,
+      showAddToCart: true,
+      imageRatio: 'square',
+      imageFit: 'cover',
+      titleSize: 'medium',
+      addToCartLabel: 'Add to cart',
+      chooseOptionsLabel: 'Choose options',
+      actionStyle: 'primary'
     }
   }
 ];
