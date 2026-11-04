@@ -290,6 +290,7 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
         footerTree={publishedFooterTree}
         footerRows={publishedFooterRows}
         useEditorChrome={useEditorChrome}
+        device={runtimeDevice}
         currentPath={activePath}
       >
         {renderPageView()}
