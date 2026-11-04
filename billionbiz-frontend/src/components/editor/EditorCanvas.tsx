@@ -13,6 +13,7 @@ import { WebsitePreview } from './WebsitePreview';
 
 import { useEditorContextStore } from '../../store/editorContextStore';
 import { scrollPreviewToHeaderSection, scrollPreviewToFooterSection, scrollPreviewToSection } from './utils/previewScroll';
+import { resolveEditorPage } from './utils/pageIdentity';
 
 export const EditorCanvas: React.FC = () => {
    const { 
@@ -23,7 +24,8 @@ export const EditorCanvas: React.FC = () => {
      pagesNavLevel 
    } = useLandingEditorStore();
    const { selectedTarget } = useEditorContextStore();
-   const { theme } = useSiteStore();
+   const { theme, pages } = useSiteStore();
+   const activePage = resolveEditorPage(pages, selectedPageId);
    const containerRef = useRef<HTMLDivElement>(null);
 
    // Scroll preview intelligently when switching or opening a particular page editor
