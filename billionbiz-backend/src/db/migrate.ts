@@ -917,6 +917,22 @@ export async function runMigrations() {
     END $$;
   `);
 
+  // 21. Draft version integrity: serialize page autosaves on a stable version key.
+  // Retain the newest legacy row when prior releases created duplicate versions.
+  await query(`
+    DELETE FROM page_draft_versions older
+    USING page_draft_versions newer
+    WHERE older.page_id = newer.page_id
+      AND older.version = newer.version
+      AND (
+        older.created_at < newer.created_at
+        OR (older.created_at = newer.created_at AND older.id < newer.id)
+      );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_page_draft_page_version
+      ON page_draft_versions (page_id, version);
+  `);
+
   console.log('[Migration] All migrations completed successfully.');
 }
 
