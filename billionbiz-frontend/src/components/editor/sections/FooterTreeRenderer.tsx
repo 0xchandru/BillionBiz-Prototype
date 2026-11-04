@@ -27,6 +27,9 @@ import {
 import { useEditorContextStore } from '../../../store/editorContextStore';
 import { useLandingEditorStore } from '../../../store/landingEditorStore';
 import type { FooterTreeNode } from '../engine/footerTreeTypes';
+import { createDefaultFooterTree } from '../engine/footerTreeEngine';
+import { createDefaultFooterStack } from '../engine/footerPresets';
+import type { FooterRow } from '../engine/types';
 
 // ─── SOCIAL ICONS ─────────────────────────────────────────────
 
@@ -1411,12 +1414,14 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
 
 interface FooterTreeRendererProps {
   tree?: FooterTreeNode[];
+  rows?: FooterRow[];
   isEditorInteractive?: boolean;
   device?: 'desktop' | 'tablet' | 'mobile';
 }
 
 export const FooterTreeRenderer: React.FC<FooterTreeRendererProps> = ({
   tree: explicitTree,
+  rows: explicitRows,
   isEditorInteractive = false,
   device = 'desktop',
 }) => {
@@ -1433,10 +1438,20 @@ export const FooterTreeRenderer: React.FC<FooterTreeRendererProps> = ({
   const [hoveredId, setHoveredId] = useState<string | 'root' | null>(null);
 
   // Use explicitTree if provided, or pending template tree during preview, or store footerTree
-  const effectiveTree = explicitTree || pendingFooterTree || footerTree;
+  const effectiveTree = explicitTree !== undefined
+    ? explicitTree
+    : isEditorInteractive
+      ? (pendingFooterTree || footerTree)
+      : createDefaultFooterTree();
+  const effectiveRows = explicitRows !== undefined
+    ? explicitRows
+    : isEditorInteractive
+      ? footerRows
+      : createDefaultFooterStack();
 
-  // Retrieve root row styling & layout
-  const rootRow = footerRows.find((r) => r.id === 'footer-main') || footerRows[0];
+  // Public rendering must use the supplied snapshot, never this browser's
+  // persisted editor context.
+  const rootRow = effectiveRows.find((r) => r.id === 'footer-main') || effectiveRows[0];
   const layout = rootRow?.layout;
   const styling = rootRow?.styling;
 
