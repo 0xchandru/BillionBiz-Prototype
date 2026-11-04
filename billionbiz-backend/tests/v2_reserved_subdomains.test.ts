@@ -232,6 +232,12 @@ describe('Reserved Subdomains & DNS Validation Specification Tests', () => {
       expect(res.body.error).toBe('SUBDOMAIN_RESERVED');
     });
 
+    it.each(['staff', 'pos', 'help'])('returns 400 for reserved subdomain %s', async (reservedSlug) => {
+      const res = await makeRequest('GET', `/api/v1/auth/check-domain?slug=${reservedSlug}`);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('SUBDOMAIN_RESERVED');
+    });
+
     it('returns 400 for reserved subdomain support', async () => {
       const res = await makeRequest('GET', '/api/v1/auth/check-domain?slug=support');
       expect(res.status).toBe(400);
