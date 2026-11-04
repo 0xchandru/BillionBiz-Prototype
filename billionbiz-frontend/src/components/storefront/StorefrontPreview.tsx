@@ -140,24 +140,44 @@ export const StorefrontPreview: React.FC<StorefrontPreviewProps> = ({
     }
   };
 
-  // Real store data source based on Draft vs Published mode
-  const effectiveTheme = previewMode === 'draft' && siteStore.theme
-    ? siteStore.theme
-    : serverData?.theme || {};
+  // Published mode is sourced only from the immutable active release.
+  // Draft mode deliberately uses the editor's current local workspace state.
+  const publishedSnapshot = serverData?.activeRelease || {};
+  const publishedTheme = publishedSnapshot.theme || serverData?.theme || {};
+  const publishedBrand = publishedSnapshot.brand || serverData?.brand || {};
+  const publishedSettings = publishedSnapshot.settings || serverData?.settings || {};
+  const publishedPages = Array.isArray(publishedSnapshot.pages)
+    ? publishedSnapshot.pages
+    : (serverData?.pages || []);
 
-  const effectiveBrand = previewMode === 'draft' && siteStore.settings
+  const effectiveTheme = previewMode === 'draft'
+    ? siteStore.theme
+    : publishedTheme;
+
+  const effectiveBrand = previewMode === 'draft'
     ? {
         brand_name: siteStore.settings.storeName || serverData?.brand?.brand_name || serverData?.brand?.name,
-        tagline: siteStore.settings.tagline || serverData?.brand?.tagline,
-        logo_url: siteStore.settings.logoUrl || serverData?.brand?.logo_url || serverData?.brand?.logoUrl,
-        favicon_url: siteStore.settings.faviconUrl || serverData?.brand?.favicon_url || serverData?.brand?.faviconUrl,
-        social_links: siteStore.settings.socialLinks || serverData?.brand?.social_links || serverData?.brand?.socialLinks
+        tagline: siteStore.settings.tagline ?? serverData?.brand?.tagline,
+        logo_url: siteStore.settings.logoUrl ?? serverData?.brand?.logo_url ?? serverData?.brand?.logoUrl,
+        favicon_url: siteStore.settings.faviconUrl ?? serverData?.brand?.favicon_url ?? serverData?.brand?.faviconUrl,
+        social_links: siteStore.settings.socialLinks ?? serverData?.brand?.social_links ?? serverData?.brand?.socialLinks
       }
-    : serverData?.brand || {};
+    : {
+        brand_name: publishedBrand.brand_name || publishedBrand.name || serverData?.brand?.brand_name || serverData?.brand?.name,
+        tagline: publishedBrand.tagline,
+        logo_url: publishedBrand.logo_url || publishedBrand.logoUrl,
+        favicon_url: publishedBrand.favicon_url || publishedBrand.faviconUrl,
+        social_links: publishedBrand.social_links || publishedBrand.socialLinks || {}
+      };
 
-  const effectiveSettings = previewMode === 'draft' && siteStore.settings
+  const effectiveSettings = previewMode === 'draft'
     ? { ...serverData?.settings, ...siteStore.settings }
-    : serverData?.settings || {};
+    : {
+        ...publishedSettings,
+        password_enabled: publishedSettings.password_enabled ?? publishedSettings.passwordEnabled ?? false,
+        maintenance_mode: publishedSettings.maintenance_mode ?? publishedSettings.maintenanceMode ?? false
+      };
+  const effectivePages = previewMode === 'draft' ? siteStore.pages : publishedPages;
 
   const effectiveSlug = serverData?.store?.slug || storeSlug;
   const pathSuffix = activePath === '/' ? '' : activePath;
@@ -330,9 +350,9 @@ export const StorefrontPreview: React.FC<StorefrontPreviewProps> = ({
             <StorefrontRenderer
               store={serverData?.store || { name: 'Demo Store', slug: storeSlug }}
               brand={effectiveBrand}
-              themeTokens={effectiveTheme?.palette || effectiveTheme?.tokens}
+              themeTokens={effectiveTheme}
               settings={effectiveSettings}
-              pages={serverData?.pages || []}
+              pages={effectivePages}
               products={serverData?.products || []}
               offerings={serverData?.offerings || []}
               categories={serverData?.categories || []}
