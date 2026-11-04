@@ -822,6 +822,12 @@ storefrontRouter.post(
         [releaseId, storeId]
       );
 
+      // The release row must exist before its id is written to the FK pointer.
+      await client.query(
+        `UPDATE storefront_settings SET active_release_id = $1, updated_at = NOW() WHERE store_id = $2`,
+        [rollbackReleaseId, storeId]
+      );
+
       await client.query(
         `UPDATE stores SET status = 'ACTIVE', updated_at = NOW() WHERE id = $1`,
         [storeId]
@@ -955,9 +961,8 @@ storefrontRouter.post(
            primary_domain = $9,
            password_enabled = $10,
            maintenance_mode = $11,
-           active_release_id = $12,
            updated_at = NOW()
-         WHERE store_id = $13`,
+         WHERE store_id = $12`,
         [
           brand.name || brand.brand_name || null,
           brand.tagline || '',
@@ -970,7 +975,6 @@ storefrontRouter.post(
           settings.primaryDomain || null,
           Boolean(settings.passwordEnabled ?? settings.password_enabled),
           Boolean(settings.maintenanceMode ?? settings.maintenance_mode),
-          rollbackReleaseId,
           storeId
         ]
       );
