@@ -131,6 +131,7 @@ import { BrandRightPanel } from './right/BrandRightPanel';
 import { SettingsRightPanel } from './right/SettingsRightPanel';
 import { ColorPickerPopover } from './ui/ColorPickerPopover';
 import { CapabilityInspector } from './engine/CapabilityInspector';
+import { HeroBannerBlockInspector } from './sectionEngine/HeroBannerBlockInspector';
 
 import styles from '../../pages/editor/EditorLayout.module.css';
 
@@ -8296,6 +8297,12 @@ export const EditorRightSidebar: React.FC = () => {
             </div>
           </div>
         </>
+      ) : activeSection?.type === 'HeroBanner' ? (
+        <HeroBannerBlockInspector
+          pageId={(isGlobalComponent ? landingPage?.id : activePage?.id) || landingPage?.id || ''}
+          section={activeSection}
+          onClose={closeRightSidebar}
+        />
       ) : activeSection && sectionConfig ? (
         /* ======= NEW CONFIG-DRIVEN EDITOR ======= */
         <>
