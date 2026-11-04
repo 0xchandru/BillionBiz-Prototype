@@ -178,8 +178,20 @@ export const EditorTopBar: React.FC = () => {
       return;
     }
 
-    if (isStoreBrand || isGrowth || isSettings) {
+    if (isStoreBrand || isSettings) {
       await saveSettingsToBackend(settings);
+      return;
+    }
+
+    if (isGrowth) {
+      const section = useLandingEditorStore.getState().brandSection;
+      if (section === 'page-seo') {
+        const page = resolveEditorPage(pages, selectedPageId) || pages.find((item) => item.path === '/') || pages[0];
+        if (!page) throw new Error('Select a page before saving page metadata.');
+        await savePageDraftToBackend(page.id);
+      } else {
+        await saveSettingsToBackend(settings);
+      }
       return;
     }
 
