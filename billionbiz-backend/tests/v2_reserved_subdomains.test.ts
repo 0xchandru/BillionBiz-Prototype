@@ -71,6 +71,11 @@ function makeRequest(
 }
 
 describe('Reserved Subdomains & DNS Validation Specification Tests', () => {
+  // Shared by registration and platform-host resolution test groups.
+  const uniqueId = Date.now().toString().slice(-6);
+  const existingSlug = `taken-store-${uniqueId}`;
+  let registeredStoreToken = '';
+
   describe('1. Pure Subdomain Validation Unit Tests (Section 6 Test Matrix)', () => {
     it('chandru1 -> Allowed (200, valid)', () => {
       const res = validateSubdomainSlug('chandru1');
@@ -283,10 +288,6 @@ describe('Reserved Subdomains & DNS Validation Specification Tests', () => {
   });
 
   describe('3. Registration & Store Provisioning Enforcement', () => {
-    const uniqueId = Date.now().toString().slice(-6);
-    const existingSlug = `taken-store-${uniqueId}`;
-    let registeredStoreToken = '';
-
     it('successfully provisions a store with a valid non-reserved slug', async () => {
       const regRes = await makeRequest('POST', '/api/v1/auth/register-streamlined', {
         body: {
