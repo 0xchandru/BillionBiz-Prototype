@@ -27,11 +27,8 @@ export const PasswordGateView: React.FC<PasswordGateViewProps> = ({
         const success = await onUnlock(password);
         if (!success) setError(true);
       } else {
-        // Fallback demo unlock
-        if (password.length > 0) {
-          sessionStorage.setItem('storefront_password_unlocked', 'true');
-          window.location.reload();
-        }
+        // Never provide a client-only fallback for storefront access control.
+        setError(true);
       }
     } catch {
       setError(true);
