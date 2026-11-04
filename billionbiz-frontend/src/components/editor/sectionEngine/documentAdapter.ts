@@ -1,5 +1,6 @@
 import type { SectionInstance } from './types';
 import { createHeroBannerInstance, createDefaultHeroBannerBlocks } from './heroBannerDefinition';
+import { createFeaturedCollectionInstance } from './featuredCollectionDefinition';
 import { getSectionDefinition } from './registry';
 
 export interface LegacySectionData {
@@ -72,6 +73,41 @@ export function migrateLegacyHeroBanner(section: LegacySectionData): LegacySecti
   };
 }
 
+export function migrateLegacyFeaturedCollection(section: LegacySectionData): LegacySectionData & SectionInstance {
+  if (isVersionedSection(section)) return section;
+
+  const props = section.props || {};
+  const seeded = createFeaturedCollectionInstance(section.id, section.name || 'Featured Collection');
+  const settings = {
+    ...seeded.settings,
+    ...(typeof props.heading === 'string' ? { heading: props.heading } : {}),
+    ...(typeof props.description === 'string' ? { description: props.description } : {}),
+    ...(typeof props.linkText === 'string' ? { linkText: props.linkText } : {}),
+    ...(typeof props.linkUrl === 'string' ? { linkUrl: props.linkUrl } : {}),
+    ...(typeof props.selectedLayout === 'string' ? { layout: props.selectedLayout } : {}),
+    ...(typeof props.layout === 'string' ? { layout: props.layout } : {}),
+    ...(typeof props.columns === 'number' ? { columns: props.columns } : {}),
+    ...(typeof props.productLimit === 'number' ? { productLimit: props.productLimit } : {})
+  };
+
+  return {
+    ...seeded,
+    settings,
+    // Product data remains a live catalogue binding. Legacy copied arrays are
+    // deliberately not migrated into page content.
+    designOverrides: {
+      ...(props.bgColor && props.bgColor !== 'inherit' ? { sectionBackground: props.bgColor } : {}),
+      ...(props.headingColor && props.headingColor !== 'inherit' ? { headingColor: props.headingColor } : {}),
+      ...(props.textColor && props.textColor !== 'inherit' ? { bodyColor: props.textColor } : {}),
+      ...(props.cardBg && props.cardBg !== 'inherit' ? { cardBackground: props.cardBg } : {}),
+      ...(props.priceColor && props.priceColor !== 'inherit' ? { priceColor: props.priceColor } : {}),
+      ...(props.linkColor && props.linkColor !== 'inherit' ? { linkColor: props.linkColor } : {})
+    },
+    responsiveOverrides: {},
+    props: {}
+  } as LegacySectionData & SectionInstance;
+}
+
 export function migrateLegacySection(section: LegacySectionData): LegacySectionData {
   if (isVersionedSection(section)) return section;
   const definition = getSectionDefinition(section.type);
@@ -79,6 +115,9 @@ export function migrateLegacySection(section: LegacySectionData): LegacySectionD
 
   if (section.type === 'HeroBanner') {
     return migrateLegacyHeroBanner(section);
+  }
+  if (section.type === 'FeaturedCollection') {
+    return migrateLegacyFeaturedCollection(section);
   }
 
   return {
@@ -94,8 +133,10 @@ export function migrateLegacySection(section: LegacySectionData): LegacySectionD
 
 export function sectionInstanceToRendererProps(section: LegacySectionData): Record<string, any> {
   if (!isVersionedSection(section)) {
-    if (section.type === 'HeroBanner') {
-      const migrated = migrateLegacyHeroBanner(section);
+    if (section.type === 'HeroBanner' || section.type === 'FeaturedCollection') {
+      const migrated = section.type === 'HeroBanner'
+        ? migrateLegacyHeroBanner(section)
+        : migrateLegacyFeaturedCollection(section);
       return {
         ...(section.props || {}),
         ...(migrated.settings || {}),
