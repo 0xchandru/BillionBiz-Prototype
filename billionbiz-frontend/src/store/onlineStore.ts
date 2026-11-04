@@ -56,7 +56,7 @@ export interface PageData {
 }
 
 import type { GlobalThemeData } from '../components/editor/theme/themePresets';
-import { getDefaultTheme, themePresets } from '../components/editor/theme/themePresets';
+import { DEFAULT_THEME_SPACING, getDefaultTheme, getThemeSpacing, themePresets } from '../components/editor/theme/themePresets';
 import { useThemeHistoryStore } from './themeHistoryStore';
 
 export type ThemeData = GlobalThemeData;
@@ -88,6 +88,7 @@ export interface OnlineStoreState {
   resetColorPalette: () => void;
   resetTypography: () => void;
   resetButtons: () => void;
+  resetSpacing: () => void;
   resetEffects: () => void;
   resetCustomCss: () => void;
   undoTheme: () => void;
@@ -781,6 +782,23 @@ export const useOnlineStore = create<OnlineStoreState>()(
         theme: {
           ...state.theme,
           buttons: JSON.parse(JSON.stringify(preset.buttons)),
+        },
+        hasUnsavedChanges: true
+      };
+    });
+  },
+
+  resetSpacing: () => {
+    useThemeHistoryStore.getState().pushState(get().theme, true);
+    set((state) => {
+      const preset = themePresets[state.theme.presetName] || getDefaultTheme();
+      return {
+        theme: {
+          ...state.theme,
+          spacing: {
+            ...DEFAULT_THEME_SPACING,
+            ...(preset.spacing || {})
+          }
         },
         hasUnsavedChanges: true
       };
