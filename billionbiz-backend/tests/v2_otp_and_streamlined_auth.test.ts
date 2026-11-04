@@ -65,6 +65,12 @@ function makeRequest(
 }
 
 describe('V2 Streamlined Registration & Phone/Email OTP Authentication', () => {
+  beforeAll(async () => {
+    await query("DELETE FROM store_domains WHERE domain LIKE '%velvet-cafe%'");
+    await query("DELETE FROM stores WHERE slug LIKE '%velvet-cafe%'");
+    await query("DELETE FROM users WHERE email LIKE '%streamline_%'");
+  });
+
   const testEmail = `streamline_${Date.now()}@test.codes`;
   const testPhone = `+9198765${Math.floor(10000 + Math.random() * 90000)}`;
 

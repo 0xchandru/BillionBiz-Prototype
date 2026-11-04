@@ -67,13 +67,14 @@ describe('V2.3 Merchant Provider Connections & Envelope Encryption (P0)', () => 
   let orgIdB: string;
 
   beforeAll(async () => {
+    const ts = Date.now();
     // Register Merchant A
     const resA = await makeRequest('POST', '/api/v1/auth/register', {
       body: {
-        email: `merchant_enc_a_${Date.now()}@test.codes`,
+        email: `merchant_enc_a_${ts}@test.codes`,
         password: 'Password@123',
         fullName: 'Merchant Alpha',
-        storeName: 'Alpha Store'
+        storeName: `Alpha Store ${ts}`
       }
     });
     merchantTokenA = resA.body.token;
@@ -83,10 +84,10 @@ describe('V2.3 Merchant Provider Connections & Envelope Encryption (P0)', () => 
     // Register Merchant B (Isolated tenant)
     const resB = await makeRequest('POST', '/api/v1/auth/register', {
       body: {
-        email: `merchant_enc_b_${Date.now()}@test.codes`,
+        email: `merchant_enc_b_${ts}@test.codes`,
         password: 'Password@123',
         fullName: 'Merchant Beta',
-        storeName: 'Beta Store'
+        storeName: `Beta Store ${ts}`
       }
     });
     merchantTokenB = resB.body.token;

@@ -22,24 +22,40 @@ export const app = express();
 export const server = http.createServer(app);
 const PORT = env.PORT || 8080;
 
-// Explicit allowlist of production & local development origins (Section 8)
-const ALLOWED_EXACT_ORIGINS = new Set([
-  'https://www.chandraprakash.codes',
-  'https://admin.chandraprakash.codes',
-  'https://accounts.chandraprakash.codes',
-  'https://staff.chandraprakash.codes',
-  'https://pos.chandraprakash.codes',
-  'https://ops.chandraprakash.codes',
-  'https://chandraprakash.codes',
+// Explicit allowlist of production & local development origins dynamically loaded from environment
+const rawOrigins = [
+  env.MAIN_WEBSITE_URL,
+  env.ADMIN_URL,
+  env.ACCOUNTS_URL,
+  env.STAFF_URL,
+  env.POS_URL,
+  env.OPS_URL,
+  env.APP_URL,
+  `https://${env.ROOT_DOMAIN}`,
   'http://localhost:5173',
   'http://localhost:5174',
   'http://127.0.0.1:5173',
   'http://127.0.0.1:5174',
   'http://localhost:3000',
   'http://localhost:8080'
-]);
+];
+
+if (env.ALLOWED_ORIGINS) {
+  env.ALLOWED_ORIGINS.split(',').forEach((o) => {
+    if (o.trim()) rawOrigins.push(o.trim());
+  });
+}
+if (env.CORS_ALLOWED_ORIGINS) {
+  env.CORS_ALLOWED_ORIGINS.split(',').forEach((o) => {
+    if (o.trim()) rawOrigins.push(o.trim());
+  });
+}
+
+const ALLOWED_EXACT_ORIGINS = new Set(rawOrigins.map((o) => o.trim().toLowerCase()));
 
 const DEV_ORIGIN_REGEX = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+const ESCAPED_ROOT = env.ROOT_DOMAIN.replace(/\./g, '\\.');
+const STORE_SUBDOMAIN_REGEX = new RegExp(`^https://([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)\\.${ESCAPED_ROOT}$`, 'i');
 
 export function isAllowedOrigin(origin: string | undefined): boolean {
   if (!origin) return false;
@@ -50,19 +66,13 @@ export function isAllowedOrigin(origin: string | undefined): boolean {
     return true;
   }
 
-  // Dynamic merchant store subdomains: https://<slug>.chandraprakash.codes
-  const storeSubMatch = lower.match(/^https:\/\/([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)\.chandraprakash\.codes$/);
+  // Dynamic merchant store subdomains: https://<slug>.<ROOT_DOMAIN>
+  const storeSubMatch = lower.match(STORE_SUBDOMAIN_REGEX);
   if (storeSubMatch) {
     const slug = storeSubMatch[1];
     if (!isReservedSubdomain(slug)) {
       return true;
     }
-  }
-
-  // Legacy stores subdomains: https://<slug>.stores.chandraprakash.codes
-  const legacyStoreMatch = lower.match(/^https:\/\/([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)\.stores\.chandraprakash\.codes$/);
-  if (legacyStoreMatch) {
-    return true;
   }
 
   // Development origins

@@ -55,13 +55,14 @@ describe('V2 Realtime, Concurrency & Release Gate Suite', () => {
       });
     });
 
+    const ts = Date.now();
     // 2. Register Tenant A
     const regResA = await api('POST', '/api/v1/auth/register', {
       body: {
-        email: `clean_tenant_${Date.now()}@example.com`,
+        email: `clean_tenant_${ts}@example.com`,
         password: 'Password123!',
         fullName: 'Clean Merchant',
-        storeName: 'Clean Slate Store',
+        storeName: `Clean Slate Store ${ts}`,
         capabilityMode: 'BOTH'
       }
     });
@@ -73,10 +74,10 @@ describe('V2 Realtime, Concurrency & Release Gate Suite', () => {
     // 3. Register Tenant B (for cross-tenant isolation testing)
     const regResB = await api('POST', '/api/v1/auth/register', {
       body: {
-        email: `isolated_tenant_${Date.now()}@example.com`,
+        email: `isolated_tenant_${ts}@example.com`,
         password: 'Password123!',
         fullName: 'Isolated Retailer',
-        storeName: 'Isolated Store',
+        storeName: `Isolated Store ${ts}`,
         capabilityMode: 'PRODUCTS'
       }
     });

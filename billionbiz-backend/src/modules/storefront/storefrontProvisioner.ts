@@ -209,7 +209,6 @@ export async function provisionDefaultStorefront(options: ProvisionStorefrontOpt
 }> {
   const { client, storeId, storeName, storeSlug, mode, userId } = options;
   const platformDomain = `${storeSlug}.${PLATFORM_MAIN_DOMAIN}`;
-  const legacyDomain = `${storeSlug}.stores.${PLATFORM_MAIN_DOMAIN}`;
 
   // 1. Primary Subdomain Mapping
   await client.query(
@@ -217,12 +216,6 @@ export async function provisionDefaultStorefront(options: ProvisionStorefrontOpt
      VALUES ($1, $2, $3, TRUE, TRUE, 'ACTIVE')
      ON CONFLICT (domain) DO UPDATE SET is_primary = TRUE, is_verified = TRUE`,
     [`dom-${uuidv4()}`, storeId, platformDomain]
-  );
-  await client.query(
-    `INSERT INTO store_domains (id, store_id, domain, is_primary, is_verified, ssl_status)
-     VALUES ($1, $2, $3, FALSE, TRUE, 'ACTIVE')
-     ON CONFLICT (domain) DO UPDATE SET is_verified = TRUE`,
-    [`dom-${uuidv4()}`, storeId, legacyDomain]
   );
 
   // 2. Default Store Navigation

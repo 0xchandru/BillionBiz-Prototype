@@ -161,10 +161,10 @@ describe('V2 Native Storefront Runtime & Multi-Tenant Isolation Suite (REQ-STORE
     expect(res.body.message).toContain('No active storefront found');
   });
 
-  it('TC-STORE-002: Unknown host header (*.stores.chandraprakash.codes) returns 404, never a fallback', async () => {
+  it('TC-STORE-002: Unknown host header (*.chandraprakash.codes) returns 404, never a fallback', async () => {
     const res = await request('GET', '/api/v1/storefront/render', {
       headers: {
-        host: 'bogus-merchant.stores.chandraprakash.codes'
+        host: 'bogus-merchant.chandraprakash.codes'
       }
     });
     expect(res.status).toBe(404);

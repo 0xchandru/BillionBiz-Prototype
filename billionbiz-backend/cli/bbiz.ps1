@@ -44,6 +44,26 @@ $ServiceExe = Join-Path $BackendDir "service\billionbiz-service.exe"
 $LogDir = Join-Path $BackendDir "service\logs"
 $ServiceName = "BillionBizBackend"
 
+# Parse .env file for dynamic domain and port configuration
+$EnvFile = Join-Path $BackendDir ".env"
+$ApiUrl = "https://api.chandraprakash.codes"
+$BackendPort = 8080
+if (Test-Path $EnvFile) {
+    Get-Content $EnvFile | ForEach-Object {
+        $line = $_.Trim()
+        if ($line -and -not $line.StartsWith("#") -and $line.Contains("=")) {
+            $parts = $line.Split("=", 2)
+            $k = $parts[0].Trim()
+            $v = $parts[1].Trim().Trim('"').Trim("'")
+            if ($k -eq "API_URL" -and $v) { $ApiUrl = $v.TrimEnd('/') }
+            if ($k -eq "PORT" -and $v) {
+                try { $BackendPort = [int]$v } catch {}
+            }
+        }
+    }
+}
+$HealthUrl = "$ApiUrl/health"
+
 function Write-BbizHeader {
     Write-Host ""
     Write-Host "  ================================================================" -ForegroundColor Cyan
@@ -120,12 +140,12 @@ function Show-Status {
     }
     Write-Host ""
 
-    # 4. Cloudflare Public Tunnel Health (https://api.chandraprakash.codes/health)
-    Write-Host "  [4] PUBLIC CLOUDFLARE TUNNEL (https://api.chandraprakash.codes/health)" -ForegroundColor Cyan
+    # 4. Cloudflare Public Tunnel Health ($HealthUrl)
+    Write-Host "  [4] PUBLIC CLOUDFLARE TUNNEL ($HealthUrl)" -ForegroundColor Cyan
     try {
-        $publicRes = Invoke-RestMethod -Uri "https://api.chandraprakash.codes/health" -Method Get -TimeoutSec 3 -ErrorAction Stop
+        $publicRes = Invoke-RestMethod -Uri $HealthUrl -Method Get -TimeoutSec 3 -ErrorAction Stop
         Write-Host "      Status         : " -NoNewline; Write-Host "$($publicRes.status)" -ForegroundColor Green
-        Write-Host "      Public URL     : " -NoNewline; Write-Host "https://api.chandraprakash.codes" -ForegroundColor Green
+        Write-Host "      Public URL     : " -NoNewline; Write-Host "$ApiUrl" -ForegroundColor Green
         Write-Host "      Tunnel State   : " -NoNewline; Write-Host "ACTIVE & ROUTING TRAFFIC" -ForegroundColor Green
     } catch {
         $msg = $_.Exception.Message
@@ -218,8 +238,8 @@ function Start-Bbiz {
     Write-Host ""
 
     if ($ready) {
-        Write-Host "  [OK] BillionBiz Backend is UP and listening on http://localhost:8080!" -ForegroundColor Green
-        Write-Host "  [OK] Public Cloudflare endpoint: https://api.chandraprakash.codes" -ForegroundColor Green
+        Write-Host "  [OK] BillionBiz Backend is UP and listening on http://localhost:$BackendPort!" -ForegroundColor Green
+        Write-Host "  [OK] Public Cloudflare endpoint: $ApiUrl" -ForegroundColor Green
     } else {
         Write-Host "  [!] Backend started, but health check did not respond within 10s. Run 'bbiz logs' to inspect output." -ForegroundColor Yellow
     }
@@ -398,10 +418,10 @@ function Test-Health {
     Write-Host ""
 
     # Cloudflare Public API
-    Write-Host "  Testing Cloudflare Tunnel: https://api.chandraprakash.codes/health..." -NoNewline
+    Write-Host "  Testing Cloudflare Tunnel: $HealthUrl..." -NoNewline
     try {
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
-        $res = Invoke-RestMethod -Uri "https://api.chandraprakash.codes/health" -Method Get -TimeoutSec 5 -ErrorAction Stop
+        $res = Invoke-RestMethod -Uri $HealthUrl -Method Get -TimeoutSec 5 -ErrorAction Stop
         $sw.Stop()
         Write-Host " OK ($($sw.ElapsedMilliseconds)ms)" -ForegroundColor Green
         Write-Host "    Status   : $($res.status)" -ForegroundColor White

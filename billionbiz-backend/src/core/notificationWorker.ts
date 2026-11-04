@@ -43,7 +43,7 @@ export async function sendEmail(
     return { success: true, id: `test-${uuidv4()}` };
   }
 
-  const fromAddress = env.SMTP_FROM || process.env.SMTP_FROM || 'BillionBiz <noreply@chandraprakash.codes>';
+  const fromAddress = env.SMTP_FROM || process.env.SMTP_FROM || `BillionBiz <noreply@${env.ROOT_DOMAIN}>`;
   const smtp = getSmtpTransporter();
 
   // 1. Direct SMTP if explicitly configured

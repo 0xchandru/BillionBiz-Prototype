@@ -7,6 +7,7 @@ import { generateToken, requireAuth } from '../../middleware/auth.js';
 import { recordAudit, enqueueOutbox } from '../../core/auditAndOutbox.js';
 import { sendEmail } from '../../core/notificationWorker.js';
 import { provisionDefaultStorefront } from '../storefront/storefrontProvisioner.js';
+import { env } from '../../core/env.js';
 import {
   validateSubdomainSlug,
   generateCandidateSlug,
@@ -21,20 +22,20 @@ export const identityRouter = Router();
  */
 export function resolvePortalDestination(role: string, isPlatformAdmin = false): { portal: string; url: string; path: string } {
   if (isPlatformAdmin) {
-    return { portal: 'PLATFORM_ADMIN', url: 'https://admin.chandraprakash.codes', path: '/platform' };
+    return { portal: 'PLATFORM_ADMIN', url: env.ADMIN_URL, path: '/platform' };
   }
   const normalizedRole = (role || '').toUpperCase();
   switch (normalizedRole) {
     case 'OWNER':
     case 'ADMIN':
     case 'MANAGER':
-      return { portal: 'MERCHANT_ADMIN', url: 'https://admin.chandraprakash.codes', path: '/dashboard' };
+      return { portal: 'MERCHANT_ADMIN', url: env.ADMIN_URL, path: '/dashboard' };
     case 'CASHIER':
-      return { portal: 'POS', url: 'https://pos.chandraprakash.codes', path: '/pos' };
+      return { portal: 'POS', url: env.POS_URL, path: '/pos' };
     case 'STAFF':
-      return { portal: 'STAFF', url: 'https://staff.chandraprakash.codes', path: '/staff' };
+      return { portal: 'STAFF', url: env.STAFF_URL, path: '/staff' };
     default:
-      return { portal: 'MERCHANT_ADMIN', url: 'https://admin.chandraprakash.codes', path: '/dashboard' };
+      return { portal: 'MERCHANT_ADMIN', url: env.ADMIN_URL, path: '/dashboard' };
   }
 }
 
@@ -272,7 +273,7 @@ identityRouter.post('/register', async (req: Request, res: Response) => {
       fullName,
       storeName,
       verifyToken: rawVerifyToken,
-      verifyUrl: `https://admin.chandraprakash.codes/verify-email?token=${rawVerifyToken}`
+      verifyUrl: `${env.ADMIN_URL}/verify-email?token=${rawVerifyToken}`
     }
   });
 
@@ -393,7 +394,7 @@ identityRouter.post('/forgot-password', async (req: Request, res: Response) => {
           email: user.email,
           fullName: user.full_name,
           resetToken: rawResetToken,
-          resetUrl: `https://admin.chandraprakash.codes/reset-password?token=${rawResetToken}`
+          resetUrl: `${env.ADMIN_URL}/reset-password?token=${rawResetToken}`
         }
       });
     }
@@ -1428,12 +1429,6 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
        ON CONFLICT (domain) DO UPDATE SET is_primary = TRUE, is_verified = TRUE`,
       [`dom-${uuidv4()}`, storeId, `${storeSlug}.${PLATFORM_MAIN_DOMAIN}`]
     );
-    await client.query(
-      `INSERT INTO store_domains (id, store_id, domain, is_primary, is_verified, ssl_status)
-       VALUES ($1, $2, $3, FALSE, TRUE, 'ACTIVE')
-       ON CONFLICT (domain) DO UPDATE SET is_verified = TRUE`,
-      [`dom-${uuidv4()}`, storeId, `${storeSlug}.stores.${PLATFORM_MAIN_DOMAIN}`]
-    );
 
     // 4. Capabilities & Storefront Settings
     await client.query(
@@ -1516,7 +1511,7 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
       await sendEmail({
         to: value,
         subject: `Welcome to BillionBiz! Your Store "${storeName}" is Ready`,
-        text: `Hello ${displayName},\n\nYour store "${storeName}" has been successfully provisioned on BillionBiz!\n\nYou can access your dashboard anytime at: https://admin.chandraprakash.codes/dashboard\n${!passwordHash ? 'You can log in securely anytime using email verification codes.' : 'You can log in with your password or email verification codes.'}\n\nStorefront Web Address: https://${storeSlug}.${PLATFORM_MAIN_DOMAIN}\n\nBest regards,\nThe BillionBiz Team`,
+        text: `Hello ${displayName},\n\nYour store "${storeName}" has been successfully provisioned on BillionBiz!\n\nYou can access your dashboard anytime at: ${env.ADMIN_URL}/dashboard\n${!passwordHash ? 'You can log in securely anytime using email verification codes.' : 'You can log in with your password or email verification codes.'}\n\nStorefront Web Address: https://${storeSlug}.${PLATFORM_MAIN_DOMAIN}\n\nBest regards,\nThe BillionBiz Team`,
         html: `
           <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 32px 16px; color: #0f172a;">
             <div style="max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
@@ -1527,12 +1522,12 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
               </p>
 
               <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 24px;">
-                <p style="margin: 0 0 8px 0; font-size: 13px; color: #64748b;"><strong>Merchant Portal:</strong> <a href="https://admin.chandraprakash.codes/dashboard" style="color: #2563eb; text-decoration: none;">admin.chandraprakash.codes/dashboard</a></p>
+                <p style="margin: 0 0 8px 0; font-size: 13px; color: #64748b;"><strong>Merchant Portal:</strong> <a href="${env.ADMIN_URL}/dashboard" style="color: #2563eb; text-decoration: none;">${env.ADMIN_URL.replace(/^https?:\/\//, '')}/dashboard</a></p>
                 <p style="margin: 0 0 8px 0; font-size: 13px; color: #64748b;"><strong>Storefront Address:</strong> <a href="https://${storeSlug}.${PLATFORM_MAIN_DOMAIN}" style="color: #2563eb; text-decoration: none;">https://${storeSlug}.${PLATFORM_MAIN_DOMAIN}</a></p>
                 <p style="margin: 0; font-size: 13px; color: #64748b;"><strong>Login Method:</strong> ${!passwordHash ? 'Instant Email Verification Code / OTP (No password required)' : 'Password or Email OTP'}</p>
               </div>
 
-              <a href="https://admin.chandraprakash.codes/dashboard" style="display: inline-block; background: #2563eb; color: #ffffff; padding: 12px 24px; border-radius: 8px; font-weight: 700; text-decoration: none; font-size: 14px;">
+              <a href="${env.ADMIN_URL}/dashboard" style="display: inline-block; background: #2563eb; color: #ffffff; padding: 12px 24px; border-radius: 8px; font-weight: 700; text-decoration: none; font-size: 14px;">
                 Launch Merchant Dashboard &rarr;
               </a>
 

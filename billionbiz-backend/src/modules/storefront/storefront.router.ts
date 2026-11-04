@@ -8,6 +8,7 @@ import { resolveTenant } from '../../middleware/tenant.js';
 import { handleIdempotency } from '../../middleware/idempotency.js';
 import { recordAudit } from '../../core/auditAndOutbox.js';
 import { provisionDefaultStorefront } from './storefrontProvisioner.js';
+import { PLATFORM_MAIN_DOMAIN } from '../../core/subdomains.js';
 
 export const storefrontRouter = Router();
 
@@ -433,7 +434,7 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
       mode: settingsRow.mode || 'COMMERCE',
       homePage: settingsRow.home_page || 'LANDING',
       navigation: settingsRow.navigation_config || [],
-      primaryDomain: settingsRow.primary_domain || `${store.slug}.stores.chandraprakash.codes`,
+      primaryDomain: settingsRow.primary_domain || `${store.slug}.${PLATFORM_MAIN_DOMAIN}`,
       passwordEnabled: settingsRow.password_enabled || false,
       maintenanceMode: settingsRow.maintenance_mode || false
     }
@@ -527,7 +528,7 @@ storefrontRouter.get('/render', resolveTenant, async (req: Request, res: Respons
       mode: settingsRow.mode || 'COMMERCE',
       homePage: settingsRow.home_page || 'LANDING',
       navigation: settingsRow.navigation_config || [],
-      primaryDomain: settingsRow.primary_domain || `${store.slug}.stores.chandraprakash.codes`,
+      primaryDomain: settingsRow.primary_domain || `${store.slug}.${PLATFORM_MAIN_DOMAIN}`,
       passwordEnabled: settingsRow.password_enabled || false,
       maintenanceMode: settingsRow.maintenance_mode || false
     },
@@ -1008,7 +1009,7 @@ storefrontRouter.post(
         dnsInstructions: {
           type: 'CNAME',
           host: cleanDomain.split('.')[0],
-          target: 'stores.chandraprakash.codes'
+          target: PLATFORM_MAIN_DOMAIN
         }
       }
     });
@@ -1085,7 +1086,7 @@ storefrontRouter.delete(
     }
     const { domain, is_primary } = domRes.rows[0];
 
-    if (domain.endsWith('.stores.chandraprakash.codes')) {
+    if (domain.endsWith(`.${PLATFORM_MAIN_DOMAIN}`)) {
       return res.status(400).json({ error: 'CANNOT_REMOVE_PLATFORM_DOMAIN', message: 'The default platform subdomain cannot be removed.' });
     }
     if (is_primary) {

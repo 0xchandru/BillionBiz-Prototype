@@ -5,7 +5,7 @@
  * subdomains protection across all registration, onboarding, and host resolution flows.
  */
 
-export const PLATFORM_MAIN_DOMAIN = 'chandraprakash.codes';
+export const PLATFORM_MAIN_DOMAIN = (process.env.ROOT_DOMAIN || 'chandraprakash.codes').trim().toLowerCase();
 
 /**
  * Complete list of reserved platform subdomains categorized by concern.

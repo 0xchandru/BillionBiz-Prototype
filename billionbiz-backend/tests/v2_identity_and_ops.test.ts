@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { app } from '../src/server.js';
 import { runMigrations } from '../src/db/migrate.js';
 import { seedDatabase } from '../src/db/seed.js';
+import { query } from '../src/db/pool.js';
 
 let authToken = '';
 
@@ -71,6 +72,8 @@ describe('V2 Identity, First-Store Provisioning & Outbox Services', () => {
   beforeAll(async () => {
     await runMigrations();
     await seedDatabase();
+    await query("DELETE FROM store_domains WHERE domain LIKE '%chandru-boutique%'");
+    await query("DELETE FROM stores WHERE slug LIKE '%chandru-boutique%'");
   });
 
   const testEmail = `merchant_${Date.now()}@example.com`;

@@ -7,15 +7,14 @@ export async function resolveTenant(req: Request, res: Response, next: NextFunct
   let storeId = (req.headers['x-store-id'] as string) || req.auth?.storeId;
   const locationId = req.headers['x-location-id'] as string | undefined;
 
-  // Resolve store from slug header, query parameter, or Host header (*.chandraprakash.codes or *.stores.chandraprakash.codes)
+  // Resolve store from slug header, query parameter, or Host header (*.<PLATFORM_MAIN_DOMAIN>)
   const host = (req.headers['x-forwarded-host'] as string) || req.headers.host || '';
   const hostClean = host.toLowerCase().split(':')[0];
   const hostParts = hostClean.split('.');
   let hostSlug: string | undefined;
 
-  if (hostParts.length >= 4 && hostParts[1] === 'stores' && hostClean.endsWith(PLATFORM_MAIN_DOMAIN)) {
-    hostSlug = hostParts[0];
-  } else if (hostParts.length === 3 && hostClean.endsWith(PLATFORM_MAIN_DOMAIN)) {
+  // Single-level store subdomains only: {slug}.<PLATFORM_MAIN_DOMAIN>
+  if (hostParts.length === 3 && hostClean.endsWith(PLATFORM_MAIN_DOMAIN)) {
     const candidateSub = hostParts[0];
     if (!isReservedSubdomain(candidateSub)) {
       hostSlug = candidateSub;
