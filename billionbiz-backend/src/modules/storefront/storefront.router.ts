@@ -446,30 +446,35 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
     [store.id]
   );
   const settingsRow = settingsRes.rows[0] || {};
+  const activeSnapshot = releaseRes.rows[0]?.snapshot || {};
+  const publishedBrand = activeSnapshot.brand || {};
+  const publishedSettings = activeSnapshot.settings || {};
 
   res.json({
     store,
-    activeRelease: releaseRes.rows[0]?.snapshot || null,
+    activeRelease: activeSnapshot,
     releaseNumber: releaseRes.rows[0]?.release_number || null,
-    theme: themeRes.rows[0] || { preset_name: 'modern', palette: {}, typography: {}, buttons: {}, effects: {} },
+    // The public site is an immutable publication. Unpublished theme/brand/
+    // navigation/settings changes remain visible only in the authenticated editor.
+    theme: activeSnapshot.theme || themeRes.rows[0] || { preset_name: 'modern', palette: {}, typography: {}, buttons: {}, effects: {} },
     pages: publishedPages,
     products: productsRes.rows,
     offerings: offeringsRes.rows,
     categories: categoriesRes.rows,
     brand: {
-      name: settingsRow.brand_name || store.name,
-      tagline: settingsRow.tagline || '',
-      logoUrl: settingsRow.logo_url || '',
-      faviconUrl: settingsRow.favicon_url || '',
-      socialLinks: settingsRow.social_links || {}
+      name: publishedBrand.name || settingsRow.brand_name || store.name,
+      tagline: publishedBrand.tagline ?? settingsRow.tagline ?? '',
+      logoUrl: publishedBrand.logoUrl ?? settingsRow.logo_url ?? '',
+      faviconUrl: publishedBrand.faviconUrl ?? settingsRow.favicon_url ?? '',
+      socialLinks: publishedBrand.socialLinks || settingsRow.social_links || {}
     },
     settings: {
-      mode: settingsRow.mode || 'COMMERCE',
-      homePage: settingsRow.home_page || 'LANDING',
-      navigation: settingsRow.navigation_config || [],
-      primaryDomain: settingsRow.primary_domain || `${store.slug}.${PLATFORM_MAIN_DOMAIN}`,
-      passwordEnabled: settingsRow.password_enabled || false,
-      maintenanceMode: settingsRow.maintenance_mode || false
+      mode: publishedSettings.mode || settingsRow.mode || 'COMMERCE',
+      homePage: publishedSettings.homePage || settingsRow.home_page || 'LANDING',
+      navigation: activeSnapshot.navigation || settingsRow.navigation_config || [],
+      primaryDomain: publishedSettings.primaryDomain || settingsRow.primary_domain || `${store.slug}.${PLATFORM_MAIN_DOMAIN}`,
+      passwordEnabled: publishedSettings.passwordEnabled ?? settingsRow.password_enabled ?? false,
+      maintenanceMode: publishedSettings.maintenanceMode ?? settingsRow.maintenance_mode ?? false
     }
   });
 });
