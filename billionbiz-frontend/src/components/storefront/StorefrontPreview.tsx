@@ -93,7 +93,7 @@ export const StorefrontPreview: React.FC<StorefrontPreviewProps> = ({
   // Merge custom pages from server data or local store
   const allPages = [
     ...standardPages,
-    ...(serverData?.pages || siteStore.pages || [])
+    ...(previewMode === 'draft' ? siteStore.pages : (serverData?.activeRelease?.pages || serverData?.pages || []))
       .filter((p: any) => !standardPages.some((sp) => sp.path === p.path))
       .map((p: any) => ({ label: `${p.name} (Custom)`, path: p.path }))
   ];
