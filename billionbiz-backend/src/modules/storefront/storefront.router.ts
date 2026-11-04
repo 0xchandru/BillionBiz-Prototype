@@ -1388,11 +1388,19 @@ storefrontRouter.post(
     }
 
     const domainId = `dom-${uuidv4()}`;
-    await query(
+    const insertedDomain = await query(
       `INSERT INTO store_domains (id, store_id, domain, is_primary, is_verified, ssl_status)
-       VALUES ($1, $2, $3, FALSE, FALSE, 'PENDING')`,
+       VALUES ($1, $2, $3, FALSE, FALSE, 'PENDING')
+       ON CONFLICT DO NOTHING
+       RETURNING id`,
       [domainId, storeId, cleanDomain]
     );
+    if (insertedDomain.rowCount === 0) {
+      return res.status(409).json({
+        error: 'DOMAIN_ALREADY_CONNECTED',
+        message: 'This domain is already mapped to a store.'
+      });
+    }
 
     res.status(201).json({
       message: 'Domain connected. Complete DNS configuration to verify.',
