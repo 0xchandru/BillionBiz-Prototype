@@ -1,8 +1,7 @@
 import React from 'react';
 import {
   CheckCircle2, Globe, Bell, Shield, FileText,
-  Plug, Code, Key,
-  PanelLeftClose, PanelLeftOpen, ChevronRight,
+  Plug, Code, Key, PanelLeftClose, PanelLeftOpen, ChevronRight
 } from 'lucide-react';
 import { useLandingEditorStore } from '../../../store/landingEditorStore';
 import type { SettingsSection } from '../../../store/landingEditorStore';
@@ -13,9 +12,8 @@ interface NavItemDef {
   label: string;
   description: string;
   icon: React.FC<{ size?: number; className?: string }>;
-  tag?: string;
+  status?: string;
 }
-
 interface NavGroupDef {
   title: string;
   items: NavItemDef[];
@@ -25,34 +23,36 @@ const SETTINGS_GROUPS: NavGroupDef[] = [
   {
     title: 'STORE OPERATIONS',
     items: [
-      { id: 'launch-checklist', label: 'Launch readiness', description: 'Setup checks based on your store data', icon: CheckCircle2 },
-      { id: 'language-region', label: 'Regional defaults', description: 'Store currency and timezone', icon: Globe },
+      { id: 'launch-checklist', label: 'Launch readiness', description: 'Setup checks from your current store data', icon: CheckCircle2 },
+      { id: 'language-region', label: 'Regional defaults', description: 'Currency and store timezone', icon: Globe },
       { id: 'notifications', label: 'Announcements', description: 'Storefront announcement bar and messages', icon: Bell },
     ]
   },
   {
     title: 'POLICIES & LEGAL',
     items: [
-      { id: 'refund-policy', label: 'Refund & Returns', description: 'Return conditions & refund rules', icon: Shield },
-      { id: 'privacy-policy', label: 'Privacy Policy', description: 'Data privacy & cookies consent', icon: FileText },
-      { id: 'terms-of-service', label: 'Terms of Service', description: 'Customer terms & conditions', icon: FileText },
-      { id: 'shipping-policy', label: 'Shipping & Delivery', description: 'Zones, timeframes & shipping policy', icon: FileText },
+      { id: 'refund-policy', label: 'Refund & returns', description: 'Customer refund and return policy', icon: Shield },
+      { id: 'privacy-policy', label: 'Privacy policy', description: 'Customer privacy and data terms', icon: FileText },
+      { id: 'terms-of-service', label: 'Terms of service', description: 'Customer terms and conditions', icon: FileText },
+      { id: 'shipping-policy', label: 'Shipping & delivery', description: 'Delivery policy and timeframes', icon: FileText },
     ]
   },
   {
     title: 'CONNECTIONS & DEVELOPER',
     items: [
-      { id: 'integrations', label: 'Integrations', description: 'Connected analytics and marketing providers', icon: Plug, tag: 'Not connected' },
-      { id: 'custom-code', label: 'Custom code', description: 'Controlled head and body integrations', icon: Code, tag: 'Not connected' },
-      { id: 'api-webhooks', label: 'API & webhooks', description: 'Developer credentials and event endpoints', icon: Key, tag: 'Not connected' },
+      { id: 'integrations', label: 'Integrations', description: 'Analytics and marketing providers', icon: Plug, status: 'Not connected' },
+      { id: 'custom-code', label: 'Custom code', description: 'Controlled head and body integrations', icon: Code, status: 'Not connected' },
+      { id: 'api-webhooks', label: 'API & webhooks', description: 'Developer credentials and event endpoints', icon: Key, status: 'Not connected' },
     ]
   }
 ];
 
 export const SettingsPanel: React.FC = () => {
   const {
-    settingsSection, setSettingsSection,
-    isLeftSidebarCollapsed, setLeftSidebarCollapsed,
+    settingsSection,
+    setSettingsSection,
+    isLeftSidebarCollapsed,
+    setLeftSidebarCollapsed,
     setActivePanel,
   } = useLandingEditorStore();
 
@@ -63,53 +63,67 @@ export const SettingsPanel: React.FC = () => {
       <div className={styles.contextPanelHeader}>
         <div>
           <h3 className={styles.contextPanelTitle}>Store setup</h3>
-          <p className={styles.contextPanelDesc}>Regional behavior, legal pages and platform connections</p>
+          <p className={styles.contextPanelDesc}>Operational defaults, legal pages and connections</p>
         </div>
         <button
+          type="button"
           onClick={() => setLeftSidebarCollapsed(!isLeftSidebarCollapsed)}
           className={styles.collapseBtn}
           title={isLeftSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={isLeftSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           {isLeftSidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
         </button>
       </div>
 
       <div className={styles.contextPanelScroll}>
-        {SETTINGS_GROUPS.map((grp, idx) => (
-          <div key={idx} className={styles.navGroup}>
-            <div className={styles.navGroupTitle}>{grp.title}</div>
-            {grp.items.map(item => {
-              const isSelected = 
-                currentSection === item.id ||
+        {SETTINGS_GROUPS.map((group) => (
+          <div key={group.title} className={styles.navGroup}>
+            <div className={styles.navGroupTitle}>{group.title}</div>
+            {group.items.map((item) => {
+              const selected = currentSection === item.id ||
                 (item.id === 'launch-checklist' && currentSection === 'setup') ||
                 (item.id === 'language-region' && currentSection === 'language') ||
                 (item.id === 'refund-policy' && currentSection === 'policies');
               const Icon = item.icon;
               return (
-                <div
+                <button
                   key={item.id}
-                  className={`${styles.navItem} ${isSelected ? styles.navItemActive : ''}`}
+                  type="button"
+                  className={`${styles.navItem} ${selected ? styles.navItemActive : ''}`}
                   onClick={() => {
                     setSettingsSection(item.id);
                     setActivePanel('settings');
                   }}
+                  aria-current={selected ? 'page' : undefined}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 9,
+                    textAlign: 'left',
+                    border: 0,
+                    background: 'transparent',
+                    font: 'inherit',
+                    cursor: 'pointer'
+                  }}
                 >
-                  <div className={`${styles.navItemIcon} ${isSelected ? styles.navItemIconActive : ''}`}>
+                  <span className={`${styles.navItemIcon} ${selected ? styles.navItemIconActive : ''}`}>
                     <Icon size={16} />
-                  </div>
-                  <div className={styles.navItemContent}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span className={`${styles.navItemLabel} ${isSelected ? styles.navItemLabelActive : ''}`}>{item.label}</span>
-                      {item.tag && (
-                        <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '4px', background: '#f1f5f9', color: '#64748b', fontWeight: 600 }}>
-                          {item.tag}
+                  </span>
+                  <span className={styles.navItemContent}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span className={`${styles.navItemLabel} ${selected ? styles.navItemLabelActive : ''}`}>{item.label}</span>
+                      {item.status && (
+                        <span style={{ fontSize: 9, padding: '2px 5px', borderRadius: 5, background: '#f1f5f9', color: '#64748b', fontWeight: 650 }}>
+                          {item.status}
                         </span>
                       )}
-                    </div>
+                    </span>
                     <span className={styles.navItemPath}>{item.description}</span>
-                  </div>
+                  </span>
                   <ChevronRight size={14} className={styles.navItemChevron} />
-                </div>
+                </button>
               );
             })}
           </div>
@@ -118,3 +132,5 @@ export const SettingsPanel: React.FC = () => {
     </div>
   );
 };
+
+export default SettingsPanel;
