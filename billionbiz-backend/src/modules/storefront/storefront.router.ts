@@ -745,6 +745,12 @@ storefrontRouter.post(
 
     await withTransaction(async (client) => {
       // 1. Get next release number
+      // Serialize publishers per store so parallel publish requests cannot
+      // allocate the same release number or race the active-release pointer.
+      await client.query(
+        `SELECT store_id FROM storefront_settings WHERE store_id = $1 FOR UPDATE`,
+        [storeId]
+      );
       const numRes = await client.query(
         `SELECT COALESCE(MAX(release_number), 0) + 1 as next_num FROM store_releases WHERE store_id = $1`,
         [storeId]
@@ -853,7 +859,7 @@ storefrontRouter.get('/releases', requireAuth, resolveTenant, async (req: Reques
   res.json({ releases: releasesRes.rows });
 });
 
-// POST /api/v1/storefront/releases/:id/restore (Restore to previous snapshot)
+// POST /api/v1/storefront/releases/:id/restore (Create and activate an immutable rollback release)
 storefrontRouter.post(
   '/releases/:id/restore',
   requireAuth,
@@ -861,44 +867,193 @@ storefrontRouter.post(
   requirePermission('store.publish'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
-    const releaseId = req.params.id as string;
+    const sourceReleaseId = req.params.id as string;
 
-    const relRes = await query(
-      `SELECT snapshot FROM store_releases WHERE id = $1 AND store_id = $2`,
-      [releaseId, storeId]
+    const sourceRes = await query(
+      `SELECT release_number, snapshot
+       FROM store_releases
+       WHERE id = $1 AND store_id = $2`,
+      [sourceReleaseId, storeId]
     );
 
-    if (relRes.rowCount === 0) {
+    if (sourceRes.rowCount === 0) {
       return res.status(404).json({ error: 'RELEASE_NOT_FOUND', message: 'Release snapshot not found' });
     }
 
-    const { pages, theme } = relRes.rows[0].snapshot;
+    const sourceSnapshot = sourceRes.rows[0].snapshot;
+    if (!sourceSnapshot || !Array.isArray(sourceSnapshot.pages)) {
+      return res.status(409).json({ error: 'INVALID_RELEASE_SNAPSHOT', message: 'The selected release does not contain a valid page snapshot.' });
+    }
+
+    const rollbackReleaseId = `rel-${uuidv4()}`;
+    let rollbackReleaseNumber = 0;
+    const restoredSnapshot = {
+      ...sourceSnapshot,
+      publishedAt: new Date().toISOString(),
+      rollback: { sourceReleaseId, sourceReleaseNumber: Number(sourceRes.rows[0].release_number) }
+    };
+    const contentHash = crypto.createHash('sha256').update(JSON.stringify(restoredSnapshot)).digest('hex');
 
     await withTransaction(async (client) => {
-      // Restore theme
-      if (theme) {
-        await client.query(
-          `UPDATE store_themes
-           SET preset_name = $1, palette = $2, typography = $3, buttons = $4, effects = $5, updated_at = NOW()
-           WHERE store_id = $6`,
-          [theme.preset_name, theme.palette, theme.typography, theme.buttons, theme.effects, storeId]
-        );
+      // Lock the store configuration row to serialize rollback with publishes.
+      const settingsLock = await client.query(
+        `SELECT * FROM storefront_settings WHERE store_id = $1 FOR UPDATE`,
+        [storeId]
+      );
+      if (settingsLock.rowCount === 0) {
+        throw new Error('Storefront settings are missing for this store.');
       }
 
-      // Restore pages as new draft versions
-      for (const p of pages || []) {
-        const nextVerRes = await client.query(
-          `SELECT COALESCE(MAX(version), 0) + 1 as next_ver FROM page_draft_versions WHERE page_id = $1`,
-          [p.id]
-        );
-        const nextVer = nextVerRes.rows[0].next_ver;
+      const nextRelease = await client.query(
+        `SELECT COALESCE(MAX(release_number), 0) + 1 AS next_num
+         FROM store_releases WHERE store_id = $1`,
+        [storeId]
+      );
+      rollbackReleaseNumber = Number(nextRelease.rows[0].next_num);
 
+      // Synchronize mutable editor state to the restored snapshot, but keep the
+      // public storefront driven by the new immutable release pointer.
+      const theme = restoredSnapshot.theme || {};
+      await client.query(
+        `INSERT INTO store_themes (
+           id, store_id, preset_name, palette, typography, buttons, effects, custom_css, version, updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, NOW())
+         ON CONFLICT (store_id) DO UPDATE SET
+           preset_name = EXCLUDED.preset_name,
+           palette = EXCLUDED.palette,
+           typography = EXCLUDED.typography,
+           buttons = EXCLUDED.buttons,
+           effects = EXCLUDED.effects,
+           custom_css = EXCLUDED.custom_css,
+           version = store_themes.version + 1,
+           updated_at = NOW()`,
+        [
+          `thm-${uuidv4()}`,
+          storeId,
+          theme.preset_name || theme.presetName || 'modern',
+          JSON.stringify(theme.palette || {}),
+          JSON.stringify(theme.typography || {}),
+          JSON.stringify(theme.buttons || {}),
+          JSON.stringify(theme.effects || {}),
+          theme.custom_css || theme.customCss || ''
+        ]
+      );
+
+      const brand = restoredSnapshot.brand || {};
+      const settings = restoredSnapshot.settings || {};
+      await client.query(
+        `UPDATE storefront_settings SET
+           brand_name = $1,
+           tagline = $2,
+           logo_url = $3,
+           favicon_url = $4,
+           social_links = $5,
+           navigation_config = $6,
+           mode = $7,
+           home_page = $8,
+           primary_domain = $9,
+           password_enabled = $10,
+           maintenance_mode = $11,
+           active_release_id = $12,
+           updated_at = NOW()
+         WHERE store_id = $13`,
+        [
+          brand.name || brand.brand_name || null,
+          brand.tagline || '',
+          brand.logoUrl || brand.logo_url || '',
+          brand.faviconUrl || brand.favicon_url || '',
+          JSON.stringify(brand.socialLinks || brand.social_links || {}),
+          JSON.stringify(restoredSnapshot.navigation || []),
+          settings.mode || 'COMMERCE',
+          settings.homePage || 'LANDING',
+          settings.primaryDomain || null,
+          Boolean(settings.passwordEnabled ?? settings.password_enabled),
+          Boolean(settings.maintenanceMode ?? settings.maintenance_mode),
+          rollbackReleaseId,
+          storeId
+        ]
+      );
+
+      const snapshotPageIds: string[] = [];
+      for (const page of restoredSnapshot.pages) {
+        if (!page?.id) continue;
+        const pageLock = await client.query(
+          `SELECT id FROM store_pages WHERE id = $1 AND store_id = $2 FOR UPDATE`,
+          [page.id, storeId]
+        );
+        if (pageLock.rowCount === 0) continue;
+
+        snapshotPageIds.push(page.id);
+        const nextVersionRes = await client.query(
+          `SELECT COALESCE(MAX(version), 0) + 1 AS next_ver
+           FROM page_draft_versions WHERE page_id = $1`,
+          [page.id]
+        );
         await client.query(
           `INSERT INTO page_draft_versions (id, page_id, version, sections, page_props, created_by)
            VALUES ($1, $2, $3, $4, $5, $6)`,
-          [`draft-${uuidv4()}`, p.id, nextVer, JSON.stringify(p.sections || []), JSON.stringify(p.page_props || {}), req.auth?.userId]
+          [
+            `draft-${uuidv4()}`,
+            page.id,
+            Number(nextVersionRes.rows[0].next_ver),
+            JSON.stringify(Array.isArray(page.sections) ? page.sections : []),
+            JSON.stringify(page.page_props || page.pageProps || {}),
+            req.auth?.userId
+          ]
+        );
+        await client.query(
+          `UPDATE store_pages SET
+             name = COALESCE($1, name),
+             path = CASE WHEN is_locked THEN path ELSE COALESCE($2, path) END,
+             type = COALESCE($3, type),
+             category = COALESCE($4, category),
+             seo_title = COALESCE($5, seo_title),
+             seo_description = COALESCE($6, seo_description),
+             template_key = COALESCE($7, template_key),
+             status = 'published',
+             updated_at = NOW()
+           WHERE id = $8 AND store_id = $9`,
+          [
+            page.name || null,
+            page.path || null,
+            page.type || null,
+            page.category || null,
+            page.seo_title || null,
+            page.seo_description || null,
+            page.template_key || null,
+            page.id,
+            storeId
+          ]
         );
       }
+
+      if (snapshotPageIds.length > 0) {
+        await client.query(
+          `UPDATE store_pages SET status = 'draft', updated_at = NOW()
+           WHERE store_id = $1 AND NOT (id = ANY($2::text[]))`,
+          [storeId, snapshotPageIds]
+        );
+      }
+
+      await client.query(
+        `INSERT INTO store_releases (id, store_id, release_number, content_hash, snapshot, published_by, notes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          rollbackReleaseId,
+          storeId,
+          rollbackReleaseNumber,
+          contentHash,
+          JSON.stringify(restoredSnapshot),
+          req.auth?.userId,
+          `Rollback to release ${sourceRes.rows[0].release_number}`
+        ]
+      );
+
+      await client.query(
+        `UPDATE stores SET status = 'ACTIVE', updated_at = NOW() WHERE id = $1`,
+        [storeId]
+      );
 
       await recordAudit({
         organizationId: req.tenant?.organizationId,
@@ -906,12 +1061,17 @@ storefrontRouter.post(
         actorId: req.auth?.userId,
         action: 'RESTORE_STORE_RELEASE',
         targetType: 'STORE_RELEASE',
-        targetId: releaseId,
-        changes: { restoredFrom: releaseId as string }
+        targetId: rollbackReleaseId,
+        changes: { restoredFrom: sourceReleaseId, releaseNumber: rollbackReleaseNumber }
       });
     });
 
-    res.json({ message: 'Store restored to snapshot draft state successfully' });
+    res.status(201).json({
+      message: 'Previous storefront version restored and activated.',
+      releaseId: rollbackReleaseId,
+      releaseNumber: rollbackReleaseNumber,
+      restoredFrom: sourceReleaseId
+    });
   }
 );
 
