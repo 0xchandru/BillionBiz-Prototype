@@ -212,8 +212,7 @@ const HeroBannerSection: React.FC<HeroBannerProps> = ({ props }) => {
           ) : null}
         </div>
 
-        {!isCentered && (
-          <div className={styles.media}>
+        <div className={styles.media}>
             {image?.settings?.src ? (
               <img
                 src={String(image.settings.src)}
@@ -231,8 +230,7 @@ const HeroBannerSection: React.FC<HeroBannerProps> = ({ props }) => {
                 }}
               />
             )}
-          </div>
-        )}
+        </div>
       </div>
     </section>
   );
