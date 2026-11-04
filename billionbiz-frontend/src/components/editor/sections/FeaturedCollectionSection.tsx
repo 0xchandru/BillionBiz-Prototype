@@ -44,6 +44,30 @@ const safeCurrencyFormatter = (currencyCode?: string) => {
   }
 };
 
+const resolveDesignValue = (value: any, fallback: string): string => {
+  if (!value || value === 'inherit') return fallback;
+  const tokenVariables: Record<string, string> = {
+    'color.brand.primary': 'var(--theme-brand-primary)',
+    'color.brand.secondary': 'var(--theme-brand-secondary)',
+    'color.brand.accent': 'var(--theme-brand-accent)',
+    'color.text.heading': 'var(--theme-text-heading)',
+    'color.text.body': 'var(--theme-text-body)',
+    'color.text.muted': 'var(--theme-text-muted)',
+    'color.background.surface': 'var(--theme-bg-surface)',
+    'color.background.page': 'var(--theme-bg)',
+    'color.border.default': 'var(--theme-border)'
+  };
+  if (typeof value === 'string') {
+    if (value.startsWith('token:')) return tokenVariables[value.slice(6)] || fallback;
+    return value;
+  }
+  if (typeof value === 'object') {
+    if (value.mode === 'token') return tokenVariables[value.token] || fallback;
+    if (value.mode === 'custom' && typeof value.value === 'string') return value.value;
+  }
+  return fallback;
+};
+
 const FeaturedCollectionSection: React.FC<{ props: Record<string, any> }> = ({ props }) => {
   const { device = 'desktop' } = props;
   const isMobile = device === 'mobile';
@@ -80,18 +104,13 @@ const FeaturedCollectionSection: React.FC<{ props: Record<string, any> }> = ({ p
   }, [props.dataContext?.categories, limit]);
 
   const items = isCategorySection ? categories : products;
-  const background = props.designOverrides?.sectionBackground ||
-    props.bgColor || 'var(--theme-bg-section, var(--theme-bg, #ffffff))';
-  const headingColor = props.designOverrides?.headingColor ||
-    props.headingColor || 'var(--theme-text-heading, #0f172a)';
-  const bodyColor = props.designOverrides?.bodyColor ||
-    props.textColor || 'var(--theme-text-body, #475569)';
-  const cardBg = props.designOverrides?.cardBackground ||
-    props.cardBg || 'var(--theme-bg-surface, #f8fafc)';
-  const priceColor = props.designOverrides?.priceColor ||
-    props.priceColor || 'var(--theme-brand-primary, #0f172a)';
-  const linkColor = props.designOverrides?.linkColor ||
-    props.linkColor || 'var(--theme-brand-link, var(--theme-brand-primary))';
+  const design = props.designOverrides || {};
+  const background = resolveDesignValue(design.sectionBackground ?? props.bgColor, 'var(--theme-bg-section, var(--theme-bg, #ffffff))');
+  const headingColor = resolveDesignValue(design.headingColor ?? props.headingColor, 'var(--theme-text-heading, #0f172a)');
+  const bodyColor = resolveDesignValue(design.bodyColor ?? props.textColor, 'var(--theme-text-body, #475569)');
+  const cardBg = resolveDesignValue(design.cardBackground ?? props.cardBg, 'var(--theme-bg-surface, #f8fafc)');
+  const priceColor = resolveDesignValue(design.priceColor ?? props.priceColor, 'var(--theme-brand-primary, #0f172a)');
+  const linkColor = resolveDesignValue(design.linkColor ?? props.linkColor, 'var(--theme-brand-link, var(--theme-brand-primary))');
 
   const formatPrice = (minor: number) => currency.format(minor / 100);
   const navigate = (event: React.MouseEvent<HTMLAnchorElement>, target: string) => {
@@ -117,7 +136,7 @@ const FeaturedCollectionSection: React.FC<{ props: Record<string, any> }> = ({ p
   const emptyTitle = isCategorySection ? 'No active categories yet' : 'No active products yet';
   const emptyDescription = isCategorySection
     ? 'Create active categories in your catalogue to display them here.'
-    : 'Add and activate products in your catalogue. Real products will appear here automatically.';
+    : (props.emptyStateText || 'Add and activate products in your catalogue. Real products will appear here automatically.');
 
   return (
     <section
