@@ -199,7 +199,6 @@ export const SettingsRightPanel: React.FC = () => {
   const title = section === 'language-region' || section === 'language' ? 'Language & region'
     : section === 'store-access' ? 'Store access'
     : section.includes('policy') || section === 'policies' ? 'Policies & legal'
-    : section === 'store-access' ? 'Store access'
     : section === 'notifications' ? 'Notifications'
     : section === 'integrations' ? 'Integrations'
     : section === 'api-webhooks' ? 'API & webhooks'
