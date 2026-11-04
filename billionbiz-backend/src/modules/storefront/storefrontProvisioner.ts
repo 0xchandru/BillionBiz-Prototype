@@ -423,6 +423,7 @@ export async function provisionDefaultStorefront(options: ProvisionStorefrontOpt
       type: pageDef.type,
       category: pageDef.category,
       templateKey: pageDef.templateKey,
+      status: 'published',
       sections,
       pageProps
     });
@@ -433,7 +434,7 @@ export async function provisionDefaultStorefront(options: ProvisionStorefrontOpt
   const initialSnapshot = {
     brand: {
       name: storeName,
-      tagline: 'Handcrafted Quality & Direct Commerce',
+      tagline: '',
       logoUrl: '',
       faviconUrl: '',
       socialLinks: {}
