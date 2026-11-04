@@ -257,13 +257,13 @@ export const EditorLeftSidebar: React.FC = () => {
       'settings': '/editor/settings',
       'store-brand': '/editor/brand',
       'design-experience': '/editor/design',
-      'seo-growth': '/editor/brand',
+      'seo-growth': '/editor/growth',
     };
     navigate(routeMap[tabId] || '/editor/pages');
   };
 
   // ─────────────────────────────────────────────────────
-  // RENDER: CONTEXTUAL CONTENT FOR EACH OF THE 4 TABS
+  // RENDER: CONTEXTUAL CONTENT FOR EACH STORE EDITOR WORKSPACE
   // ─────────────────────────────────────────────────────
 
   const renderContextualPanel = () => {
