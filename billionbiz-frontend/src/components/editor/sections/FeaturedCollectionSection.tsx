@@ -122,7 +122,7 @@ const FeaturedCollectionSection: React.FC<{ props: Record<string, any> }> = ({ p
   const gridStyle: React.CSSProperties = layout === 'carousel'
     ? {
         display: 'flex',
-        gap: isMobile ? 16 : 24,
+        gap: 'var(--theme-grid-gap, 24px)',
         overflowX: 'auto',
         paddingBottom: 12,
         scrollSnapType: 'x mandatory'
@@ -130,7 +130,7 @@ const FeaturedCollectionSection: React.FC<{ props: Record<string, any> }> = ({ p
     : {
         display: 'grid',
         gridTemplateColumns: `repeat(${isMobile ? 1 : isTablet ? Math.min(2, columns) : columns}, minmax(0, 1fr))`,
-        gap: isMobile ? 18 : 24
+        gap: 'var(--theme-grid-gap, 24px)'
       };
 
   const emptyTitle = isCategorySection ? 'No active categories yet' : 'No active products yet';
@@ -153,7 +153,11 @@ const FeaturedCollectionSection: React.FC<{ props: Record<string, any> }> = ({ p
         style={{
           maxWidth: props._layoutWidth || '1400px',
           margin: '0 auto',
-          padding: isMobile ? '42px 20px' : isTablet ? '60px 32px' : '76px 48px',
+          padding: isMobile
+            ? 'var(--theme-section-space-y, 42px) 20px'
+            : isTablet
+              ? 'var(--theme-section-space-y, 60px) 32px'
+              : 'var(--theme-section-space-y, 76px) clamp(24px, 4vw, 48px)',
           boxSizing: 'border-box',
           ...props._paddingStyle
         }}
@@ -163,8 +167,8 @@ const FeaturedCollectionSection: React.FC<{ props: Record<string, any> }> = ({ p
           flexDirection: isMobile ? 'column' : 'row',
           alignItems: isMobile ? 'flex-start' : 'flex-end',
           justifyContent: 'space-between',
-          gap: 14,
-          marginBottom: 28
+          gap: 'var(--theme-content-gap, 14px)',
+          marginBottom: 'var(--theme-content-gap, 28px)'
         }}>
           <div style={{ minWidth: 0 }}>
             <h2 style={{
@@ -214,7 +218,7 @@ const FeaturedCollectionSection: React.FC<{ props: Record<string, any> }> = ({ p
             minHeight: 210,
             padding: 28,
             border: '1px dashed var(--theme-border, #cbd5e1)',
-            borderRadius: 16,
+            borderRadius: 'var(--theme-card-radius, 16px)',
             background: 'var(--theme-bg-surface, #f8fafc)',
             textAlign: 'center'
           }}>
@@ -302,7 +306,7 @@ const FeaturedCollectionSection: React.FC<{ props: Record<string, any> }> = ({ p
                         minWidth: cardWidth,
                         scrollSnapAlign: 'start',
                         overflow: 'hidden',
-                        borderRadius: 14,
+                        borderRadius: 'var(--theme-card-radius, 14px)',
                         border: '1px solid var(--theme-border, #e2e8f0)',
                         background: cardBg
                       }}
@@ -336,7 +340,7 @@ const FeaturedCollectionSection: React.FC<{ props: Record<string, any> }> = ({ p
                           </div>
                         )}
                       </a>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 9, flex: 1, padding: 14 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 9, flex: 1, padding: 'var(--theme-card-padding, 14px)' }}>
                         {showVendor && product.brand && (
                           <span style={{ color: bodyColor, fontSize: 10, fontWeight: 650, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                             {product.brand}
