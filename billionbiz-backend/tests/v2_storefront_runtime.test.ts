@@ -207,7 +207,11 @@ describe('V2 Native Storefront Runtime & Multi-Tenant Isolation Suite (REQ-STORE
     expect(Array.isArray(res.body.products)).toBe(true);
   });
 
-  it('TC-STORE-003A: Password-protected storefront requires the configured password', async () => {
+  it('TC-STORE-003A: Password protection blocks public data until a store-scoped token is presented', async () => {
+    // Ensure Store B has a valid initial publication before testing the gate.
+    const draftRender = await request('GET', '/api/v1/storefront/render', { token: storeBToken });
+    expect(draftRender.status).toBe(200);
+
     const passwordHash = await bcrypt.hash('storefront-secret-2026', 10);
     await query(
       `INSERT INTO storefront_settings (store_id, mode, home_page, password_enabled, password_hash)
@@ -216,20 +220,49 @@ describe('V2 Native Storefront Runtime & Multi-Tenant Isolation Suite (REQ-STORE
       [storeBId, passwordHash]
     );
 
+    const locked = await request('GET', `/api/v1/storefront/by-slug/${storeBSlug}`);
+    expect(locked.status).toBe(200);
+    expect(locked.body.passwordRequired).toBe(true);
+    expect(locked.body.pages).toBeUndefined();
+    expect(locked.body.activeRelease).toBeUndefined();
+    expect(locked.body.products).toBeUndefined();
+    expect(locked.body.theme).toBeUndefined();
+
     const invalid = await request('POST', `/api/v1/storefront/by-slug/${storeBSlug}/password/verify`, {
       body: { password: 'incorrect-password' }
     });
     expect(invalid.status).toBe(200);
     expect(invalid.body.verified).toBe(false);
+    expect(invalid.body.accessToken).toBeUndefined();
 
     const valid = await request('POST', `/api/v1/storefront/by-slug/${storeBSlug}/password/verify`, {
       body: { password: 'storefront-secret-2026' }
     });
     expect(valid.status).toBe(200);
     expect(valid.body.verified).toBe(true);
+    expect(typeof valid.body.accessToken).toBe('string');
+
+    const withToken = await request('GET', `/api/v1/storefront/by-slug/${storeBSlug}`, {
+      headers: { 'x-storefront-access-token': valid.body.accessToken }
+    });
+    expect(withToken.status).toBe(200);
+    expect(withToken.body.passwordRequired).toBeUndefined();
+    expect(Array.isArray(withToken.body.pages)).toBe(true);
+    expect(withToken.body.activeRelease).toBeDefined();
+
+    const forged = await request('GET', `/api/v1/storefront/by-slug/${storeBSlug}`, {
+      headers: { 'x-storefront-access-token': 'not-a-signed-token' }
+    });
+    expect(forged.status).toBe(200);
+    expect(forged.body.passwordRequired).toBe(true);
+    expect(forged.body.pages).toBeUndefined();
 
     await query(
       `UPDATE storefront_settings SET password_enabled = FALSE, password_hash = NULL WHERE store_id = $1`,
+      [storeBId]
+    );
+    await query(
+      `DELETE FROM storefront_password_attempts WHERE store_id = $1`,
       [storeBId]
     );
   });
