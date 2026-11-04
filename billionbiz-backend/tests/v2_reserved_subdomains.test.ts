@@ -220,6 +220,12 @@ describe('Reserved Subdomains & DNS Validation Specification Tests', () => {
       expect(res.body.error).toBe('SUBDOMAIN_RESERVED');
     });
 
+    it.each(['staff', 'pos', 'help'])('rejects the reserved platform subdomain %s', (reservedSlug) => {
+      const result = validateSubdomainSlug(reservedSlug);
+      expect(result.isValid).toBe(false);
+      expect(result.errorCode).toBe('SUBDOMAIN_RESERVED');
+    });
+
     it('returns 400 for reserved subdomain api', async () => {
       const res = await makeRequest('GET', '/api/v1/auth/check-domain?slug=api');
       expect(res.status).toBe(400);
@@ -273,6 +279,7 @@ describe('Reserved Subdomains & DNS Validation Specification Tests', () => {
   describe('3. Registration & Store Provisioning Enforcement', () => {
     const uniqueId = Date.now().toString().slice(-6);
     const existingSlug = `taken-store-${uniqueId}`;
+    let registeredStoreToken = '';
 
     it('successfully provisions a store with a valid non-reserved slug', async () => {
       const regRes = await makeRequest('POST', '/api/v1/auth/register-streamlined', {
@@ -285,6 +292,8 @@ describe('Reserved Subdomains & DNS Validation Specification Tests', () => {
       });
 
       expect(regRes.status).toBe(201);
+      registeredStoreToken = regRes.body.token;
+      expect(registeredStoreToken).toBeTruthy();
     });
 
     it('returns 409 SUBDOMAIN_TAKEN when checking an existing store slug', async () => {
@@ -369,10 +378,11 @@ describe('Reserved Subdomains & DNS Validation Specification Tests', () => {
   });
 
   describe('4. Platform Protection & Host Resolution Middleware', () => {
-    it('returns 404 STORE_NOT_FOUND when accessing an unregistered store subdomain (never falls back)', async () => {
+    it('returns 404 STORE_NOT_FOUND for an unregistered store host after authentication', async () => {
       const res = await makeRequest('GET', '/api/v1/storefront/render', {
         headers: {
-          host: 'completely-unregistered-store-xyz.chandraprakash.codes'
+          host: 'completely-unregistered-store-xyz.chandraprakash.codes',
+          authorization: `Bearer ${registeredStoreToken}`
         }
       });
 
@@ -380,20 +390,28 @@ describe('Reserved Subdomains & DNS Validation Specification Tests', () => {
       expect(res.body.error).toBe('STORE_NOT_FOUND');
     });
 
-    it('resolves valid store correctly when accessed via single-level host (e.g. store.chandraprakash.codes)', async () => {
-      // Find an active store
-      const storeRes = await query(`SELECT slug FROM stores WHERE status = 'ACTIVE' LIMIT 1`);
-      if (storeRes.rowCount && storeRes.rowCount > 0) {
-        const slug = storeRes.rows[0].slug;
-        const res = await makeRequest('GET', '/api/v1/storefront/render', {
-          headers: {
-            host: `${slug}.chandraprakash.codes`
-          }
-        });
+    it('resolves a verified single-level merchant host to its registered tenant', async () => {
+      const storeRes = await query(
+        `SELECT id, slug FROM stores WHERE LOWER(slug) = LOWER($1) AND status = 'ACTIVE' LIMIT 1`,
+        [existingSlug]
+      );
+      expect(storeRes.rowCount).toBe(1);
+      const slug = storeRes.rows[0].slug;
+      const domainRes = await query(
+        `SELECT 1 FROM store_domains WHERE store_id = $1 AND LOWER(domain) = LOWER($2) AND is_verified = TRUE AND ssl_status = 'ACTIVE' LIMIT 1`,
+        [storeRes.rows[0].id, `${slug}.${PLATFORM_MAIN_DOMAIN}`]
+      );
+      expect(domainRes.rowCount).toBe(1);
 
-        expect(res.status).toBe(200);
-        expect(res.body.store.slug).toBe(slug);
-      }
+      const res = await makeRequest('GET', '/api/v1/storefront/render', {
+        headers: {
+          host: `${slug}.${PLATFORM_MAIN_DOMAIN}`,
+          authorization: `Bearer ${registeredStoreToken}`
+        }
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body.store.slug).toBe(slug);
     });
   });
 });
