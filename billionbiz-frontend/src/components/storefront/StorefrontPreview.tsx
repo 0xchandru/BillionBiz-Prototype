@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Monitor, 
   Tablet, 
@@ -9,6 +9,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { StorefrontRenderer } from './StorefrontRenderer';
+import { StorefrontPreviewViewport } from './StorefrontPreviewViewport';
 import { apiClient } from '../../api/client';
 import { useAuthStore } from '../../store/authStore';
 import { useSiteStore } from '../../store/siteStore';
@@ -47,21 +48,6 @@ export const StorefrontPreview: React.FC<StorefrontPreviewProps> = ({
     }
   }, [selectedPageId, siteStore.pages]);
 
-  // Measure container width for responsive scaling
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [containerWidth, setContainerWidth] = useState<number>(1200);
-
-  useEffect(() => {
-    const handleResize = () => {
-      if (containerRef.current) {
-        setContainerWidth(containerRef.current.clientWidth);
-      }
-    };
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
   // Fetch real authoritative tenant data from backend
   const fetchTenantData = async () => {
     try {
@@ -86,26 +72,6 @@ export const StorefrontPreview: React.FC<StorefrontPreviewProps> = ({
   useEffect(() => {
     fetchTenantData();
   }, [storeSlug]);
-
-  // Determine target preview width & scale
-  let targetWidth: string | number = '100%';
-  let scale = 1;
-
-  if (deviceMode === 'tablet') {
-    targetWidth = 768;
-    scale = containerWidth > 0 && containerWidth < 800 ? (containerWidth - 32) / 768 : 1;
-  } else if (deviceMode === 'mobile') {
-    targetWidth = 375;
-    scale = containerWidth > 0 && containerWidth < 400 ? (containerWidth - 32) / 375 : 1;
-  } else if (deviceMode === 'custom') {
-    const w = Math.max(300, Math.min(1440, customWidth));
-    targetWidth = w;
-    scale = containerWidth > 0 && containerWidth < w + 32 ? (containerWidth - 32) / w : 1;
-  } else {
-    // Desktop: full native desktop width, never squished
-    targetWidth = '100%';
-    scale = 1;
-  }
 
   // Pages Catalog for selector
   const standardPages = [
@@ -325,45 +291,36 @@ export const StorefrontPreview: React.FC<StorefrontPreviewProps> = ({
         </div>
       </div>
 
-      {/* ─── Canvas Preview Stage ─── */}
-      <div
-        ref={containerRef}
-        className="flex-1 overflow-y-auto p-4 sm:p-6 flex items-start justify-center"
-      >
-        {loading ? (
-          <div className="flex items-center justify-center h-64 text-slate-400 gap-2 text-xs">
-            <RefreshCw size={16} className="animate-spin text-indigo-600" />
-            <span>Loading preview environment...</span>
-          </div>
-        ) : (
-          <div
-            style={{
-              width: typeof targetWidth === 'number' ? `${targetWidth}px` : targetWidth,
-              maxWidth: deviceMode === 'desktop' ? '1280px' : undefined,
-              minHeight: '820px',
-              transform: scale < 1 ? `scale(${scale})` : undefined,
-              transformOrigin: 'top center',
-              transition: 'all 0.2s ease'
-            }}
-            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl overflow-hidden shrink-0"
-          >
-            <StorefrontRenderer
-              store={serverData?.store || { name: 'Demo Store', slug: storeSlug }}
-              brand={effectiveBrand}
-              themeTokens={effectiveTheme}
-              settings={effectiveSettings}
-              pages={effectivePages}
-              products={serverData?.products || []}
-              offerings={serverData?.offerings || []}
-              categories={serverData?.categories || []}
-              currentPath={activePath}
-              onNavigate={(path) => setActivePath(path)}
-              previewMode={true}
-            />
-          </div>
-        )}
-      </div>
-    </div>
-  );
+      {/* Shared responsive preview viewport used by every storefront preview surface. */}
+      {loading ? (
+        <div className="flex-1 flex items-center justify-center text-slate-400 gap-2 text-xs">
+          <RefreshCw size={16} className="animate-spin text-indigo-600" />
+          <span>Loading preview environment...</span>
+        </div>
+      ) : (
+        <StorefrontPreviewViewport
+          device={deviceMode}
+          customWidth={customWidth}
+          className="flex-1 overflow-y-auto p-4 sm:p-6"
+          minHeight={820}
+          desktopMaxWidth={1280}
+          frameClassName="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl overflow-hidden shrink-0"
+        >
+          <StorefrontRenderer
+            store={serverData?.store || { name: 'Demo Store', slug: storeSlug }}
+            brand={effectiveBrand}
+            themeTokens={effectiveTheme}
+            settings={effectiveSettings}
+            pages={effectivePages}
+            products={serverData?.products || []}
+            offerings={serverData?.offerings || []}
+            categories={serverData?.categories || []}
+            currentPath={activePath}
+            onNavigate={(path) => setActivePath(path)}
+            previewMode={true}
+          />
+        </StorefrontPreviewViewport>
+      )}
+
 };
 
