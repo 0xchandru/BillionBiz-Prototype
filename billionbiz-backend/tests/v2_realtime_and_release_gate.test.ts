@@ -56,6 +56,15 @@ describe('V2 Realtime, Concurrency & Release Gate Suite', () => {
     });
 
     const ts = Date.now();
+
+    // Keep this suite independent of test-file execution order. Registration
+    // assigns role-owner and the database FK requires that system role to exist.
+    await query(
+      `INSERT INTO roles (id, name, code, description, is_system)
+       VALUES ('role-owner', 'Store Owner', 'OWNER', 'Full access for test registrations', TRUE)
+       ON CONFLICT (id) DO NOTHING`
+    );
+
     // 2. Register Tenant A
     const regResA = await api('POST', '/api/v1/auth/register', {
       body: {
