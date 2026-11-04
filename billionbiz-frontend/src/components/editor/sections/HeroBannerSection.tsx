@@ -95,7 +95,7 @@ const HeroBannerSection: React.FC<HeroBannerProps> = ({ props }) => {
 
   const widthMap: Record<string, string> = {
     standard: '1100px',
-    wide: '1280px',
+    wide: 'var(--theme-container-max-width, 1280px)',
     full: '100%'
   };
 
