@@ -135,7 +135,7 @@ export const ShopPageView: React.FC<ShopPageViewProps> = ({
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4" style={{ gap: 'var(--theme-grid-gap, 24px)' }}>
           {sortedProducts.map((product) => {
             const variants = Array.isArray(product.variants) ? product.variants : [];
             const priceRange = getPriceRange(product);
