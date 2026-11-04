@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import { useSiteStore, type SectionData } from '../../../store/siteStore';
-import { getBlockDefinition, isVersionedSection } from './registry';
+import { getBlockDefinition } from './registry';
+import { isVersionedSection, migrateLegacyFeaturedCollection } from './documentAdapter';
 import './builtins';
 import { featuredCollectionBlockDefinitions } from './featuredCollectionDefinition';
-import { migrateLegacyFeaturedCollection } from './documentAdapter';
-import type { BlockInstance, JsonValue } from './types';
+import type { BlockInstance, JsonValue, SectionInstance } from './types';
 
 type InspectorTab = 'content' | 'design' | 'responsive';
 
@@ -86,7 +86,7 @@ export const FeaturedCollectionInspector: React.FC<FeaturedCollectionInspectorPr
   const [device, setDevice] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
 
   const document = useMemo(
-    () => isVersionedSection(section) ? section : migrateLegacyFeaturedCollection(section),
+    () => (isVersionedSection(section) ? section : migrateLegacyFeaturedCollection(section)) as SectionData & SectionInstance,
     [section]
   );
 
@@ -105,7 +105,7 @@ export const FeaturedCollectionInspector: React.FC<FeaturedCollectionInspectorPr
 
   const blocks = (document.blocks || []) as BlockInstance[];
   const cardBlock = blocks.find((block) => block.type === 'product-card-template');
-  const cardDefinition = cardBlock ? getBlockDefinition(cardBlock.type) : featuredCollectionBlockDefinitions[0];
+  const cardDefinition = (cardBlock ? getBlockDefinition(cardBlock.type) : undefined) ?? featuredCollectionBlockDefinitions[0]!;
 
   const save = (patch: Partial<SectionData>) => {
     updateSectionInstance(pageId, section.id, patch);
