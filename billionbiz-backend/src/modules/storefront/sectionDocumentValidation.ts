@@ -166,6 +166,9 @@ function validateVersionedHeroBanner(
     if (typeof settings.minHeight !== 'number' || settings.minHeight < 280 || settings.minHeight > 900) {
       issues.push({ path: `${path}.settings.minHeight`, message: 'Hero minimum height must be between 280 and 900 pixels.' });
     }
+    if (!['start', 'center', 'end'].includes(settings.verticalAlignment)) {
+      issues.push({ path: `${path}.settings.verticalAlignment`, message: 'Hero vertical alignment is not registered.' });
+    }
   }
 
   if (!Array.isArray(section.blocks)) {
