@@ -99,7 +99,7 @@ app.use((req, res, next) => {
     } else {
       res.setHeader(
         'Access-Control-Allow-Headers',
-        'Content-Type, Authorization, x-organization-id, x-store-id, x-store-slug, x-tenant-id, x-portal-domain, x-client-version, idempotency-key, ngrok-skip-browser-warning, x-correlation-id, Accept, Origin, X-Requested-With, Cache-Control, Pragma'
+        'Content-Type, Authorization, x-organization-id, x-store-id, x-store-slug, x-tenant-id, x-portal-domain, x-client-version, x-storefront-access-token, idempotency-key, ngrok-skip-browser-warning, x-correlation-id, Accept, Origin, X-Requested-With, Cache-Control, Pragma'
       );
     }
   }
