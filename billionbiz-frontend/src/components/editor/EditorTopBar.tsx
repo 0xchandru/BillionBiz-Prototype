@@ -158,6 +158,19 @@ export const EditorTopBar: React.FC = () => {
     pages.find((page) => page.id === 'landing-page') ||
     pages[0];
 
+  const getCurrentDraftFingerprint = useCallback(() => {
+    const state = useSiteStore.getState();
+    return JSON.stringify({
+      pages: state.pages.map((page) => ({
+        id: page.id,
+        sections: page.sections,
+        pageProps: page.pageProps
+      })),
+      theme: state.theme,
+      settings: state.settings
+    });
+  }, []);
+
   const persistCurrentScope = useCallback(async () => {
     if (isTheme) {
       await saveThemeToBackend(theme);
@@ -209,11 +222,16 @@ export const EditorTopBar: React.FC = () => {
       return;
     }
 
+    const savedFingerprint = getCurrentDraftFingerprint();
     setIsSaving(true);
     try {
       await persistCurrentScope();
-      markSaved();
-      showToast(`${activeScopeName} saved successfully`);
+      if (getCurrentDraftFingerprint() === savedFingerprint) {
+        markSaved();
+        showToast(`${activeScopeName} saved successfully`);
+      } else {
+        showToast('Saved the current snapshot. Newer edits are still pending.');
+      }
     } catch (error: any) {
       showToast(`Save failed: ${error?.message || 'Please retry.'}`);
     } finally {
@@ -227,11 +245,16 @@ export const EditorTopBar: React.FC = () => {
     if (!hasUnsavedChanges || isSaving) return;
 
     const autoSaveTimer = setTimeout(async () => {
+      const savedFingerprint = getCurrentDraftFingerprint();
       setIsSaving(true);
       try {
         await persistCurrentScope();
-        markSaved();
-        showToast(`${activeScopeName} auto-saved`);
+        if (getCurrentDraftFingerprint() === savedFingerprint) {
+          markSaved();
+          showToast(`${activeScopeName} auto-saved`);
+        } else {
+          showToast('Auto-save completed. Newer edits are still pending.');
+        }
       } catch (error: any) {
         showToast(`Auto-save failed: ${error?.message || 'Changes remain unsaved.'}`);
       } finally {
@@ -253,7 +276,8 @@ export const EditorTopBar: React.FC = () => {
     activeScopeName,
     selectedPageId,
     isSaving,
-    persistCurrentScope
+    persistCurrentScope,
+    getCurrentDraftFingerprint
   ]);
 
   const editorEngineStore = useEditorContextStore();
