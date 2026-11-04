@@ -56,7 +56,7 @@ export interface PageData {
 }
 
 import type { GlobalThemeData } from '../components/editor/theme/themePresets';
-import { DEFAULT_THEME_SPACING, getDefaultTheme, getThemeSpacing, themePresets } from '../components/editor/theme/themePresets';
+import { DEFAULT_THEME_SPACING, getDefaultTheme, themePresets } from '../components/editor/theme/themePresets';
 import { useThemeHistoryStore } from './themeHistoryStore';
 
 export type ThemeData = GlobalThemeData;
