@@ -166,7 +166,7 @@ export const WebsitePreview: React.FC<WebsitePreviewProps> = ({
           id: serverData?.store?.id,
           name: effectiveBusinessName,
           slug: storeSlug,
-          primary_domain: getStoreUrl(storeSlug).replace(/^https?:\\/\\//, '')
+          primary_domain: getStoreUrl(storeSlug).replace(/^https?:\/\//, '')
         }}
         brand={effectiveBrand}
         themeTokens={effectiveTheme}
@@ -186,7 +186,6 @@ export const WebsitePreview: React.FC<WebsitePreviewProps> = ({
       />
     </StorefrontPreviewViewport>
   );
-};
 };
 
 export default WebsitePreview;
