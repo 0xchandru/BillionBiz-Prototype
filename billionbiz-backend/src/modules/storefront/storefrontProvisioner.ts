@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import type { PoolClient } from 'pg';
-import { PLATFORM_MAIN_DOMAIN } from '../../core/subdomains.js';
+import { PLATFORM_MAIN_DOMAIN, validateSubdomainSlug } from '../../core/subdomains.js';
 
 export interface ProvisionStorefrontOptions {
   client: PoolClient;
@@ -278,6 +278,12 @@ export async function provisionDefaultStorefront(options: ProvisionStorefrontOpt
   pageCount: number;
 }> {
   const { client, storeId, storeName, storeSlug, mode, userId } = options;
+  const slugValidation = validateSubdomainSlug(storeSlug);
+  if (!slugValidation.isValid || slugValidation.normalizedSlug !== storeSlug) {
+    const error = new Error(slugValidation.error || 'Store handle is invalid or reserved.');
+    (error as Error & { code?: string }).code = slugValidation.errorCode || 'INVALID_STORE_HANDLE';
+    throw error;
+  }
   const platformDomain = `${storeSlug}.${PLATFORM_MAIN_DOMAIN}`;
 
   // 1. Primary platform subdomain mapping. Never reassign an existing
