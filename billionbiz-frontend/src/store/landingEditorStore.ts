@@ -35,7 +35,7 @@ export type SeoSection = 'global' | 'page';
 export type SettingsSection = 
   | 'launch-checklist' | 'language-region' | 'notifications'
   | 'refund-policy' | 'privacy-policy' | 'terms-of-service' | 'shipping-policy'
-  | 'integrations' | 'custom-code' | 'api-webhooks' | 'permissions'
+  | 'integrations' | 'custom-code' | 'api-webhooks' | 'permissions' | 'store-access'
   | 'setup' | 'general' | 'policies' | 'language';
 
 interface LandingEditorState {
