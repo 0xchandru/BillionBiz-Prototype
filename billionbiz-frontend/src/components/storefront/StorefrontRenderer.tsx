@@ -84,6 +84,60 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
   const [internalPath, setInternalPath] = useState<string>(currentPath);
   const activePath = previewMode ? (currentPath || internalPath) : (window.location.pathname || currentPath || '/');
 
+  const seoDefaults = (settings as any)?.seoDefaults || (settings as any)?.seo_defaults || {};
+  const normalizedActivePath = activePath.replace(/\\/+$/, '') || '/';
+  const activePageMetadata = pages.find((page: any) =>
+    (page.path || '/') === normalizedActivePath
+  ) || pages.find((page: any) => page.slug && `/${page.slug}` === normalizedActivePath);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const pageName = activePageMetadata?.name || (normalizedActivePath === '/' ? 'Home' : normalizedActivePath.split('/').filter(Boolean).pop() || 'Page');
+    const template = String(seoDefaults.titleTemplate || '{page} · {store}');
+    const generatedTitle = template
+      .replace(/\\{page\\}/g, pageName)
+      .replace(/\\{store\\}/g, brandDisplayName);
+    const title = activePageMetadata?.seo_title || activePageMetadata?.seoTitle || generatedTitle;
+    const description = activePageMetadata?.seo_description ||
+      activePageMetadata?.seoDescription ||
+      seoDefaults.metaDescription ||
+      brand?.tagline ||
+      '';
+    const allowIndexing = seoDefaults.allowIndexing !== false;
+
+    document.title = title;
+
+    const setMeta = (selector: string, attribute: string, value: string) => {
+      if (!value) return;
+      let element = document.head.querySelector(selector) as HTMLMetaElement | null;
+      if (!element) {
+        element = document.createElement('meta');
+        if (selector.startsWith('meta[name=')) element.name = selector.slice(11, -2);
+        else if (selector.startsWith('meta[property=')) element.setAttribute('property', selector.slice(14, -2));
+        document.head.appendChild(element);
+      }
+      element.setAttribute(attribute, value);
+    };
+
+    setMeta('meta[name="description"]', 'content', description);
+    setMeta('meta[name="robots"]', 'content', allowIndexing ? 'index,follow' : 'noindex,nofollow');
+    setMeta('meta[property="og:title"]', 'content', title);
+    setMeta('meta[property="og:description"]', 'content', description);
+    setMeta('meta[property="og:image"]', 'content', activePageMetadata?.social_image || activePageMetadata?.socialImage || seoDefaults.socialImage || '');
+
+    const canonicalBase = String(seoDefaults.canonicalBase || '').trim().replace(/\\/+$/, '');
+    const pageCanonical = activePageMetadata?.canonical_url || activePageMetadata?.canonicalUrl;
+    const canonicalUrl = pageCanonical || (canonicalBase ? `${canonicalBase}${normalizedActivePath === '/' ? '' : normalizedActivePath}` : `${window.location.origin}${normalizedActivePath}`);
+    let canonicalLink = document.head.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
+    if (!canonicalLink) {
+      canonicalLink = document.createElement('link');
+      canonicalLink.rel = 'canonical';
+      document.head.appendChild(canonicalLink);
+    }
+    canonicalLink.href = canonicalUrl;
+  }, [activePageMetadata, normalizedActivePath, seoDefaults.titleTemplate, seoDefaults.metaDescription, seoDefaults.allowIndexing, seoDefaults.socialImage, seoDefaults.canonicalBase, brandDisplayName, brand?.tagline]);
+
   const handleNavigate = (path: string) => {
     if (onNavigate) {
       onNavigate(path);
