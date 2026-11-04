@@ -1,4 +1,4 @@
-import type { BlockInstance, SectionInstance } from './types';
+import type { SectionInstance } from './types';
 import { createHeroBannerInstance, createDefaultHeroBannerBlocks } from './heroBannerDefinition';
 import { getSectionDefinition } from './registry';
 
