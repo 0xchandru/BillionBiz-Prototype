@@ -464,12 +464,45 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
     });
   }
 
-  // 4. Active products with variants
+  // 4. Active catalogue products. Return one row per product with a safe
+  // public variant projection; never duplicate cards because a product has
+  // multiple variants, and never expose cost, SKU or private inventory fields.
   const productsRes = await query(
-    `SELECT p.id, p.name, p.handle, p.description, p.product_type, p.media,
-            v.id as variant_id, v.sku, v.price_minor, v.compare_at_minor
+    `SELECT
+       p.id,
+       p.name,
+       p.handle,
+       p.description,
+       p.brand,
+       p.product_type,
+       p.media,
+       p.category_id,
+       c.name AS category_name,
+       c.slug AS category_slug,
+       COALESCE((
+         SELECT json_agg(
+           json_build_object(
+             'id', v.id,
+             'price_minor', v.price_minor,
+             'compare_at_minor', v.compare_at_minor,
+             'option_values', v.option_values,
+             'stock_available', stock.available,
+             'stock_tracked', stock.is_tracked
+           )
+           ORDER BY v.created_at ASC
+         )
+         FROM product_variants v
+         LEFT JOIN LATERAL (
+           SELECT
+             CASE WHEN COUNT(ib.id) = 0 THEN NULL ELSE SUM(ib.available)::integer END AS available,
+             COUNT(ib.id) > 0 AS is_tracked
+           FROM inventory_balances ib
+           WHERE ib.variant_id = v.id
+         ) stock ON TRUE
+         WHERE v.product_id = p.id AND v.is_active = TRUE
+       ), '[]'::json) AS variants
      FROM products p
-     LEFT JOIN product_variants v ON v.product_id = p.id
+     LEFT JOIN categories c ON c.id = p.category_id
      WHERE p.store_id = $1 AND p.status = 'ACTIVE'
      ORDER BY p.created_at DESC
      LIMIT 24`,
