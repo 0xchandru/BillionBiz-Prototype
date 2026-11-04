@@ -11,7 +11,7 @@ export interface LegacySectionData {
   schemaVersion?: number;
   enabled?: boolean;
   settings?: Record<string, any>;
-  blocks?: BlockInstance[];
+  blocks?: Array<Record<string, any>>;
   designOverrides?: Record<string, any>;
   responsiveOverrides?: Record<string, any>;
 }
