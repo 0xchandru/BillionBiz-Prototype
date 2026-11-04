@@ -6,7 +6,8 @@ import { query, withTransaction } from '../../db/pool.js';
 import { requireAuth, requirePermission } from '../../middleware/auth.js';
 import { resolveTenant } from '../../middleware/tenant.js';
 import { handleIdempotency } from '../../middleware/idempotency.js';
-import { recordAudit } from '../../core/auditAndOutbox.js';
+import { recordAudit, enqueueOutbox } from '../../core/auditAndOutbox.js';
+import { realtimeGateway } from '../../core/realtimeGateway.js';
 import { provisionDefaultStorefront } from './storefrontProvisioner.js';
 import { PLATFORM_MAIN_DOMAIN } from '../../core/subdomains.js';
 import { env } from '../../core/env.js';
@@ -481,6 +482,31 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
   });
 });
 
+// GET /api/v1/storefront/by-slug/:slug/updates
+// Public, read-only stream for newly activated releases. It exposes only a
+// release identifier/version; customers re-fetch the active public snapshot.
+storefrontRouter.get('/by-slug/:slug/updates', async (req: Request, res: Response) => {
+  const slug = String(req.params.slug || '').trim().toLowerCase();
+  const storeRes = await query(
+    `SELECT id, organization_id FROM stores
+     WHERE LOWER(slug) = LOWER($1) AND status = 'ACTIVE'
+     LIMIT 1`,
+    [slug]
+  );
+
+  if (storeRes.rowCount === 0) {
+    return res.status(404).json({ error: 'STORE_NOT_FOUND', message: 'Store not found' });
+  }
+
+  realtimeGateway.registerSseClient(
+    `storefront-${storeRes.rows[0].id}-${uuidv4()}`,
+    res,
+    storeRes.rows[0].organization_id,
+    storeRes.rows[0].id,
+    ['STOREFRONT_RELEASE_PUBLISHED']
+  );
+});
+
 // POST /api/v1/storefront/by-slug/:slug/password/verify
 // Password checks happen on the server; the hash is never exposed to the storefront.
 const passwordAttemptBuckets = new Map<string, { count: number; resetAt: number }>();
@@ -838,6 +864,21 @@ storefrontRouter.post(
       });
     });
 
+    try {
+      await enqueueOutbox({
+        organizationId: req.tenant!.organizationId,
+        storeId,
+        eventType: 'STOREFRONT_RELEASE_PUBLISHED',
+        aggregateType: 'STOREFRONT',
+        aggregateId: releaseId,
+        payload: { storeId, releaseId, releaseNumber }
+      });
+    } catch (error) {
+      // Publication is already committed. Realtime delivery is best-effort;
+      // clients can still fetch the active release on their next request.
+      console.error('[Storefront] Failed to enqueue release notification:', error);
+    }
+
     res.status(201).json({
       message: 'Store published atomically. New release active.',
       releaseId,
@@ -1069,6 +1110,19 @@ storefrontRouter.post(
         changes: { restoredFrom: sourceReleaseId, releaseNumber: rollbackReleaseNumber }
       });
     });
+
+    try {
+      await enqueueOutbox({
+        organizationId: req.tenant!.organizationId,
+        storeId,
+        eventType: 'STOREFRONT_RELEASE_PUBLISHED',
+        aggregateType: 'STOREFRONT',
+        aggregateId: rollbackReleaseId,
+        payload: { storeId, releaseId: rollbackReleaseId, releaseNumber: rollbackReleaseNumber, restoredFrom: sourceReleaseId }
+      });
+    } catch (error) {
+      console.error('[Storefront] Failed to enqueue rollback release notification:', error);
+    }
 
     res.status(201).json({
       message: 'Previous storefront version restored and activated.',
