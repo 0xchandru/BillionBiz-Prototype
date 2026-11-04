@@ -72,7 +72,7 @@ export const StorefrontPreviewViewport: React.FC<StorefrontPreviewViewportProps>
 
   const frameDimensions: React.CSSProperties = logicalWidth === null
     ? { width: '100%', maxWidth: desktopMaxWidth }
-    : { width: `${logicalWidth}px`, maxWidth: '100%' };
+    : { width: `${logicalWidth}px`, maxWidth: 'none' };
 
   return (
     <div
