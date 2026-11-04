@@ -22,7 +22,7 @@ export const app = express();
 export const server = http.createServer(app);
 const PORT = env.PORT || 8080;
 
-// Explicit allowlist of production origins (Section 8)
+// Explicit allowlist of production & local development origins (Section 8)
 const ALLOWED_EXACT_ORIGINS = new Set([
   'https://www.chandraprakash.codes',
   'https://admin.chandraprakash.codes',
@@ -30,7 +30,13 @@ const ALLOWED_EXACT_ORIGINS = new Set([
   'https://staff.chandraprakash.codes',
   'https://pos.chandraprakash.codes',
   'https://ops.chandraprakash.codes',
-  'https://chandraprakash.codes'
+  'https://chandraprakash.codes',
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174',
+  'http://localhost:3000',
+  'http://localhost:8080'
 ]);
 
 const DEV_ORIGIN_REGEX = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
@@ -39,7 +45,8 @@ export function isAllowedOrigin(origin: string | undefined): boolean {
   if (!origin) return false;
   const lower = origin.trim().toLowerCase();
 
-  if (ALLOWED_EXACT_ORIGINS.has(lower)) {
+  // Local development origins always permitted
+  if (DEV_ORIGIN_REGEX.test(lower) || ALLOWED_EXACT_ORIGINS.has(lower)) {
     return true;
   }
 
@@ -99,7 +106,7 @@ app.use(
       if (!origin || isAllowedOrigin(origin)) {
         callback(null, true);
       } else {
-        callback(new Error(`Origin ${origin} not allowed by CORS`));
+        callback(null, false);
       }
     },
     credentials: true,
