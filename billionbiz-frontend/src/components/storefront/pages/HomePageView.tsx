@@ -11,6 +11,7 @@ interface HomePageViewProps {
   products?: any[];
   categories?: any[];
   offerings?: any[];
+  currencyCode?: string;
   mode?: string;
   onNavigate?: (path: string) => void;
   device?: 'desktop' | 'tablet' | 'mobile';
@@ -19,9 +20,14 @@ interface HomePageViewProps {
 
 export const HomePageView: React.FC<HomePageViewProps> = ({
   sections = [],
+  products = [],
+  categories = [],
+  offerings = [],
+  currencyCode = 'INR',
   onNavigate,
   device = 'desktop'
 }) => {
+  const dataContext = { products, categories, offerings, currencyCode };
   // Only render custom body sections - Header and Footer are rendered natively by StoreLayout
   const bodySections = (sections || []).filter((s: any) =>
     s && !isHeaderComponent(s) && !isFooterComponent(s)
@@ -49,7 +55,14 @@ export const HomePageView: React.FC<HomePageViewProps> = ({
   return (
     <div className="space-y-8 pb-16">
       {bodySections.map((section: any, idx: number) => (
-        <SectionRenderer key={section.id || idx} section={section} overrideDevice={device} onNavigate={onNavigate} />
+        <SectionRenderer
+          key={section.id || idx}
+          section={section}
+          overrideDevice={device}
+          onNavigate={onNavigate}
+          dataContext={dataContext}
+          currencyCode={currencyCode}
+        />
       ))}
     </div>
   );
