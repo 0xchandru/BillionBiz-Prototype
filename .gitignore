@@ -2,6 +2,14 @@
 node_modules/
 billionbiz-backend/node_modules/
 billionbiz-backend/dist/
+billionbiz-frontend/node_modules/
+billionbiz-frontend/dist/
+dist/
+dist-ssr/
+*.tsbuildinfo
+
+# Backups
+.frontend-git-backup/
 
 # Environment and secrets (Never commit real credentials)
 .env
@@ -13,12 +21,18 @@ billionbiz-backend/dist/
 *.env.local
 billionbiz-backend/.env
 billionbiz-backend/.env.local
+billionbiz-frontend/.env
+billionbiz-frontend/.env.local
+billionbiz-frontend/.env.development
+billionbiz-frontend/.env.production
+!.env.example
+!billionbiz-backend/.env.example
+!billionbiz-frontend/.env.example
 client_secret*.json
 *.csv
 api-keys*
 
-# Separate frontend repository (managed and pushed to its own repository)
-billionbiz-frontend/
+
 
 # Blueprint archives & extracted duplicates
 billionbiz_platform_blueprint_v2/

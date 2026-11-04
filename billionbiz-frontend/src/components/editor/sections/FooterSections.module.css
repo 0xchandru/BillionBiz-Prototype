@@ -1,0 +1,384 @@
+/* ============================================================
+   FOOTER SECTIONS REUSABLE STYLES
+   Used across FooterTrustSection, FooterNewsletterSection,
+   FooterMainSection, FooterSocialSection, and FooterBottomSection.
+   ============================================================ */
+
+/* ── Live Row Outline & Selection ── */
+.footerRow {
+  width: 100%;
+  position: relative;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-sizing: border-box;
+}
+
+.footerRowEditable {
+  cursor: pointer;
+}
+
+.footerRowHovered {
+  outline: 2px dashed #2563eb !important;
+  outline-offset: -2px;
+}
+
+.footerRowSelected {
+  outline: 2px solid #2563eb !important;
+  outline-offset: -2px;
+}
+
+.rowBadge {
+  display: none !important;
+}
+
+.elementEditable {
+  position: relative;
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+.elementEditable:hover:not(.elementSelected) {
+  outline: 2px dashed #3b82f6 !important;
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.elementHovered {
+  outline: 2px dashed #2563eb !important;
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.elementSelected {
+  outline: 2px solid #2563eb !important;
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* ── Container Modes ── */
+.containerNarrow {
+  max-width: 1024px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
+}
+
+.containerStandard {
+  max-width: 1280px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
+}
+
+.containerWide {
+  max-width: 1440px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
+}
+
+.containerConstrained {
+  max-width: 1280px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
+}
+
+.containerBoxed {
+  max-width: 1140px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
+}
+
+.containerFull {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* ── Trust & Guarantees Section ── */
+.trustGrid {
+  display: grid;
+  gap: 24px;
+  align-items: center;
+}
+
+.trustItemCard {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.trustItemCard:hover {
+  transform: translateY(-2px);
+}
+
+.trustIconWrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.trustItemCard:hover .trustIconWrapper {
+  transform: scale(1.08);
+}
+
+/* ── Newsletter Section ── */
+.newsletterHeroCard {
+  padding: 40px;
+  border-radius: 16px;
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.newsletterInputWrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  position: relative;
+}
+
+.newsletterInput {
+  flex: 1;
+  padding: 12px 18px;
+  font-size: 14px;
+  border-radius: 8px;
+  outline: none;
+  transition: all 0.15s ease;
+  box-sizing: border-box;
+}
+
+.newsletterInput:focus {
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+}
+
+.newsletterSubmitBtn {
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.18s ease;
+}
+
+.newsletterSubmitBtn:hover {
+  opacity: 0.92;
+  transform: translateY(-1px);
+}
+
+.newsletterSuccessBanner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
+  animation: fadeIn 0.25s ease;
+}
+
+/* ── Main Multi-Column Directory ── */
+.mainFooterGrid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.columnCard {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.linkGroupHeading {
+  font-size: 13.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.linkList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.linkItemAnchor {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  font-size: 13.5px;
+  transition: all 0.15s ease;
+  line-height: 1.4;
+}
+
+.linkItemAnchor:hover {
+  transform: translateX(2px);
+}
+
+.linkBadge {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.3;
+}
+
+/* ── Social Profiles ── */
+.socialIconRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.socialIconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  text-decoration: none;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.socialIconBtn:hover {
+  transform: translateY(-2px) scale(1.05);
+}
+
+/* ── Bottom Payment & Legal Bar ── */
+.bottomBarFlex {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  width: 100%;
+}
+
+.paymentBadgesRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.paymentBadgeItem {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  transition: all 0.15s ease;
+}
+
+.paymentBadgeItem:hover {
+  background: rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
+}
+
+.policyLinksRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.policyLinkItem {
+  font-size: 12px;
+  text-decoration: none;
+  opacity: 0.75;
+  transition: opacity 0.15s ease;
+}
+
+.policyLinkItem:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.backToTopBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.backToTopBtn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  transform: translateY(-2px);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Modular Column Child Newsletter Input ── */
+.columnNewsletterInput {
+  flex: 1;
+  min-width: 0;
+  outline: none;
+  font-size: 13.5px;
+  background-color: var(--footer-input-bg, #f8fafc);
+  border: 1px solid var(--footer-input-border, var(--footer-border, #cbd5e1));
+  color: var(--footer-input-text, var(--footer-heading, #0f172a));
+  box-sizing: border-box;
+  transition: all 0.2s ease;
+}
+
+.columnNewsletterInput::placeholder {
+  color: var(--footer-muted-text, #64748b);
+  opacity: 0.75;
+}
+
+.columnNewsletterInput:focus {
+  border-color: var(--footer-accent, #2563eb) !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+}
+

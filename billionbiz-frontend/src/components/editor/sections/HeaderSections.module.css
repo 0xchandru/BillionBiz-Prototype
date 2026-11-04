@@ -1,0 +1,166 @@
+/* ============================================================
+   HEADER SECTIONS REUSABLE STYLES
+   Used across AnnouncementBarSection, UtilityBarSection,
+   HeaderNavbarSection, and CategoryBarSection.
+   ============================================================ */
+
+/* ── Live Row Outline & Selection ── */
+.headerRow {
+  width: 100%;
+  position: relative;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.headerRowEditable {
+  cursor: pointer;
+}
+
+.headerRowHovered {
+  outline: 2px dashed #2563eb !important;
+  outline-offset: -2px;
+}
+
+.headerRowSelected {
+  outline: 2px solid #2563eb !important;
+  outline-offset: -2px;
+}
+
+.rowBadge {
+  position: absolute;
+  top: 4px;
+  left: 12px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: #2563eb;
+  color: #ffffff;
+  padding: 2px 8px;
+  border-radius: 4px;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.35);
+  z-index: 30;
+  pointer-events: none;
+}
+
+.elementEditable {
+  position: relative;
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+.elementHovered {
+  outline: 2px dashed #2563eb !important;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.elementSelected {
+  outline: 2px solid #2563eb !important;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* ── Announcement Bar Marquee Animation ── */
+@keyframes marqueeScroll {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.marqueeTrack {
+  display: flex;
+  width: max-content;
+  will-change: transform;
+  animation: marqueeScroll 25s linear infinite;
+}
+
+/* ── Dropdown & Mega Menu Animations ── */
+.dropdownMenu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  padding: 8px 0;
+  min-width: 200px;
+  z-index: 1050;
+  animation: fadeInDown 0.18s ease-out forwards;
+}
+
+.megaMenuContainer {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 95vw;
+  max-width: 1140px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.12), 0 10px 10px -5px rgba(0, 0, 0, 0.08);
+  padding: 24px;
+  z-index: 1050;
+  animation: fadeInDown 0.2s ease-out forwards;
+}
+
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Mobile Drawer ── */
+.mobileDrawerOverlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 9999;
+  display: flex;
+}
+
+.mobileDrawerContent {
+  width: 320px;
+  max-width: 85vw;
+  height: 100%;
+  background: #ffffff;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  animation: slideInLeft 0.25s ease-out forwards;
+}
+
+@keyframes slideInLeft {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+/* ── Category Bar Horizontal Scroll ── */
+.categoryBarScroll {
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.categoryBarScroll::-webkit-scrollbar {
+  display: none;
+}

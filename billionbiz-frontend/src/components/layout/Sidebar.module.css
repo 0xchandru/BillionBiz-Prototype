@@ -1,0 +1,235 @@
+.sidebar {
+  width: 250px;
+  background-color: #ffffff;
+  border-right: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  user-select: none;
+  font-family: inherit;
+  flex-shrink: 0;
+  box-shadow: 1px 0 3px rgba(0, 0, 0, 0.02);
+}
+
+/* Scrollable Nav Container with Minimal Sleek Scrollbar */
+.navContainer {
+  display: flex;
+  flex-direction: column;
+  padding: 16px 12px;
+  gap: 3px;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.navContainer::-webkit-scrollbar {
+  width: 4px;
+}
+
+.navContainer::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.navContainer::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+.navContainer::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.sectionHeaderWrap {
+  margin-bottom: 2px;
+}
+
+/* Dashboard / Direct Link Button */
+.itemBtn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  text-decoration: none;
+  color: #334155;
+  font-size: 13.5px;
+  font-weight: 600;
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+.itemBtn:hover {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+.itemActiveDirect {
+  background-color: #e6f4f1;
+  color: #083e47 !important;
+  font-weight: 700;
+}
+
+.itemActiveDirect .itemIcon {
+  color: #083e47 !important;
+}
+
+/* Dropdown Accordion Header Button */
+.sectionGroup {
+  display: flex;
+  flex-direction: column;
+}
+
+.dropdownBtn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  color: #334155;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.dropdownBtn:hover {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+.dropdownBtnOpen {
+  color: #083e47;
+  font-weight: 700;
+}
+
+.dropdownBtnOpen .itemIcon {
+  color: #083e47;
+}
+
+.itemLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.itemIcon {
+  color: #64748b;
+  flex-shrink: 0;
+  transition: color 0.15s ease;
+}
+
+.itemLabel {
+  font-size: 13.5px;
+  letter-spacing: -0.01em;
+}
+
+.chevronIcon {
+  color: #94a3b8;
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+/* Sub-items List with thin vertical left guideline */
+.subList {
+  display: flex;
+  flex-direction: column;
+  margin-left: 18px;
+  padding-left: 10px;
+  border-left: 1.5px solid #e2e8f0;
+  margin-top: 2px;
+  margin-bottom: 6px;
+  gap: 2px;
+}
+
+.subItem {
+  display: block;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #475569;
+  text-decoration: none;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.subItem:hover {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+/* Highlighted Active Sub-item Pill */
+.subItemActive {
+  background-color: #e6f4f1 !important;
+  color: #083e47 !important;
+  font-weight: 700 !important;
+}
+
+/* DOCKED BOTTOM FOOTER: Static User Identity */
+.bottomFooter {
+  padding: 14px 16px;
+  border-top: 1px solid #e2e8f0;
+  background-color: #ffffff;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.profileRowStatic {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  overflow: hidden;
+  user-select: none;
+  cursor: default;
+}
+
+.avatarCircle {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background-color: #083e47;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.profileInfo {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.profileName {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.profileRole {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    display: none;
+  }
+}

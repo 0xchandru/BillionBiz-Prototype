@@ -1,0 +1,220 @@
+import React, { useEffect, useState, useMemo } from 'react';
+import { useLandingEditorStore } from '../../store/landingEditorStore';
+import { useSiteStore } from '../../store/siteStore';
+import { useAuthStore } from '../../store/authStore';
+import { apiClient } from '../../api/client';
+import { getStoreUrl } from '../../utils/subdomain';
+import { StorefrontRenderer } from '../storefront/StorefrontRenderer';
+
+interface WebsitePreviewProps {
+  pagePath?: string;
+  overrideDevice?: 'desktop' | 'tablet' | 'mobile';
+  highlightSection?: 'header' | 'footer' | null;
+  className?: string;
+  style?: React.CSSProperties;
+}
+
+export const WebsitePreview: React.FC<WebsitePreviewProps> = ({
+  pagePath,
+  overrideDevice,
+  highlightSection: _highlightSection,
+  className = '',
+  style = {}
+}) => {
+  const storeDevice = useLandingEditorStore((s) => s.device);
+  const selectedPageId = useLandingEditorStore((s) => s.selectedPageId);
+
+  const { theme, settings, pages } = useSiteStore();
+  const authStoreSlug = useAuthStore((s) => s.storeSlug);
+  const localSlug = typeof window !== 'undefined' ? localStorage.getItem('billionbiz_store_slug') : null;
+  const storeSlug = authStoreSlug || localSlug || 'chandru';
+
+  const activeDevice = (overrideDevice || (storeDevice === 'all' ? 'desktop' : storeDevice) || 'desktop') as 'desktop' | 'tablet' | 'mobile';
+
+  const [serverData, setServerData] = useState<any>(null);
+
+  // Load authoritative store data (products, categories, offerings, brand, settings)
+  const fetchAuthoritativeData = async () => {
+    try {
+      let res: any;
+      try {
+        res = await apiClient<any>('/storefront/render');
+      } catch {
+        res = await apiClient<any>(`/storefront/by-slug/${storeSlug}`);
+      }
+      if (res && res.store) {
+        setServerData(res);
+      }
+    } catch (err) {
+      console.warn('[WebsitePreview] Could not load live server data:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchAuthoritativeData();
+  }, [storeSlug]);
+
+  // Determine current active path based on selectedPageId
+  const currentPath = useMemo(() => {
+    if (pagePath) return pagePath;
+    if (!selectedPageId || selectedPageId === 'landing-page' || selectedPageId.endsWith('-global')) {
+      return '/';
+    }
+
+    // Map common page IDs to their canonical URL routes
+    const pathToIdMap: Record<string, string> = {
+      'shop-page': '/shop',
+      'shop': '/shop',
+      'product-details-page': '/products',
+      'product_detail': '/products',
+      'collections-page': '/collections',
+      'collection': '/collections',
+      'cart-page': '/cart',
+      'cart': '/cart',
+      'checkout-page': '/checkout',
+      'checkout': '/checkout',
+      'account-page': '/account',
+      'account': '/account',
+      'booking-page': '/book',
+      'booking': '/book',
+      'contact-page': '/contact',
+      'contact': '/contact',
+      'privacy-policy-page': '/policies/privacy',
+      'terms-conditions-page': '/policies/terms',
+      'refund-policy-page': '/policies/refund',
+      '404': '/404',
+      'password': '/password'
+    };
+
+    if (pathToIdMap[selectedPageId]) {
+      return pathToIdMap[selectedPageId];
+    }
+
+    const matched = pages.find((p) => p.id === selectedPageId || p.type === selectedPageId);
+    return matched?.path || '/';
+  }, [selectedPageId, pagePath, pages]);
+
+  // Business Name: Inherit authoritatively from Admin Settings / Store Settings
+  const effectiveBusinessName = 
+    settings?.storeName || 
+    serverData?.store?.name || 
+    serverData?.brand?.brand_name || 
+    'Chandru Store';
+
+  const effectiveBrand = {
+    brand_name: effectiveBusinessName,
+    tagline: settings?.tagline || serverData?.brand?.tagline || 'Handcrafted Quality & Direct Commerce',
+    logo_url: settings?.logoUrl || serverData?.brand?.logo_url,
+    favicon_url: settings?.faviconUrl || serverData?.brand?.favicon_url,
+    social_links: settings?.socialLinks || serverData?.brand?.social_links || {}
+  };
+
+  const effectiveTheme = theme || serverData?.theme || {};
+  const effectiveProducts = serverData?.products || [];
+  const effectiveCategories = serverData?.categories || [];
+  const effectiveOfferings = serverData?.offerings || [];
+
+  // Determine container dimensions based on device
+  // CRITICAL: Desktop uses 100% width up to 1280px with overflowX: hidden to eliminate horizontal scrollbars completely!
+  const getDeviceStyle = (): React.CSSProperties => {
+    if (activeDevice === 'mobile') {
+      return {
+        width: '375px',
+        maxWidth: '100%',
+        minHeight: '750px',
+        margin: '24px auto',
+        backgroundColor: '#ffffff',
+        borderRadius: '20px',
+        boxShadow: '0 12px 36px -4px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0,0,0,0.06)',
+        overflowX: 'hidden',
+        overflowY: 'visible',
+        transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
+      };
+    }
+    if (activeDevice === 'tablet') {
+      return {
+        width: '768px',
+        maxWidth: '100%',
+        minHeight: '850px',
+        margin: '24px auto',
+        backgroundColor: '#ffffff',
+        borderRadius: '16px',
+        boxShadow: '0 12px 36px -4px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0,0,0,0.06)',
+        overflowX: 'hidden',
+        overflowY: 'visible',
+        transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
+      };
+    }
+    // Desktop: Natural 100% responsive width, capped at 1280px, perfectly centered
+    return {
+      width: '100%',
+      maxWidth: '1280px',
+      minHeight: '100%',
+      margin: '0 auto',
+      backgroundColor: '#ffffff',
+      borderRadius: '8px',
+      boxShadow: '0 2px 12px -2px rgba(0, 0, 0, 0.06)',
+      overflowX: 'hidden',
+      overflowY: 'visible',
+      transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
+    };
+  };
+
+  return (
+    <div
+      className={`website-preview-outer-container ${className}`}
+      style={{
+        width: '100%',
+        height: '100%',
+        overflowX: 'hidden',
+        overflowY: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        padding: activeDevice === 'desktop' ? '0' : '0 16px 32px 16px',
+        boxSizing: 'border-box',
+        ...style
+      }}
+    >
+      <div
+        className="website-preview-frame"
+        style={getDeviceStyle()}
+        onClickCapture={(e) => {
+          // Prevent real navigation away in editor mode
+          const target = e.target as HTMLElement;
+          const anchor = target.closest('a');
+          if (anchor) {
+            e.preventDefault();
+          }
+        }}
+      >
+        <StorefrontRenderer
+          store={{
+            id: serverData?.store?.id,
+            name: effectiveBusinessName,
+            slug: storeSlug,
+            primary_domain: getStoreUrl(storeSlug).replace(/^https?:\/\//, '')
+          }}
+          brand={effectiveBrand}
+          themeTokens={effectiveTheme}
+          settings={serverData?.settings || settings}
+          pages={pages && pages.length > 0 ? pages : (serverData?.pages || [])}
+          currentPath={currentPath}
+          products={effectiveProducts}
+          categories={effectiveCategories}
+          offerings={effectiveOfferings}
+          previewMode={true}
+          onNavigate={(targetPath) => {
+            // Update selected page in store when user clicks a link in the preview
+            const matched = pages.find((p) => p.path === targetPath);
+            if (matched) {
+              useLandingEditorStore.getState().navigateToPage(matched.id);
+            }
+          }}
+        />
+      </div>
+    </div>
+  );
+};
+
+export default WebsitePreview;
