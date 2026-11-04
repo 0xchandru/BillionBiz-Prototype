@@ -612,11 +612,12 @@ export const useOnlineStore = create<OnlineStoreState>()(
       pageProps: {},
       visibility: { desktop: true, tablet: true, mobile: true }
     };
-    return { pages: [...state.pages, newPage] };
+    return { pages: [...state.pages, newPage], hasUnsavedChanges: true };
   }),
 
   removePage: (pageId) => set((state) => ({
-    pages: state.pages.filter(page => page.id !== pageId)
+    pages: state.pages.filter(page => page.id !== pageId),
+    hasUnsavedChanges: true
   })),
 
   updateTheme: (newTheme, forceHistory = false) => {
@@ -730,7 +731,8 @@ export const useOnlineStore = create<OnlineStoreState>()(
         theme: {
           ...state.theme,
           buttons: JSON.parse(JSON.stringify(preset.buttons)),
-        }
+        },
+        hasUnsavedChanges: true
       };
     });
   },
@@ -744,7 +746,8 @@ export const useOnlineStore = create<OnlineStoreState>()(
           ...state.theme,
           effects: JSON.parse(JSON.stringify(preset.effects)),
           ui: { ...preset.ui },
-        }
+        },
+        hasUnsavedChanges: true
       };
     });
   },
