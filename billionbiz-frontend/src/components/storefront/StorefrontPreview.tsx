@@ -319,6 +319,9 @@ export const StorefrontPreview: React.FC<StorefrontPreviewProps> = ({
             onNavigate={(path) => setActivePath(path)}
             previewMode={true}
             useEditorChrome={previewMode === 'draft'}
+            device={deviceMode === 'custom'
+              ? (customWidth <= 600 ? 'mobile' : customWidth <= 900 ? 'tablet' : 'desktop')
+              : deviceMode}
           />
         </StorefrontPreviewViewport>
       )}
