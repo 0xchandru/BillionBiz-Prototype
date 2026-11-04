@@ -30,6 +30,7 @@ interface StoreLayoutProps {
   footerTree?: FooterTreeNode[];
   footerRows?: FooterRow[];
   useEditorChrome?: boolean;
+  device?: 'desktop' | 'tablet' | 'mobile';
 }
 
 export const StoreLayout: React.FC<StoreLayoutProps> = ({
@@ -38,7 +39,8 @@ export const StoreLayout: React.FC<StoreLayoutProps> = ({
   headerProps,
   footerTree,
   footerRows,
-  useEditorChrome = false
+  useEditorChrome = false,
+  device = 'desktop'
 }) => {
   const { items, isOpen, setIsOpen, updateQuantity, removeItem, getSubtotal, getTotalCount } = useStorefrontCartStore();
   const subtotal = getSubtotal();
@@ -58,6 +60,7 @@ export const StoreLayout: React.FC<StoreLayoutProps> = ({
       <header className="sticky top-0 z-40 bg-[var(--theme-bg)] border-b border-[var(--theme-border)] shadow-xs">
         <HeaderNavbarSection
           props={headerProps}
+          device={device}
           isEditorInteractive={useEditorChrome}
           useEditorModel={useEditorChrome}
         />
@@ -73,6 +76,7 @@ export const StoreLayout: React.FC<StoreLayoutProps> = ({
         <FooterTreeRenderer
           tree={useEditorChrome ? undefined : footerTree}
           rows={useEditorChrome ? undefined : footerRows}
+          device={device}
           isEditorInteractive={useEditorChrome}
         />
       </div>
