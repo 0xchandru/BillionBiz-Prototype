@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   ArrowLeft, Undo, Redo, Monitor, Tablet, Smartphone, Columns,
@@ -28,6 +28,7 @@ import { getStoreUrl } from '../../utils/subdomain';
 import { AuditButton } from './topbar/AuditButton';
 import { VersionCompareModal } from './engine/VersionCompareModal';
 import styles from './topbar/topbar.module.css';
+import { getHomePage, resolveEditorPage } from './utils/pageIdentity';
 
 export const EditorTopBar: React.FC = () => {
   const navigate = useNavigate();
@@ -71,7 +72,7 @@ export const EditorTopBar: React.FC = () => {
   const [isVersionCompareOpen, setIsVersionCompareOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const activePage = pages.find((p) => p.id === selectedPageId) || pages[0];
+  const activePage = resolveEditorPage(pages, selectedPageId) || pages[0];
   const isPages = activePanel === 'pages';
   const isPagesList = isPages && pagesNavLevel === 'list';
   const isPageEditor = isPages && pagesNavLevel === 'page-detail';
@@ -84,7 +85,7 @@ export const EditorTopBar: React.FC = () => {
 
   // Helper to determine status and baseline per editing scope
   const getPublishScopeState = () => {
-    const landingPage = pages.find((p) => p.path === '/') || pages.find((p) => p.id === 'landing-page') || pages[0];
+    const landingPage = getHomePage(pages) || pages[0];
 
     if (selectedPageId === 'header-global') {
       const currentSections = (landingPage?.sections || []).filter(isHeaderComponent);
@@ -112,7 +113,7 @@ export const EditorTopBar: React.FC = () => {
       return { isLive, isSavedDraft, hasUnpublished, name: 'Global Footer' };
     }
 
-    if (selectedPageId === 'landing-page' || pages.find((page) => page.id === selectedPageId)?.path === '/') {
+    if (selectedPageId === 'landing-page' || activePage?.path === '/') {
       const currentSections = (landingPage?.sections || []).filter(isHomepageBodySection);
       const snapshot = landingPage?.lastPublishedSnapshot ||
         lastPublishedSnapshots?.[landingPage?.id || ''] ||
@@ -128,7 +129,7 @@ export const EditorTopBar: React.FC = () => {
       return { isLive, isSavedDraft, hasUnpublished, name: 'Homepage' };
     }
 
-    const targetPage = pages.find((p) => p.id === selectedPageId) || landingPage;
+    const targetPage = resolveEditorPage(pages, selectedPageId) || landingPage;
     const snapshot = targetPage?.lastPublishedSnapshot || (targetPage ? lastPublishedSnapshots?.[targetPage.id] : null);
     const hasBaseline = Boolean(snapshot?.publishedAt && Array.isArray(snapshot?.sections));
     const hasUnpublished = Boolean(
@@ -194,7 +195,7 @@ export const EditorTopBar: React.FC = () => {
         return;
       }
 
-      const page = pages.find((item) => item.id === selectedPageId) || landingPage;
+      const page = resolveEditorPage(pages, selectedPageId) || landingPage;
       if (!page) throw new Error('The selected page is not available in the current store.');
       await savePageDraftToBackend(page.id);
       return;
