@@ -1,9 +1,10 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import { query, withTransaction } from '../../db/pool.js';
-import { requireAuth, requirePermission } from '../../middleware/auth.js';
+import { requireAuth, requirePermission, JWT_SECRET } from '../../middleware/auth.js';
 import { resolveTenant } from '../../middleware/tenant.js';
 import { handleIdempotency } from '../../middleware/idempotency.js';
 import { recordAudit, enqueueOutbox } from '../../core/auditAndOutbox.js';
@@ -340,7 +341,8 @@ storefrontRouter.delete(
 
 // GET /api/v1/storefront/by-slug/:slug (Public Storefront by store slug, REQ-STOREFRONT-001)
 storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
-  const slug = req.params.slug as string;
+  res.setHeader('Cache-Control', 'private, no-store');
+  const slug = String(req.params.slug || '').trim().toLowerCase();
   const storeRes = await query(
     `SELECT id, organization_id, name, slug, currency, timezone, status
      FROM stores
@@ -356,6 +358,48 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
   }
 
   const store = storeRes.rows[0];
+
+  const settingsRes = await query(
+    `SELECT mode, home_page, navigation_config, icon_visibility, brand_name, tagline,
+            logo_url, favicon_url, social_links, primary_domain, password_enabled,
+            password_hash, maintenance_mode
+     FROM storefront_settings
+     WHERE store_id = $1`,
+    [store.id]
+  );
+  const settingsRow = settingsRes.rows[0] || {};
+
+  if (settingsRow.password_enabled) {
+    const suppliedToken = req.headers['x-storefront-access-token'];
+    let hasStoreAccess = false;
+
+    if (typeof suppliedToken === 'string' && suppliedToken.length > 0) {
+      try {
+        const claims = jwt.verify(suppliedToken, JWT_SECRET) as jwt.JwtPayload;
+        hasStoreAccess =
+          claims.scope === 'STOREFRONT_PASSWORD' &&
+          claims.storeId === store.id &&
+          claims.slug === store.slug;
+      } catch {
+        hasStoreAccess = false;
+      }
+    }
+
+    if (!hasStoreAccess) {
+      return res.status(200).json({
+        store: { id: store.id, name: store.name, slug: store.slug, currency: store.currency, timezone: store.timezone },
+        brand: {
+          name: settingsRow.brand_name || store.name,
+          tagline: settingsRow.tagline || '',
+          logoUrl: settingsRow.logo_url || '',
+          faviconUrl: settingsRow.favicon_url || '',
+          socialLinks: settingsRow.social_links || {}
+        },
+        settings: { passwordEnabled: true },
+        passwordRequired: true
+      });
+    }
+  }
 
   // 1. Latest immutable published release snapshot
   const releaseRes = await query(
@@ -442,13 +486,8 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
     [store.id]
   );
 
-  // 7. Storefront settings & brand
-  const settingsRes = await query(
-    `SELECT mode, home_page, navigation_config, icon_visibility, brand_name, tagline, logo_url, favicon_url, social_links, primary_domain, password_enabled, maintenance_mode
-     FROM storefront_settings WHERE store_id = $1`,
-    [store.id]
-  );
-  const settingsRow = settingsRes.rows[0] || {};
+  // 7. Storefront settings & brand. Settings were loaded before any
+  // publication/catalogue data so password-protected stores can fail closed.
   const activeSnapshot = releaseRes.rows[0]?.snapshot || {};
   const publishedBrand = activeSnapshot.brand || {};
   const publishedSettings = activeSnapshot.settings || {};
@@ -509,7 +548,8 @@ storefrontRouter.get('/by-slug/:slug/updates', async (req: Request, res: Respons
 
 // POST /api/v1/storefront/by-slug/:slug/password/verify
 // Password checks happen on the server; the hash is never exposed to the storefront.
-const passwordAttemptBuckets = new Map<string, { count: number; resetAt: number }>();
+// Attempts are tracked in PostgreSQL so limits are consistent across instances.
+
 storefrontRouter.post('/by-slug/:slug/password/verify', async (req: Request, res: Response) => {
   const slug = String(req.params.slug || '').trim().toLowerCase();
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
@@ -541,30 +581,74 @@ storefrontRouter.post('/by-slug/:slug/password/verify', async (req: Request, res
     });
   }
 
-  const now = Date.now();
-  const attemptKey = `${req.ip || 'unknown'}:${store.id}`;
-  const bucket = passwordAttemptBuckets.get(attemptKey);
-  if (bucket && bucket.resetAt > now && bucket.count >= 10) {
+  const clientIp = String(req.socket?.remoteAddress || req.ip || 'unknown');
+  const ipHash = crypto.createHash('sha256')
+    .update(`${store.id}:${clientIp}:${JWT_SECRET}`)
+    .digest('hex');
+
+  const attemptRes = await query(
+    `SELECT attempt_count, window_started_at, blocked_until
+     FROM storefront_password_attempts
+     WHERE store_id = $1 AND ip_hash = $2
+     LIMIT 1`,
+    [store.id, ipHash]
+  );
+  const existingAttempt = attemptRes.rows[0];
+  if (existingAttempt?.blocked_until && new Date(existingAttempt.blocked_until).getTime() > Date.now()) {
     return res.status(429).json({
       error: 'TOO_MANY_ATTEMPTS',
       verified: false,
       message: 'Too many password attempts. Please wait before trying again.'
     });
   }
-  if (!bucket || bucket.resetAt <= now) {
-    passwordAttemptBuckets.set(attemptKey, { count: 0, resetAt: now + 10 * 60 * 1000 });
-  }
 
   const verified = await bcrypt.compare(password, store.password_hash);
   if (!verified) {
-    const activeBucket = passwordAttemptBuckets.get(attemptKey)!;
-    activeBucket.count += 1;
-    passwordAttemptBuckets.set(attemptKey, activeBucket);
+    const savedAttempt = await query(
+      `INSERT INTO storefront_password_attempts (
+         store_id, ip_hash, window_started_at, attempt_count, blocked_until, updated_at
+       )
+       VALUES ($1, $2, NOW(), 1, NULL, NOW())
+       ON CONFLICT (store_id, ip_hash) DO UPDATE SET
+         attempt_count = CASE
+           WHEN storefront_password_attempts.window_started_at < NOW() - INTERVAL '10 minutes' THEN 1
+           ELSE storefront_password_attempts.attempt_count + 1
+         END,
+         window_started_at = CASE
+           WHEN storefront_password_attempts.window_started_at < NOW() - INTERVAL '10 minutes' THEN NOW()
+           ELSE storefront_password_attempts.window_started_at
+         END,
+         blocked_until = CASE
+           WHEN storefront_password_attempts.window_started_at < NOW() - INTERVAL '10 minutes' THEN NULL
+           WHEN storefront_password_attempts.attempt_count + 1 >= 10 THEN NOW() + INTERVAL '10 minutes'
+           ELSE NULL
+         END,
+         updated_at = NOW()
+       RETURNING attempt_count, blocked_until`,
+      [store.id, ipHash]
+    );
+
+    if (Number(savedAttempt.rows[0]?.attempt_count || 0) >= 10) {
+      return res.status(429).json({
+        error: 'TOO_MANY_ATTEMPTS',
+        verified: false,
+        message: 'Too many password attempts. Please wait before trying again.'
+      });
+    }
     return res.json({ verified: false, message: 'Incorrect storefront password.' });
   }
 
-  passwordAttemptBuckets.delete(attemptKey);
-  return res.json({ verified: true });
+  await query(
+    `DELETE FROM storefront_password_attempts WHERE store_id = $1 AND ip_hash = $2`,
+    [store.id, ipHash]
+  );
+
+  const accessToken = jwt.sign(
+    { scope: 'STOREFRONT_PASSWORD', storeId: store.id, slug: store.slug },
+    JWT_SECRET,
+    { expiresIn: '4h', issuer: 'billionbiz-storefront', subject: store.id }
+  );
+  return res.json({ verified: true, accessToken, expiresInSeconds: 4 * 60 * 60 });
 });
 
 // GET /api/v1/storefront/render (Render active storefront or draft preview)
