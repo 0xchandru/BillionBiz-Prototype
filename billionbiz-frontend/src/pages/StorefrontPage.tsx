@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { StorefrontRenderer } from '../components/storefront/StorefrontRenderer';
-import { apiClient } from '../api/client';
+import { apiClient, getApiBaseUrl } from '../api/client';
 import { AlertCircle, ArrowLeft, ExternalLink } from 'lucide-react';
 
 interface StorefrontPageProps {
@@ -12,28 +12,56 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ slug = 'shoum' }
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
-  useEffect(() => {
-    async function loadStore() {
-      try {
-        setLoading(true);
-        setNotFound(false);
-        const data = await apiClient<any>(`/storefront/by-slug/${slug}`);
-        if (!data || !data.store) {
-          setNotFound(true);
-        } else {
-          setStoreData(data);
-        }
-      } catch (err: any) {
-        console.warn(`[Storefront] Failed to load store '${slug}':`, err);
+  const loadStore = useCallback(async (showLoading = false) => {
+    try {
+      if (showLoading) setLoading(true);
+      setNotFound(false);
+      const data = await apiClient<any>(`/storefront/by-slug/${encodeURIComponent(slug)}`);
+      if (!data || !data.store) {
         setNotFound(true);
-      } finally {
-        setLoading(false);
+        setStoreData(null);
+      } else {
+        setStoreData(data);
       }
-    }
-    if (slug) {
-      loadStore();
+    } catch (err: any) {
+      console.warn(`[Storefront] Failed to load store '${slug}':`, err);
+      setNotFound(true);
+      setStoreData(null);
+    } finally {
+      setLoading(false);
     }
   }, [slug]);
+
+  useEffect(() => {
+    if (!slug) return;
+
+    void loadStore(true);
+
+    // A public, store-scoped SSE stream sends only release metadata. Re-fetch
+    // the immutable active snapshot when a merchant publishes or rolls back.
+    const updatesUrl = `${getApiBaseUrl()}/storefront/by-slug/${encodeURIComponent(slug)}/updates`;
+    const updates = new EventSource(updatesUrl);
+
+    updates.onmessage = (message) => {
+      try {
+        const envelope = JSON.parse(message.data);
+        if (envelope?.data?.type === 'STOREFRONT_RELEASE_PUBLISHED') {
+          void loadStore(false);
+        }
+      } catch {
+        // Ignore malformed frames and keep the stream open.
+      }
+    };
+
+    updates.onerror = () => {
+      // EventSource reconnects automatically. The current published page
+      // remains usable while the stream is temporarily unavailable.
+    };
+
+    return () => {
+      updates.close();
+    };
+  }, [slug, loadStore]);
 
   if (loading) {
     return (
@@ -46,7 +74,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ slug = 'shoum' }
     );
   }
 
-  // P0 Launch Gate: Dedicated 404 Store Not Found UI (Never a fake demo store)
+  // A store without a publication is not served as a demo or draft storefront.
   if (notFound || !storeData) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
