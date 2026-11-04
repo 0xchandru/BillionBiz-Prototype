@@ -1,0 +1,93 @@
+name: BillionBiz CI
+
+on:
+  push:
+    branches:
+      - main
+      - "codex/**"
+      - "feature/**"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: billionbiz-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend build and PostgreSQL tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: billionbiz
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d billionbiz"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      NODE_ENV: test
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: billionbiz
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/billionbiz
+      JWT_SECRET: ci-only-secret-not-used-in-production-2026-11
+      ROOT_DOMAIN: chandraprakash.codes
+      PORT: 8080
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: billionbiz-backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm ci --prefix billionbiz-backend
+
+      - name: Apply database migrations
+        run: npm --prefix billionbiz-backend run db:migrate
+
+      - name: Compile backend TypeScript
+        run: npm --prefix billionbiz-backend run build
+
+      - name: Run backend integration tests
+        run: npm --prefix billionbiz-backend test
+
+  frontend:
+    name: Frontend production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: billionbiz-frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix billionbiz-frontend
+
+      - name: Build production frontend
+        run: npm --prefix billionbiz-frontend run build
