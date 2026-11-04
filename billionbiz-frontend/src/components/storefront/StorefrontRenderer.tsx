@@ -12,9 +12,7 @@ import { BookingPageView } from './pages/BookingPageView';
 import { PolicyPageView } from './pages/PolicyPageView';
 import { ContactPageView } from './pages/ContactPageView';
 import { System404View } from './pages/System404View';
-import { PasswordGateView } from './pages/PasswordGateView';
 import { Hammer } from 'lucide-react';
-import { apiClient } from '../../api/client';
 
 export interface StorefrontRendererProps {
   store?: {
@@ -63,11 +61,6 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
   useEditorChrome = false
 }) => {
   const [internalPath, setInternalPath] = useState<string>(currentPath);
-  const passwordSessionKey = `storefront_password_unlocked:${store?.slug || store?.id || 'store'}`;
-  const [, setPasswordSessionRevision] = useState(0);
-  const isPasswordUnlocked = typeof window !== 'undefined' &&
-    sessionStorage.getItem(passwordSessionKey) === 'true';
-
   const activePath = previewMode ? (currentPath || internalPath) : (window.location.pathname || currentPath || '/');
 
   const handleNavigate = (path: string) => {
@@ -92,7 +85,6 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
   const publishedFooterTree = Array.isArray(footerEditorConfig.tree) ? footerEditorConfig.tree : undefined;
   const publishedFooterRows = Array.isArray(footerEditorConfig.rows) ? footerEditorConfig.rows : undefined;
   const maintenanceMode = settings?.maintenance_mode ?? (settings as any)?.maintenanceMode ?? false;
-  const passwordEnabled = settings?.password_enabled ?? (settings as any)?.passwordEnabled ?? false;
 
   // Check Maintenance Mode
   if (maintenanceMode && !previewMode) {
@@ -111,29 +103,8 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
     );
   }
 
-  // Check Password Protection
-  if (passwordEnabled && !isPasswordUnlocked && !previewMode) {
-    return (
-      <ThemeTokenProvider theme={themeTokens}>
-        <PasswordGateView
-          brandName={brandDisplayName}
-          tagline={brand?.tagline}
-          onUnlock={async (password) => {
-            if (!store?.slug) return false;
-            const result = await apiClient.post<{ verified: boolean }>(
-              `/storefront/by-slug/${encodeURIComponent(store.slug)}/password/verify`,
-              { password }
-            );
-            if (!result.verified) return false;
-
-            sessionStorage.setItem(passwordSessionKey, 'true');
-            setPasswordSessionRevision((revision) => revision + 1);
-            return true;
-          }}
-        />
-      </ThemeTokenProvider>
-    );
-  }
+  // Password protection is enforced by the public data API before this
+  // renderer receives any private publication or catalogue content.
 
   // Route Resolver
   const renderPageView = () => {
