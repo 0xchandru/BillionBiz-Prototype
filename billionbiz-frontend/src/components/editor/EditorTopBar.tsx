@@ -78,6 +78,7 @@ export const EditorTopBar: React.FC = () => {
   const isPageEditor = isPages && pagesNavLevel === 'page-detail';
   const isTheme = activePanel === 'design' || activePanel === 'design-experience';
   const isStoreBrand = activePanel === 'brand' || activePanel === 'store-brand';
+  const isGrowth = activePanel === 'growth' || activePanel === 'seo-growth';
   const isSettings = activePanel === 'settings';
   const isLandingPageEditor =
     !location.pathname.startsWith('/editor/pages') &&
@@ -177,7 +178,7 @@ export const EditorTopBar: React.FC = () => {
       return;
     }
 
-    if (isStoreBrand || isSettings) {
+    if (isStoreBrand || isGrowth || isSettings) {
       await saveSettingsToBackend(settings);
       return;
     }
@@ -207,6 +208,7 @@ export const EditorTopBar: React.FC = () => {
   }, [
     isTheme,
     isStoreBrand,
+    isGrowth,
     isSettings,
     isPageEditor,
     selectedPageId,
@@ -521,17 +523,22 @@ export const EditorTopBar: React.FC = () => {
             {isSettings ? (
               <div className={styles.contextTag}>
                 <Settings size={14} color="#64748b" />
-                <span>Store Settings</span>
+                <span>Store setup</span>
               </div>
             ) : isStoreBrand ? (
               <div className={styles.contextTag}>
                 <Store size={14} color="#d97706" />
-                <span>Brand & Identity</span>
+                <span>Store identity</span>
               </div>
             ) : isTheme ? (
               <div className={styles.contextTag}>
                 <Palette size={14} color="#2563eb" />
-                <span>Design: {theme?.presetName || 'Modern'}</span>
+                <span>Design system · {theme?.presetName || 'Modern'}</span>
+              </div>
+            ) : isGrowth ? (
+              <div className={styles.contextTag}>
+                <Sparkles size={14} color="#0f766e" />
+                <span>Growth &amp; discovery</span>
               </div>
             ) : isPageEditor ? (
               /* Status Badge: only shown inside a specific page editor, not in /editor/pages list */
