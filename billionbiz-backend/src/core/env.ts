@@ -28,10 +28,10 @@ const envSchema = z.object({
   DATABASE_URL: z.string().default('postgres://postgres:postgres@localhost:5432/billionbiz'),
   JWT_SECRET: z.string().default('billionbiz-secret-jwt-key-2026-production-ready'),
   CORS_ALLOWED_ORIGINS: z.string().default(
-    'https://chandraprakash.codes,https://www.chandraprakash.codes,https://admin.chandraprakash.codes,https://accounts.chandraprakash.codes,https://staff.chandraprakash.codes,https://pos.chandraprakash.codes,https://ops.chandraprakash.codes,http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://localhost:8080'
+    'https://chandraprakash.codes,https://www.chandraprakash.codes,https://admin.chandraprakash.codes,https://accounts.chandraprakash.codes,https://staff.chandraprakash.codes,https://pos.chandraprakash.codes,https://ops.chandraprakash.codes,https://api.chandraprakash.codes,http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://localhost:8080'
   ),
   APP_URL: z.string().default('https://chandraprakash.codes'),
-  API_BASE_URL: z.string().default('http://localhost:8080'),
+  API_BASE_URL: z.string().default('https://api.chandraprakash.codes/api/v1'),
   EMAIL_PROVIDER: z.enum(['console', 'smtp', 'resend', 'sendgrid']).default('console'),
   RESEND_API_KEY: z.string().optional(),
   SMTP_HOST: z.string().optional(),
@@ -41,8 +41,7 @@ const envSchema = z.object({
   SMTP_FROM: z.string().default('noreply@chandraprakash.codes'),
   INTEGRATION_CREDENTIALS_KEK: z.string().optional(),
   GOOGLE_CLIENT_ID: z.string().optional(),
-  GOOGLE_CLIENT_SECRET: z.string().optional(),
-  TUNNEL_URL: z.string().optional()
+  GOOGLE_CLIENT_SECRET: z.string().optional()
 });
 
 export type Env = z.infer<typeof envSchema>;
