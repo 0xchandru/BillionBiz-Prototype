@@ -822,6 +822,25 @@ identityRouter.get('/me', requireAuth, async (req: Request, res: Response) => {
     [userId]
   );
 
+  let storeName: string | null = null;
+  let storeSlug: string | null = null;
+  let organizationName: string | null = null;
+
+  if (storeId) {
+    const sRes = await query(`SELECT name, slug FROM stores WHERE id = $1`, [storeId]);
+    if (sRes.rows.length > 0) {
+      storeName = sRes.rows[0].name;
+      storeSlug = sRes.rows[0].slug;
+    }
+  }
+
+  if (orgId) {
+    const oRes = await query(`SELECT name FROM organizations WHERE id = $1`, [orgId]);
+    if (oRes.rows.length > 0) {
+      organizationName = oRes.rows[0].name;
+    }
+  }
+
   const checklistRes = storeId ? await query(
     `SELECT step_key, title, description, is_completed, completed_at
      FROM onboarding_checklists
@@ -836,7 +855,10 @@ identityRouter.get('/me', requireAuth, async (req: Request, res: Response) => {
     user: userRes.rows[0] || req.auth,
     role: req.auth?.role,
     storeId,
+    storeName,
+    storeSlug,
     organizationId: orgId,
+    organizationName,
     onboardingChecklist: checklistRes.rows,
     portalDestination,
     permissions: req.auth?.permissions || []

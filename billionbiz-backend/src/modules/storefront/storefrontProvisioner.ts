@@ -28,27 +28,6 @@ export function getSystemPageCatalog(storeName: string, mode: 'COMMERCE' | 'SERV
   const hasCommerce = mode === 'COMMERCE' || mode === 'BOTH';
   const hasServices = mode === 'SERVICES' || mode === 'BOTH';
 
-  const starterHeroSections = [
-    {
-      id: 'sec-hero-1',
-      type: 'hero',
-      props: {
-        title: `Welcome to ${storeName}`,
-        subtitle: 'Handcrafted Quality & Direct Commerce.',
-        buttonText: isServices ? 'Book an Appointment' : 'Explore Catalog',
-        buttonLink: isServices ? '/booking' : '/shop',
-      }
-    },
-    {
-      id: 'sec-featured-1',
-      type: isServices ? 'service-grid' : 'product-grid',
-      props: {
-        title: isServices ? 'Our Featured Services' : 'Featured Products',
-        limit: 8
-      }
-    }
-  ];
-
   const pages: SystemPageDefinition[] = [
     {
       name: 'Home',
@@ -58,8 +37,8 @@ export function getSystemPageCatalog(storeName: string, mode: 'COMMERCE' | 'SERV
       templateKey: 'home',
       seoTitle: `${storeName} | Official Online Store`,
       seoDescription: `Welcome to the official online store of ${storeName}. Discover our latest offerings.`,
-      initialSections: starterHeroSections,
-      pageProps: { showHero: true, gridColumns: 4 }
+      initialSections: [],
+      pageProps: { showHero: false, gridColumns: 4 }
     },
     {
       name: 'Product Listing',

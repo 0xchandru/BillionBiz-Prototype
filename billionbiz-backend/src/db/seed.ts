@@ -117,10 +117,10 @@ export async function seedDatabase() {
     [orgId]
   );
 
-  const storeId = 'store-shoum-default';
+  const storeId = 'store-main-default';
   await query(
     `INSERT INTO stores (id, organization_id, name, slug, currency, timezone, status)
-     VALUES ($1, $2, 'Shoum', 'shoum', 'INR', 'Asia/Kolkata', 'ACTIVE')
+     VALUES ($1, $2, 'BillionBiz Store', 'store', 'INR', 'Asia/Kolkata', 'ACTIVE')
      ON CONFLICT (id) DO NOTHING`,
     [storeId, orgId]
   );
@@ -149,10 +149,10 @@ export async function seedDatabase() {
   );
 
   // Store Location
-  const locationId = 'loc-shoum-main';
+  const locationId = 'loc-main-flagship';
   await query(
     `INSERT INTO store_locations (id, store_id, name, address_line1, city, state, postal_code, country, is_primary, is_active)
-     VALUES ($1, $2, 'Shoum Flagship Store', '100 Commercial Road, Indiranagar', 'Bengaluru', 'Karnataka', '560038', 'IN', TRUE, TRUE)
+     VALUES ($1, $2, 'Main Flagship Store', '100 Commercial Road, Indiranagar', 'Bengaluru', 'Karnataka', '560038', 'IN', TRUE, TRUE)
      ON CONFLICT (id) DO NOTHING`,
     [locationId, storeId]
   );
@@ -201,7 +201,7 @@ export async function seedDatabase() {
   );
 
   // 5. Default Counter for POS
-  const counterId = 'cnt-shoum-01';
+  const counterId = 'cnt-main-01';
   await query(
     `INSERT INTO counters (id, store_id, location_id, name, code, is_active)
      VALUES ($1, $2, $3, 'Counter 1 - Main Express', 'POS-01', TRUE)
@@ -233,8 +233,8 @@ export async function seedDatabase() {
     await provisionDefaultStorefront({
       client,
       storeId,
-      storeName: 'Shoum',
-      storeSlug: 'shoum',
+      storeName: 'BillionBiz Store',
+      storeSlug: 'store',
       mode: 'BOTH',
       userId
     });
