@@ -6,6 +6,7 @@ import { useLandingEditorStore } from '../../../store/landingEditorStore';
 import { EditorSwitchConfirmModal } from '../ui/EditorSwitchConfirmModal';
 import styles from './topbar.module.css';
 import { getEditorPath } from '../utils/editorNavigation';
+import { getHomePage, resolveEditorPage } from '../utils/pageIdentity';
 
 export const PageSelectorDropdown: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -20,13 +21,15 @@ export const PageSelectorDropdown: React.FC = () => {
   const { pages } = useSiteStore();
   const { selectedPageId, setSelectedPageId, activePanel, setActivePanel, pagesNavLevel, navigateToPage, setRightSidebarOpen } = useLandingEditorStore();
 
-  const activePage = pages.find((p) => p.id === selectedPageId) || pages[0];
+  const activePage = resolveEditorPage(pages, selectedPageId) || pages[0];
+  const homePage = getHomePage(pages);
+  const resolvedCurrentPageId = resolveEditorPage(pages, selectedPageId)?.id || null;
 
   const getPageDisplayName = (pageId: string) => {
     if (pageId === 'header-global') return 'Global Header';
     if (pageId === 'footer-global') return 'Global Footer';
-    if (pageId === 'landing-page') return 'Landing Page';
-    const found = pages.find((p) => p.id === pageId);
+    const found = resolveEditorPage(pages, pageId);
+    if (found?.path === '/') return 'Landing Page';
     return found ? found.name : 'Page';
   };
 
@@ -39,7 +42,7 @@ export const PageSelectorDropdown: React.FC = () => {
     if (pagesNavLevel === 'list') return 'Editor';
     if (selectedPageId === 'header-global') return 'Global Header';
     if (selectedPageId === 'footer-global') return 'Global Footer';
-    if (selectedPageId === 'landing-page') return 'Landing Page';
+    if (activePage?.path === '/') return 'Landing Page';
     if (activePage) return activePage.name;
     return 'Editor';
   };
@@ -101,7 +104,7 @@ export const PageSelectorDropdown: React.FC = () => {
       ? null
       : pagesNavLevel === 'list'
         ? null
-        : selectedPageId;
+        : resolvedCurrentPageId;
 
   const globalItems = [
     { id: 'header-global', name: 'Global Header', icon: Layers },
@@ -164,7 +167,7 @@ export const PageSelectorDropdown: React.FC = () => {
           <div style={{ maxHeight: '250px', overflowY: 'auto' }}>
             {pages.map((p) => {
               const isSelected = p.id === currentlyActiveId;
-              const displayName = p.id === 'landing-page' ? 'Landing Page' : p.name;
+              const displayName = p.path === '/' ? 'Landing Page' : p.name;
               return (
                 <button
                   key={p.id}
