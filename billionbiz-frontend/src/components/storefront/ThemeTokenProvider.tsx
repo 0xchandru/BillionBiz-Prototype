@@ -36,7 +36,7 @@ export const ThemeTokenProvider: React.FC<ThemeTokenProviderProps> = ({
   className = '',
   style = {}
 }) => {
-  const defaultTheme = useMemo(() => getDefaultTheme(), []);
+  const defaultTheme = useMemo(() => getDefaultTheme() as Record<string, any>, []);
 
   const resolvedTheme = useMemo(() => {
     const source = theme ?? tokens ?? {};
@@ -55,15 +55,15 @@ export const ThemeTokenProvider: React.FC<ThemeTokenProviderProps> = ({
       typography: mergeRecord(defaultTheme.typography as ThemeRecord, overrides.typography),
       buttons: mergeRecord(defaultTheme.buttons as ThemeRecord, overrides.buttons),
       effects: mergeRecord(defaultTheme.effects as ThemeRecord, overrides.effects),
-    };
+    } as Record<string, any>;
   }, [defaultTheme, theme, tokens]);
 
   const cssVariables = useMemo(() => {
-    const p = resolvedTheme.palette || {};
-    const t = resolvedTheme.typography || {};
-    const b = resolvedTheme.buttons || {};
-    const e = resolvedTheme.effects || {};
-    const legacyColors = resolvedTheme.colors || {};
+    const p: Record<string, any> = resolvedTheme.palette || {};
+    const t: Record<string, any> = resolvedTheme.typography || {};
+    const b: Record<string, any> = resolvedTheme.buttons || {};
+    const e: Record<string, any> = resolvedTheme.effects || {};
+    const legacyColors: Record<string, any> = resolvedTheme.colors || {};
     const baseSize = typeof t.baseSize === 'number'
       ? `${t.baseSize}px`
       : (t.baseSize || '16px');
