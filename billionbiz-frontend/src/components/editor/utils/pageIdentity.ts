@@ -16,7 +16,7 @@ export interface PageIdentityLike {
 const normalizePath = (path: string): string => {
   const value = String(path || '/').trim();
   if (!value.startsWith('/')) return `/${value}`;
-  const normalized = value.replace(/\\/+$/, '');
+  const normalized = value.replace(/\/+$/, '');
   return normalized || '/';
 };
 
@@ -71,7 +71,7 @@ export function resolveEditorPage<T extends PageIdentityLike>(
   if (typeMatch) return typeMatch;
 
   const nameMatch = pages.find((page) =>
-    page.name?.toLowerCase().replace(/\\s+/g, '-') === type
+    page.name?.toLowerCase().replace(/\s+/g, '-') === type
   );
   return nameMatch || getHomePage(pages) || pages[0];
 }
