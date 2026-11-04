@@ -94,7 +94,7 @@ const resolvePageId = (rawId: string, pages: PageData[]): string | null => {
   return null;
 };
 
-const VALID_TABS: EditorPanelType[] = ['pages', 'brand', 'design', 'settings', 'store-brand', 'design-experience', 'seo-growth'];
+const VALID_TABS: EditorPanelType[] = ['pages', 'brand', 'design', 'growth', 'settings', 'store-brand', 'design-experience', 'seo-growth'];
 
 const EditorLayout: React.FC = () => {
   const navigate = useNavigate();
@@ -130,7 +130,8 @@ const EditorLayout: React.FC = () => {
       'design': 'design',
       'design-experience': 'design',
       'theme': 'design',
-      'seo-growth': 'brand',
+      'seo-growth': 'growth',
+      'growth': 'growth',
       'settings': 'settings',
     };
 
