@@ -186,7 +186,7 @@ describe('V2 Native Storefront Runtime & Multi-Tenant Isolation Suite (REQ-STORE
   });
 
   it('TC-STORE-002B: Untrusted forwarded host cannot switch an authenticated tenant', async () => {
-    const res = await request('GET', '/api/v1/storefront/pages', {
+    const res = await request('GET', '/api/v1/storefront/render', {
       token: storeAToken,
       headers: {
         host: 'admin.chandraprakash.codes',
@@ -194,7 +194,7 @@ describe('V2 Native Storefront Runtime & Multi-Tenant Isolation Suite (REQ-STORE
       }
     });
     expect(res.status).toBe(200);
-    expect((res.body.pages || []).every((page: any) => !String(page.id).includes(storeBId))).toBe(true);
+    expect(res.body.store.slug).toBe(storeASlug);
   });
 
   it('TC-STORE-003: Storefront resolves active store by slug and returns store metadata & theme', async () => {
@@ -284,6 +284,17 @@ describe('V2 Native Storefront Runtime & Multi-Tenant Isolation Suite (REQ-STORE
     const releaseNum2 = pub2.body.releaseNumber;
 
     expect(releaseNum2).toBe(releaseNum1 + 1);
+
+    const publishedEvent = await query(
+      `SELECT event_type, payload
+       FROM outbox_events
+       WHERE store_id = $1 AND event_type = 'STOREFRONT_RELEASE_PUBLISHED'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [storeAId]
+    );
+    expect(publishedEvent.rowCount).toBe(1);
+    expect(publishedEvent.rows[0].payload.releaseId).toBe(pub2.body.releaseId);
 
     // Verify release history contains both
     const historyRes = await request('GET', '/api/v1/storefront/releases', {
