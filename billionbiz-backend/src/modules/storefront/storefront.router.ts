@@ -560,7 +560,7 @@ storefrontRouter.post('/by-slug/:slug/password/verify', async (req: Request, res
   }
 
   const storeRes = await query(
-    `SELECT s.id, ss.password_enabled, ss.password_hash
+    `SELECT s.id, s.slug, ss.password_enabled, ss.password_hash
      FROM stores s
      JOIN storefront_settings ss ON ss.store_id = s.id
      WHERE LOWER(s.slug) = LOWER($1) AND s.status != 'SUSPENDED'
@@ -892,7 +892,7 @@ storefrontRouter.post(
 
       // 3. Snapshot all pages + their latest drafts
       const pagesRes = await client.query(
-        `SELECT p.id, p.name, p.path, p.type, p.category, p.seo_title, p.seo_description, p.template_key, p.is_system, p.is_locked,
+        `SELECT p.id, p.name, p.path, p.type, p.category, p.seo_title, p.seo_description, p.template_key, p.is_system, p.is_locked, 'published'::text AS status,
                 COALESCE(
                   (SELECT pd.sections FROM page_draft_versions pd WHERE pd.page_id = p.id ORDER BY pd.version DESC, pd.created_at DESC LIMIT 1),
                   '[]'::jsonb
