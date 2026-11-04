@@ -215,7 +215,7 @@ export async function provisionDefaultStorefront(options: ProvisionStorefrontOpt
   await client.query(
     `INSERT INTO store_domains (id, store_id, domain, is_primary, is_verified, ssl_status)
      VALUES ($1, $2, $3, TRUE, TRUE, 'ACTIVE')
-     ON CONFLICT (domain) DO NOTHING`,
+     ON CONFLICT DO NOTHING`,
     [`dom-${uuidv4()}`, storeId, platformDomain]
   );
 
