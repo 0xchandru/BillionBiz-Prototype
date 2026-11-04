@@ -152,6 +152,14 @@ storefrontRouter.post(
     const storeId = req.tenant!.storeId;
     const { name, title, path, slug, type = 'custom', category = 'GENERAL', templateKey = 'standard', sections = [], pageProps = {} } = req.body;
     const pageName = name || title || 'New Page';
+    const sectionValidation = validatePageSectionDocument(sections);
+    if (!sectionValidation.valid) {
+      return res.status(400).json({
+        error: 'INVALID_SECTION_DOCUMENT',
+        message: 'One or more sections do not match their registered schema.',
+        issues: sectionValidation.issues
+      });
+    }
     let pagePath = path || `/${slug || pageName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
     if (!pagePath.startsWith('/')) pagePath = `/${pagePath}`;
 
