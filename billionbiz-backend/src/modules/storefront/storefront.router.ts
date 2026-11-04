@@ -13,6 +13,7 @@ import { provisionDefaultStorefront } from './storefrontProvisioner.js';
 import { PLATFORM_MAIN_DOMAIN } from '../../core/subdomains.js';
 import { env } from '../../core/env.js';
 import { resolveCname } from 'node:dns/promises';
+import { validatePageSectionDocument } from './sectionDocumentValidation.js';
 
 export const storefrontRouter = Router();
 
@@ -778,6 +779,15 @@ storefrontRouter.patch(
     if (!Array.isArray(sections)) {
       return res.status(400).json({ error: 'INVALID_DRAFT', message: 'Sections must be an array.' });
     }
+
+    const sectionValidation = validatePageSectionDocument(sections);
+    if (!sectionValidation.valid) {
+      return res.status(400).json({
+        error: 'INVALID_SECTION_DOCUMENT',
+        message: 'One or more sections do not match their registered schema.',
+        issues: sectionValidation.issues
+      });
+    }
     if (pageProps !== undefined && (!pageProps || typeof pageProps !== 'object' || Array.isArray(pageProps))) {
       return res.status(400).json({ error: 'INVALID_DRAFT', message: 'Page properties must be an object.' });
     }
@@ -886,6 +896,20 @@ storefrontRouter.post(
          WHERE p.store_id = $1`,
         [storeId]
       );
+
+      // Validate every page at the API boundary before a release can be created.
+      const invalidPages = pagesRes.rows.flatMap((page: any) => {
+        const validation = validatePageSectionDocument(page.sections);
+        return validation.valid
+          ? []
+          : [{ pageId: page.id, pageName: page.name, path: page.path, issues: validation.issues }];
+      });
+      if (invalidPages.length > 0) {
+        const error = new Error('Publication blocked because one or more pages contain invalid section documents.');
+        (error as Error & { code?: string; details?: unknown }).code = 'INVALID_STOREFRONT_DOCUMENT';
+        (error as Error & { code?: string; details?: unknown }).details = invalidPages;
+        throw error;
+      }
 
       // 4. Snapshot brand, navigation, settings
       const settingsRes = await client.query(`SELECT * FROM storefront_settings WHERE store_id = $1`, [storeId]);
