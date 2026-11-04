@@ -129,6 +129,7 @@ import { getHomePage, resolveEditorPage } from './utils/pageIdentity';
 import { ThemeEditorRightPanel } from './right/ThemeEditorRightPanel';
 import { BrandRightPanel } from './right/BrandRightPanel';
 import { SettingsRightPanel } from './right/SettingsRightPanel';
+import { GrowthRightPanel } from './right/GrowthRightPanel';
 import { ColorPickerPopover } from './ui/ColorPickerPopover';
 import { CapabilityInspector } from './engine/CapabilityInspector';
 import { HeroBannerBlockInspector } from './sectionEngine/HeroBannerBlockInspector';
@@ -7943,12 +7944,15 @@ export const EditorRightSidebar: React.FC = () => {
     return null;
   }
 
-  // 2. In Brand tab: render contextual brand panel
-  if (activePanel === 'brand' || activePanel === 'store-brand' || activePanel === 'seo-growth') {
+  // Identity and Growth have separate editing surfaces.
+  if (activePanel === 'brand' || activePanel === 'store-brand') {
     return <BrandRightPanel />;
   }
+  if (activePanel === 'growth' || activePanel === 'seo-growth') {
+    return <GrowthRightPanel />;
+  }
 
-  // 3. In Settings tab: render contextual settings panel
+  // In Store Setup, render the contextual settings editor.
   if (activePanel === 'settings') {
     return <SettingsRightPanel />;
   }
