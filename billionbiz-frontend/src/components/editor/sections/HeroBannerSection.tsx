@@ -70,8 +70,13 @@ const createLegacyBlocks = (props: Record<string, any>): HeroBlock[] => [
 ];
 
 const HeroBannerSection: React.FC<HeroBannerProps> = ({ props }) => {
+  const device = props.device || 'desktop';
   const blocks: HeroBlock[] = Array.isArray(props.blocks)
-    ? props.blocks.filter((block: HeroBlock) => block && block.enabled !== false)
+    ? props.blocks.filter((block: HeroBlock) =>
+        block &&
+        block.enabled !== false &&
+        block.responsiveOverrides?.visible?.[device] !== false
+      )
     : createLegacyBlocks(props);
   const settings = props.settings || props;
   const designOverrides = props.designOverrides || {};
