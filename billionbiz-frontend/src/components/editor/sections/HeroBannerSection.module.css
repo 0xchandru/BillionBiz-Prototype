@@ -41,6 +41,12 @@
   margin-inline: auto;
 }
 
+.centered .media {
+  width: min(100%, 900px);
+  height: clamp(260px, 38vw, 520px);
+  margin-inline: auto;
+}
+
 .media {
   width: 100%;
   min-width: 0;
