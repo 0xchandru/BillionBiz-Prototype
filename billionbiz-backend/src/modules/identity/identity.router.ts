@@ -591,13 +591,38 @@ identityRouter.post('/google', async (req: Request, res: Response) => {
         }
 
         const tokenData = await tokenRes.json() as any;
-        if (tokenData.id_token) {
-          const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(tokenData.id_token)}`);
-          const tokenInfo = await verifyRes.json() as any;
-          googleId = tokenInfo.sub;
-          email = tokenInfo.email;
-          fullName = tokenInfo.name || 'Google User';
+        if (!tokenData.id_token) {
+          return res.status(401).json({
+            error: 'MISSING_GOOGLE_ID_TOKEN',
+            message: 'Google did not return an ID token for this authorization code.'
+          });
         }
+
+        const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(tokenData.id_token)}`);
+        if (!verifyRes.ok) {
+          return res.status(401).json({
+            error: 'INVALID_GOOGLE_TOKEN',
+            message: 'Google ID token verification failed.'
+          });
+        }
+
+        const tokenInfo = await verifyRes.json() as any;
+        if (tokenInfo.aud !== clientId) {
+          return res.status(401).json({
+            error: 'AUDIENCE_MISMATCH',
+            message: 'Google token was not issued for this application.'
+          });
+        }
+        if (tokenInfo.email_verified !== 'true' && tokenInfo.email_verified !== true) {
+          return res.status(400).json({
+            error: 'UNVERIFIED_EMAIL',
+            message: 'Google account email is not verified.'
+          });
+        }
+
+        googleId = tokenInfo.sub;
+        email = tokenInfo.email;
+        fullName = tokenInfo.name || 'Google User';
       } catch (err: any) {
         return res.status(500).json({
           error: 'GOOGLE_OAUTH_FAILED',
