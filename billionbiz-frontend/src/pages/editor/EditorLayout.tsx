@@ -60,11 +60,34 @@ const resolvePageId = (rawId: string, pages: PageData[]): string | null => {
   const matchIdSuffix = pages.find(p => p.id === `${target}-page`);
   if (matchIdSuffix) return matchIdSuffix.id;
 
-  // 3. Type match
+  // 3. Canonical route match. Backend pages use database UUIDs, while
+  // editor deep links still use stable product-facing aliases.
+  const routeAliases: Record<string, string> = {
+    'landing-page': '/',
+    'shop-page': '/shop',
+    'product-details-page': '/products',
+    'collections-page': '/collections',
+    'cart-page': '/cart',
+    'checkout-page': '/checkout',
+    'account-page': '/account',
+    'booking-page': '/booking',
+    'contact-page': '/contact',
+    'privacy-policy-page': '/policies/privacy',
+    'terms-conditions-page': '/policies/terms',
+    'return-policy-page': '/policies/refund',
+    'refund-policy-page': '/policies/refund',
+  };
+  const route = target.startsWith('/') ? target : routeAliases[target];
+  if (route) {
+    const matchPath = pages.find((page) => page.path.replace(/\\/+$/, '') === route.replace(/\\/+$/, '') || (route === '/' && page.path === '/'));
+    if (matchPath) return matchPath.id;
+  }
+
+  // 4. Type match
   const matchType = pages.find(p => p.type === target || p.type === target.replace(/-page$/, ''));
   if (matchType) return matchType.id;
 
-  // 4. Normalized path or name match
+  // 5. Normalized path or name match
   const matchName = pages.find(p => p.name.toLowerCase() === target.toLowerCase() || p.name.toLowerCase().replace(/[^a-z0-9]/g, '') === target.toLowerCase().replace(/[^a-z0-9]/g, ''));
   if (matchName) return matchName.id;
 
