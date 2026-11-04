@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   CheckCircle2, Globe, Bell, Shield, FileText,
-  Plug, Code, Key, PanelLeftClose, PanelLeftOpen, ChevronRight
+  Plug, Code, Key, LockKeyhole, PanelLeftClose, PanelLeftOpen, ChevronRight
 } from 'lucide-react';
 import { useLandingEditorStore } from '../../../store/landingEditorStore';
 import type { SettingsSection } from '../../../store/landingEditorStore';
@@ -25,6 +25,7 @@ const SETTINGS_GROUPS: NavGroupDef[] = [
     items: [
       { id: 'launch-checklist', label: 'Launch readiness', description: 'Setup checks from your current store data', icon: CheckCircle2 },
       { id: 'language-region', label: 'Regional defaults', description: 'Currency and store timezone', icon: Globe },
+      { id: 'store-access', label: 'Store access', description: 'Password protection and maintenance mode', icon: LockKeyhole },
       { id: 'notifications', label: 'Announcements', description: 'Storefront announcement bar and messages', icon: Bell },
     ]
   },
