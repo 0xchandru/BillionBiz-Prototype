@@ -104,7 +104,7 @@ export const WebsitePreview: React.FC<WebsitePreviewProps> = ({
 
   const effectiveBrand = {
     brand_name: effectiveBusinessName,
-    tagline: settings?.tagline || serverData?.brand?.tagline || 'Handcrafted Quality & Direct Commerce',
+    tagline: settings?.tagline || serverData?.brand?.tagline || '',
     logo_url: settings?.logoUrl || serverData?.brand?.logo_url,
     favicon_url: settings?.faviconUrl || serverData?.brand?.favicon_url,
     social_links: settings?.socialLinks || serverData?.brand?.social_links || {}
@@ -166,7 +166,8 @@ export const WebsitePreview: React.FC<WebsitePreviewProps> = ({
           id: serverData?.store?.id,
           name: effectiveBusinessName,
           slug: storeSlug,
-          primary_domain: getStoreUrl(storeSlug).replace(/^https?:\/\//, '')
+          primary_domain: getStoreUrl(storeSlug).replace(/^https?:\/\//, ''),
+          currency: serverData?.store?.currency || 'INR'
         }}
         brand={effectiveBrand}
         themeTokens={effectiveTheme}
