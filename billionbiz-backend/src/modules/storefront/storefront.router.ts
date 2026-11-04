@@ -499,25 +499,29 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
     releaseNumber: releaseRes.rows[0]?.release_number || null,
     // The public site is an immutable publication. Unpublished theme/brand/
     // navigation/settings changes remain visible only in the authenticated editor.
-    theme: activeSnapshot.theme || themeRes.rows[0] || { preset_name: 'modern', palette: {}, typography: {}, buttons: {}, effects: {} },
+    // Never fall back to mutable editor theme rows on the public route.
+    theme: activeSnapshot.theme || { preset_name: 'modern', palette: {}, typography: {}, buttons: {}, effects: {} },
     pages: publishedPages,
     products: productsRes.rows,
     offerings: offeringsRes.rows,
     categories: categoriesRes.rows,
     brand: {
-      name: publishedBrand.name || settingsRow.brand_name || store.name,
-      tagline: publishedBrand.tagline ?? settingsRow.tagline ?? '',
-      logoUrl: publishedBrand.logoUrl ?? settingsRow.logo_url ?? '',
-      faviconUrl: publishedBrand.faviconUrl ?? settingsRow.favicon_url ?? '',
-      socialLinks: publishedBrand.socialLinks || settingsRow.social_links || {}
+      name: publishedBrand.name || store.name,
+      tagline: publishedBrand.tagline ?? '',
+      logoUrl: publishedBrand.logoUrl ?? '',
+      faviconUrl: publishedBrand.faviconUrl ?? '',
+      socialLinks: publishedBrand.socialLinks || {}
     },
     settings: {
-      mode: publishedSettings.mode || settingsRow.mode || 'COMMERCE',
-      homePage: publishedSettings.homePage || settingsRow.home_page || 'LANDING',
-      navigation: activeSnapshot.navigation || settingsRow.navigation_config || [],
-      primaryDomain: publishedSettings.primaryDomain || settingsRow.primary_domain || `${store.slug}.${PLATFORM_MAIN_DOMAIN}`,
-      passwordEnabled: publishedSettings.passwordEnabled ?? settingsRow.password_enabled ?? false,
-      maintenanceMode: publishedSettings.maintenanceMode ?? settingsRow.maintenance_mode ?? false
+      mode: publishedSettings.mode || 'COMMERCE',
+      homePage: publishedSettings.homePage || 'LANDING',
+      navigation: activeSnapshot.navigation || [],
+      primaryDomain: publishedSettings.primaryDomain || `${store.slug}.${PLATFORM_MAIN_DOMAIN}`,
+      // Password protection is an immediate server-side security control, not a
+      // cosmetic draft value. The backend gate and this client flag use the same
+      // authoritative setting.
+      passwordEnabled: Boolean(settingsRow.password_enabled),
+      maintenanceMode: publishedSettings.maintenanceMode ?? false
     }
   });
 });
