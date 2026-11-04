@@ -90,6 +90,38 @@ describe('V2 Streamlined Registration & Phone/Email OTP Authentication', () => {
     expect(res.body.identifier).toBe(testPhone);
   });
 
+  it('strictly blocks registration OTP when email is already registered and returns 409 USER_ALREADY_EXISTS', async () => {
+    const res = await makeRequest('POST', '/api/v1/auth/otp/send', {
+      body: { identifier: 'admin@billionbiz.com', type: 'REGISTER' }
+    });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('USER_ALREADY_EXISTS');
+    expect(res.body.message).toContain('already registered');
+
+    // Verify no unused OTP was inserted for this registered user
+    const otpCheck = await query(
+      `SELECT id FROM verification_otps WHERE identifier = 'admin@billionbiz.com' AND is_used = FALSE`
+    );
+    expect(otpCheck.rowCount).toBe(0);
+  });
+
+  it('strictly blocks registration OTP when mobile number is already registered across phone format variants', async () => {
+    // Check with +91 format
+    const resWithPlus = await makeRequest('POST', '/api/v1/auth/otp/send', {
+      body: { identifier: '+919876543210', type: 'REGISTER' }
+    });
+    expect(resWithPlus.status).toBe(409);
+    expect(resWithPlus.body.error).toBe('USER_ALREADY_EXISTS');
+
+    // Check with 10 digits
+    const resDigits = await makeRequest('POST', '/api/v1/auth/otp/send', {
+      body: { identifier: '9876543210', type: 'REGISTER' }
+    });
+    expect(resDigits.status).toBe(409);
+    expect(resDigits.body.error).toBe('USER_ALREADY_EXISTS');
+  });
+
   it('verifies valid registration OTP code and rejects incorrect code', async () => {
     const sendRes = await makeRequest('POST', '/api/v1/auth/otp/send', {
       body: { identifier: testEmail, type: 'REGISTER' }

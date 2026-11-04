@@ -6,6 +6,7 @@ import { query, withTransaction } from '../../db/pool.js';
 import { generateToken, requireAuth } from '../../middleware/auth.js';
 import { recordAudit, enqueueOutbox } from '../../core/auditAndOutbox.js';
 import { sendEmail } from '../../core/notificationWorker.js';
+import { provisionDefaultStorefront } from '../storefront/storefrontProvisioner.js';
 
 export const identityRouter = Router();
 
@@ -180,16 +181,6 @@ identityRouter.post('/register', async (req: Request, res: Response) => {
       [storeId, prodEnabled, apptEnabled]
     );
 
-    await client.query(
-      `INSERT INTO storefront_settings (store_id, mode, home_page, navigation_config, icon_visibility, version)
-       VALUES ($1, $2, $3,
-         '[{"id":"nav-home","label":"Home","path":"/"},{"id":"nav-shop","label":"Shop","path":"/shop"},{"id":"nav-book","label":"Book","path":"/booking"}]'::jsonb,
-         '{"showCart": true, "showWishlist": true, "showAccount": true}'::jsonb,
-         1
-       )`,
-      [storeId, mode, mode === 'SERVICES' ? 'BOOKING' : 'LANDING']
-    );
-
     // 6. Default Store Location
     await client.query(
       `INSERT INTO store_locations (id, store_id, name, is_primary, is_active)
@@ -217,71 +208,15 @@ identityRouter.post('/register', async (req: Request, res: Response) => {
       [`ra-${uuidv4()}`, staffProfileId, storeId, locId]
     );
 
-    // 8. Initialize Default Store Theme
-    await client.query(
-      `INSERT INTO store_themes (id, store_id, preset_name)
-       VALUES ($1, $2, 'modern')`,
-      [`thm-${uuidv4()}`, storeId]
-    );
-
-    // 9. Initial Published Home Page & Release Snapshot (Auto-published storefront)
-    const homePageId = `page-${uuidv4()}`;
-    const initialSections = [
-      {
-        id: 'sec-hero-1',
-        type: 'hero',
-        props: {
-          title: `Welcome to ${storeName}`,
-          subtitle: 'Discover our premium offerings handcrafted with care.',
-          buttonText: mode === 'SERVICES' ? 'Book Appointment' : 'Shop Now',
-          buttonLink: mode === 'SERVICES' ? '/booking' : '/shop'
-        }
-      },
-      {
-        id: 'sec-featured-1',
-        type: mode === 'SERVICES' ? 'service-grid' : 'product-grid',
-        props: {
-          title: mode === 'SERVICES' ? 'Featured Services' : 'Featured Products',
-          limit: 8
-        }
-      }
-    ];
-
-    await client.query(
-      `INSERT INTO store_pages (id, store_id, name, path, type, category, status, page_props)
-       VALUES ($1, $2, 'Home', '/', 'standard', 'storefront', 'published', '{}'::jsonb)`,
-      [homePageId, storeId]
-    );
-
-    await client.query(
-      `INSERT INTO page_draft_versions (id, page_id, version, sections, page_props, created_by)
-       VALUES ($1, $2, 1, $3, '{}'::jsonb, $4)`,
-      [`draft-${uuidv4()}`, homePageId, JSON.stringify(initialSections), userId]
-    );
-
-    const initialReleaseId = `rel-${uuidv4()}`;
-    const initialSnapshot = {
-      theme: { preset_name: 'modern', palette: {}, typography: {}, buttons: {}, effects: {} },
-      pages: [
-        {
-          id: homePageId,
-          name: 'Home',
-          path: '/',
-          type: 'standard',
-          category: 'storefront',
-          sections: initialSections,
-          page_props: {}
-        }
-      ],
-      publishedAt: new Date().toISOString()
-    };
-    const contentHash = crypto.createHash('sha256').update(JSON.stringify(initialSnapshot)).digest('hex');
-
-    await client.query(
-      `INSERT INTO store_releases (id, store_id, release_number, content_hash, snapshot, published_by, notes)
-       VALUES ($1, $2, 1, $3, $4, $5, 'Initial store auto-published release')`,
-      [initialReleaseId, storeId, contentHash, JSON.stringify(initialSnapshot), userId]
-    );
+    // 8. Provision Full Online Store Architecture (Subdomain, Theme, Navigation, System Pages Catalog, Starter Release)
+    await provisionDefaultStorefront({
+      client,
+      storeId,
+      storeName,
+      storeSlug,
+      mode: mode as any,
+      userId
+    });
 
     // 10. Guided Onboarding Checklist
     for (const item of defaultChecklist) {
@@ -1000,10 +935,21 @@ identityRouter.post('/otp/send', async (req: Request, res: Response) => {
   }
 
   // Check existing user for login/register constraints
-  const existingUser = await query(
-    isEmail ? `SELECT id FROM users WHERE email = $1` : `SELECT id FROM users WHERE phone = $1`,
-    [value]
-  );
+  const digitsOnly = value.replace(/[^0-9]/g, '');
+  const last10Digits = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : digitsOnly;
+
+  let existingUser;
+  if (isEmail) {
+    existingUser = await query(`SELECT id, email, phone FROM users WHERE LOWER(email) = LOWER($1)`, [value]);
+  } else {
+    existingUser = await query(
+      `SELECT id, email, phone FROM users 
+       WHERE phone = $1 
+          OR phone = $2 
+          OR RIGHT(REGEXP_REPLACE(phone, '[^0-9]', '', 'g'), 10) = $3`,
+      [value, digitsOnly, last10Digits]
+    );
+  }
 
   if (otpType === 'LOGIN' && existingUser.rowCount === 0) {
     return res.status(404).json({
@@ -1014,8 +960,8 @@ identityRouter.post('/otp/send', async (req: Request, res: Response) => {
 
   if (otpType === 'REGISTER' && existingUser.rowCount && existingUser.rowCount > 0) {
     return res.status(409).json({
-      error: 'USER_EXISTS',
-      message: `An account with this ${isEmail ? 'email' : 'mobile number'} already exists. Please log in.`
+      error: 'USER_ALREADY_EXISTS',
+      message: `This ${isEmail ? 'email address' : 'mobile number'} is already registered. Please log in.`
     });
   }
 
@@ -1336,12 +1282,20 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
   const { isEmail, value } = normalizeIdentifier(identifier);
 
   // Check existing
+  const digitsOnly = value.replace(/[^0-9]/g, '');
+  const last10Digits = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : digitsOnly;
+
   const existing = await query(
-    isEmail ? `SELECT id FROM users WHERE email = $1` : `SELECT id FROM users WHERE phone = $1`,
-    [value]
+    isEmail
+      ? `SELECT id FROM users WHERE LOWER(email) = LOWER($1)`
+      : `SELECT id FROM users WHERE phone = $1 OR phone = $2 OR RIGHT(REGEXP_REPLACE(phone, '[^0-9]', '', 'g'), 10) = $3`,
+    isEmail ? [value] : [value, digitsOnly, last10Digits]
   );
   if (existing.rowCount && existing.rowCount > 0) {
-    return res.status(409).json({ error: 'ACCOUNT_EXISTS', message: 'An account with this email or mobile already exists' });
+    return res.status(409).json({
+      error: 'USER_ALREADY_EXISTS',
+      message: `This ${isEmail ? 'email address' : 'mobile number'} is already registered. Please log in.`
+    });
   }
 
   const userId = `usr-${uuidv4()}`;
@@ -1419,16 +1373,6 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
       [storeId, prodEnabled, apptEnabled]
     );
 
-    await client.query(
-      `INSERT INTO storefront_settings (store_id, mode, home_page, navigation_config, icon_visibility, version)
-       VALUES ($1, $2, $3,
-         '[{"id":"nav-home","label":"Home","path":"/"},{"id":"nav-shop","label":"Shop","path":"/shop"},{"id":"nav-book","label":"Book","path":"/booking"}]'::jsonb,
-         '{"showCart": true, "showWishlist": true, "showAccount": true}'::jsonb,
-         1
-       )`,
-      [storeId, mode, mode === 'SERVICES' ? 'BOOKING' : 'LANDING']
-    );
-
     // 5. Default Location & Warehouse
     await client.query(
       `INSERT INTO store_locations (id, store_id, name, is_primary, is_active)
@@ -1456,71 +1400,15 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
       [`ra-${uuidv4()}`, staffProfileId, storeId, locId]
     );
 
-    // 7. Store Theme
-    await client.query(
-      `INSERT INTO store_themes (id, store_id, preset_name)
-       VALUES ($1, $2, 'modern')`,
-      [`thm-${uuidv4()}`, storeId]
-    );
-
-    // 8. Initial Published Home Page & Release Snapshot (Auto-published storefront)
-    const homePageId = `page-${uuidv4()}`;
-    const initialSections = [
-      {
-        id: 'sec-hero-1',
-        type: 'hero',
-        props: {
-          title: `Welcome to ${storeName}`,
-          subtitle: 'Discover our premium offerings handcrafted with care.',
-          buttonText: mode === 'SERVICES' ? 'Book Appointment' : 'Shop Now',
-          buttonLink: mode === 'SERVICES' ? '/booking' : '/shop'
-        }
-      },
-      {
-        id: 'sec-featured-1',
-        type: mode === 'SERVICES' ? 'service-grid' : 'product-grid',
-        props: {
-          title: mode === 'SERVICES' ? 'Featured Services' : 'Featured Products',
-          limit: 8
-        }
-      }
-    ];
-
-    await client.query(
-      `INSERT INTO store_pages (id, store_id, name, path, type, category, status, page_props)
-       VALUES ($1, $2, 'Home', '/', 'standard', 'storefront', 'published', '{}'::jsonb)`,
-      [homePageId, storeId]
-    );
-
-    await client.query(
-      `INSERT INTO page_draft_versions (id, page_id, version, sections, page_props, created_by)
-       VALUES ($1, $2, 1, $3, '{}'::jsonb, $4)`,
-      [`draft-${uuidv4()}`, homePageId, JSON.stringify(initialSections), userId]
-    );
-
-    const initialReleaseId = `rel-${uuidv4()}`;
-    const initialSnapshot = {
-      theme: { preset_name: 'modern', palette: {}, typography: {}, buttons: {}, effects: {} },
-      pages: [
-        {
-          id: homePageId,
-          name: 'Home',
-          path: '/',
-          type: 'standard',
-          category: 'storefront',
-          sections: initialSections,
-          page_props: {}
-        }
-      ],
-      publishedAt: new Date().toISOString()
-    };
-    const contentHash = crypto.createHash('sha256').update(JSON.stringify(initialSnapshot)).digest('hex');
-
-    await client.query(
-      `INSERT INTO store_releases (id, store_id, release_number, content_hash, snapshot, published_by, notes)
-       VALUES ($1, $2, 1, $3, $4, $5, 'Initial store auto-published release')`,
-      [initialReleaseId, storeId, contentHash, JSON.stringify(initialSnapshot), userId]
-    );
+    // 7. Provision Complete Online Store Architecture (Subdomain, Theme, Navigation, System Pages Catalog, Starter Release)
+    await provisionDefaultStorefront({
+      client,
+      storeId,
+      storeName,
+      storeSlug,
+      mode: mode as any,
+      userId
+    });
 
     // 9. Onboarding Checklist
     for (const item of defaultChecklist) {

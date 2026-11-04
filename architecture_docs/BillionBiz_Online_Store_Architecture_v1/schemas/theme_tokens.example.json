@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "colors": {
+    "brand": {
+      "primary": "#0B4650",
+      "secondary": "#5A9A20",
+      "accent": "#FFBF15"
+    },
+    "text": {
+      "primary": "#17212B",
+      "secondary": "#5F6B78",
+      "inverse": "#FFFFFF",
+      "link": "#0B6472"
+    },
+    "surface": {
+      "canvas": "#FFFFFF",
+      "page": "#F7F8FA",
+      "card": "#FFFFFF",
+      "subtle": "#F0F3F5"
+    },
+    "border": {
+      "default": "#DCE3E8",
+      "strong": "#AAB7C2"
+    },
+    "status": {
+      "success": "#18794E",
+      "warning": "#A15C00",
+      "danger": "#B42318",
+      "info": "#175CD3"
+    }
+  },
+  "typography": {
+    "fontFamily": {
+      "heading": "system-ui, sans-serif",
+      "body": "system-ui, sans-serif",
+      "accent": "inherit"
+    },
+    "scale": {
+      "display": "clamp(2rem, 5vw, 4.5rem)",
+      "h1": "clamp(1.8rem, 4vw, 3.2rem)",
+      "h2": "clamp(1.5rem, 3vw, 2.4rem)",
+      "h3": "1.5rem",
+      "body": "1rem",
+      "small": "0.875rem"
+    },
+    "lineHeight": {
+      "heading": 1.12,
+      "body": 1.55
+    }
+  },
+  "buttons": {
+    "variants": [
+      "primary",
+      "secondary",
+      "outline",
+      "ghost",
+      "text",
+      "destructive"
+    ],
+    "sizes": [
+      "small",
+      "medium",
+      "large"
+    ],
+    "states": [
+      "default",
+      "hover",
+      "active",
+      "focus-visible",
+      "disabled",
+      "loading"
+    ],
+    "radius": "0.65rem",
+    "minTouchTargetPx": 44
+  },
+  "layout": {
+    "contentWidths": {
+      "narrow": "720px",
+      "standard": "1100px",
+      "wide": "1400px",
+      "full": "100%"
+    },
+    "breakpoints": {
+      "sm": 480,
+      "md": 768,
+      "lg": 1024,
+      "xl": 1280
+    },
+    "spacingScale": [
+      4,
+      8,
+      12,
+      16,
+      24,
+      32,
+      48,
+      64,
+      80
+    ]
+  },
+  "motion": {
+    "respectReducedMotion": true,
+    "strongDecorativeEffectsDefault": "off",
+    "durationsMs": {
+      "fast": 120,
+      "normal": 220,
+      "slow": 360
+    }
+  },
+  "notes": [
+    "Example only; use existing BillionBiz tokens if present.",
+    "Check actual contrast.",
+    "Tokens are tenant/theme scoped and versioned."
+  ]
+}

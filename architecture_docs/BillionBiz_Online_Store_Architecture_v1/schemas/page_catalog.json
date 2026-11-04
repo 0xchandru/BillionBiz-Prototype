@@ -1,0 +1,322 @@
+{
+  "schemaVersion": 1,
+  "storeModes": [
+    "COMMERCE",
+    "SERVICES",
+    "HYBRID"
+  ],
+  "systemPages": [
+    {
+      "key": "home",
+      "type": "home",
+      "route": "/",
+      "required": true,
+      "locked": true,
+      "modes": [
+        "COMMERCE",
+        "SERVICES",
+        "HYBRID"
+      ],
+      "templateFamily": "home"
+    },
+    {
+      "key": "products",
+      "type": "product-listing",
+      "route": "/products",
+      "required": true,
+      "locked": true,
+      "modes": [
+        "COMMERCE",
+        "HYBRID"
+      ],
+      "templateFamily": "product-listing",
+      "dataOwner": "catalogue"
+    },
+    {
+      "key": "collections",
+      "type": "collection-index",
+      "route": "/collections",
+      "required": false,
+      "locked": true,
+      "modes": [
+        "COMMERCE",
+        "HYBRID"
+      ],
+      "templateFamily": "collection",
+      "dataOwner": "catalogue"
+    },
+    {
+      "key": "collection-detail",
+      "type": "collection-detail",
+      "route": "/collections/:handle",
+      "required": true,
+      "locked": true,
+      "modes": [
+        "COMMERCE",
+        "HYBRID"
+      ],
+      "templateFamily": "collection",
+      "dataOwner": "catalogue"
+    },
+    {
+      "key": "product-detail",
+      "type": "product-detail",
+      "route": "/products/:handle",
+      "required": true,
+      "locked": true,
+      "modes": [
+        "COMMERCE",
+        "HYBRID"
+      ],
+      "templateFamily": "product-detail",
+      "dataOwner": "catalogue"
+    },
+    {
+      "key": "search",
+      "type": "search-results",
+      "route": "/search",
+      "required": true,
+      "locked": true,
+      "modes": [
+        "COMMERCE",
+        "HYBRID"
+      ],
+      "templateFamily": "product-listing",
+      "dataOwner": "catalogue-search"
+    },
+    {
+      "key": "cart",
+      "type": "cart",
+      "route": "/cart",
+      "required": true,
+      "locked": true,
+      "modes": [
+        "COMMERCE",
+        "HYBRID"
+      ],
+      "templateFamily": "cart",
+      "dataOwner": "cart-service"
+    },
+    {
+      "key": "checkout",
+      "type": "checkout",
+      "route": "/checkout",
+      "required": true,
+      "locked": true,
+      "modes": [
+        "COMMERCE",
+        "HYBRID"
+      ],
+      "templateFamily": "checkout",
+      "dataOwner": "checkout-service",
+      "editing": "branding-only"
+    },
+    {
+      "key": "account-login",
+      "type": "account-login",
+      "route": "/account/login",
+      "required": true,
+      "locked": true,
+      "modes": [
+        "COMMERCE",
+        "SERVICES",
+        "HYBRID"
+      ],
+      "templateFamily": "account",
+      "dataOwner": "identity"
+    },
+    {
+      "key": "account",
+      "type": "account-home",
+      "route": "/account",
+      "required": true,
+      "locked": true,
+      "modes": [
+        "COMMERCE",
+        "SERVICES",
+        "HYBRID"
+      ],
+      "templateFamily": "account",
+      "dataOwner": "people"
+    },
+    {
+      "key": "contact",
+      "type": "contact",
+      "route": "/pages/contact",
+      "required": false,
+      "locked": true,
+      "modes": [
+        "COMMERCE",
+        "SERVICES",
+        "HYBRID"
+      ],
+      "templateFamily": "content-page"
+    },
+    {
+      "key": "privacy-policy",
+      "type": "policy",
+      "route": "/policies/privacy-policy",
+      "required": true,
+      "locked": true,
+      "modes": [
+        "COMMERCE",
+        "SERVICES",
+        "HYBRID"
+      ],
+      "templateFamily": "policy",
+      "dataOwner": "legal-policy"
+    },
+    {
+      "key": "terms",
+      "type": "policy",
+      "route": "/policies/terms-of-service",
+      "required": true,
+      "locked": true,
+      "modes": [
+        "COMMERCE",
+        "SERVICES",
+        "HYBRID"
+      ],
+      "templateFamily": "policy",
+      "dataOwner": "legal-policy"
+    },
+    {
+      "key": "refund-policy",
+      "type": "policy",
+      "route": "/policies/refund-policy",
+      "required": true,
+      "locked": true,
+      "modes": [
+        "COMMERCE",
+        "HYBRID"
+      ],
+      "templateFamily": "policy",
+      "dataOwner": "legal-policy"
+    },
+    {
+      "key": "shipping-policy",
+      "type": "policy",
+      "route": "/policies/shipping-policy",
+      "required": false,
+      "locked": true,
+      "modes": [
+        "COMMERCE",
+        "HYBRID"
+      ],
+      "templateFamily": "policy",
+      "dataOwner": "legal-policy"
+    },
+    {
+      "key": "services",
+      "type": "service-listing",
+      "route": "/services",
+      "required": true,
+      "locked": true,
+      "modes": [
+        "SERVICES",
+        "HYBRID"
+      ],
+      "templateFamily": "service-listing",
+      "dataOwner": "appointments"
+    },
+    {
+      "key": "service-detail",
+      "type": "service-detail",
+      "route": "/services/:handle",
+      "required": true,
+      "locked": true,
+      "modes": [
+        "SERVICES",
+        "HYBRID"
+      ],
+      "templateFamily": "service-detail",
+      "dataOwner": "appointments"
+    },
+    {
+      "key": "booking",
+      "type": "booking-flow",
+      "route": "/book/:serviceHandle",
+      "required": true,
+      "locked": true,
+      "modes": [
+        "SERVICES",
+        "HYBRID"
+      ],
+      "templateFamily": "booking-flow",
+      "dataOwner": "appointments"
+    },
+    {
+      "key": "booking-confirmation",
+      "type": "booking-confirmation",
+      "route": "/booking/confirmation/:reference",
+      "required": true,
+      "locked": true,
+      "modes": [
+        "SERVICES",
+        "HYBRID"
+      ],
+      "templateFamily": "booking-confirmation",
+      "dataOwner": "appointments"
+    },
+    {
+      "key": "blog-index",
+      "type": "blog-index",
+      "route": "/blogs/:blogHandle",
+      "required": false,
+      "locked": true,
+      "modes": [
+        "COMMERCE",
+        "SERVICES",
+        "HYBRID"
+      ],
+      "templateFamily": "blog-index",
+      "enabledBy": "blog-module"
+    },
+    {
+      "key": "blog-article",
+      "type": "blog-article",
+      "route": "/blogs/:blogHandle/:articleHandle",
+      "required": false,
+      "locked": true,
+      "modes": [
+        "COMMERCE",
+        "SERVICES",
+        "HYBRID"
+      ],
+      "templateFamily": "blog-article",
+      "enabledBy": "blog-module"
+    },
+    {
+      "key": "not-found",
+      "type": "not-found",
+      "route": "*",
+      "required": true,
+      "locked": true,
+      "modes": [
+        "COMMERCE",
+        "SERVICES",
+        "HYBRID"
+      ],
+      "templateFamily": "system"
+    },
+    {
+      "key": "maintenance",
+      "type": "maintenance",
+      "route": "system:maintenance",
+      "required": true,
+      "locked": true,
+      "modes": [
+        "COMMERCE",
+        "SERVICES",
+        "HYBRID"
+      ],
+      "templateFamily": "system"
+    }
+  ],
+  "customPage": {
+    "type": "content-page",
+    "routePattern": "/pages/:handle",
+    "canDelete": true,
+    "mustAvoidReservedRoutes": true
+  }
+}

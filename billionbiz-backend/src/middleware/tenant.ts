@@ -14,19 +14,32 @@ export async function resolveTenant(req: Request, res: Response, next: NextFunct
 
   if (hostParts.length >= 4 && hostParts[1] === 'stores') {
     hostSlug = hostParts[0];
+  } else if (hostClean && !hostClean.includes('localhost') && !hostClean.includes('127.0.0.1') && !hostClean.endsWith('chandraprakash.codes')) {
+    // Custom domain resolution
+    const domainRes = await query(
+      `SELECT d.store_id, s.organization_id
+       FROM store_domains d
+       JOIN stores s ON s.id = d.store_id
+       WHERE d.domain = $1 AND d.is_verified = TRUE AND s.status != 'SUSPENDED'`,
+      [hostClean]
+    );
+    if (domainRes.rowCount && domainRes.rowCount > 0) {
+      storeId = domainRes.rows[0].store_id;
+      orgId = domainRes.rows[0].organization_id;
+    }
   }
 
   const explicitSlug = (req.headers['x-store-slug'] as string) || (req.query.slug as string) || hostSlug;
 
-  if (explicitSlug && (!orgId || !storeId)) {
+  if (explicitSlug) {
     const slugRes = await query(
-      `SELECT id, organization_id, status FROM stores WHERE slug = $1 AND status = 'ACTIVE'`,
+      `SELECT id, organization_id, status FROM stores WHERE slug = $1 AND status != 'SUSPENDED'`,
       [explicitSlug]
     );
     if (slugRes.rowCount && slugRes.rowCount > 0) {
       storeId = slugRes.rows[0].id;
       orgId = slugRes.rows[0].organization_id;
-    } else {
+    } else if (!storeId) {
       // Host or slug was explicitly provided but does not match any active store => return 404, never fallback
       return res.status(404).json({
         error: 'STORE_NOT_FOUND',
@@ -40,7 +53,7 @@ export async function resolveTenant(req: Request, res: Response, next: NextFunct
     const defaultStoreRes = await query(
       `SELECT s.id as store_id, s.organization_id
        FROM stores s
-       WHERE s.status = 'ACTIVE'
+       WHERE s.status != 'SUSPENDED'
        ORDER BY s.created_at ASC
        LIMIT 1;`
     );

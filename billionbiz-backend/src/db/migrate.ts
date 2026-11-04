@@ -863,6 +863,37 @@ export async function runMigrations() {
     );
   `);
 
+  // 19. Online Store Rebuild Architecture: Pages, Brand, Design Tokens, Domains & Safe Archive
+  await query(`
+    ALTER TABLE store_pages ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE store_pages ADD COLUMN IF NOT EXISTS is_locked BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE store_pages ADD COLUMN IF NOT EXISTS template_key VARCHAR(64) NOT NULL DEFAULT 'standard';
+
+    ALTER TABLE storefront_settings ADD COLUMN IF NOT EXISTS brand_name VARCHAR(255);
+    ALTER TABLE storefront_settings ADD COLUMN IF NOT EXISTS tagline TEXT;
+    ALTER TABLE storefront_settings ADD COLUMN IF NOT EXISTS logo_url TEXT;
+    ALTER TABLE storefront_settings ADD COLUMN IF NOT EXISTS favicon_url TEXT;
+    ALTER TABLE storefront_settings ADD COLUMN IF NOT EXISTS social_links JSONB NOT NULL DEFAULT '{}'::jsonb;
+    ALTER TABLE storefront_settings ADD COLUMN IF NOT EXISTS password_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE storefront_settings ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);
+    ALTER TABLE storefront_settings ADD COLUMN IF NOT EXISTS maintenance_mode BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE storefront_settings ADD COLUMN IF NOT EXISTS primary_domain VARCHAR(255);
+    ALTER TABLE storefront_settings ADD COLUMN IF NOT EXISTS active_release_id VARCHAR(64);
+    ALTER TABLE storefront_settings ADD COLUMN IF NOT EXISTS redirects JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE storefront_settings ADD COLUMN IF NOT EXISTS seo_defaults JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+    ALTER TABLE store_themes ADD COLUMN IF NOT EXISTS tokens JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+    CREATE TABLE IF NOT EXISTS legacy_sections_archive (
+      id VARCHAR(64) PRIMARY KEY,
+      store_id VARCHAR(64) NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+      page_id VARCHAR(64) REFERENCES store_pages(id) ON DELETE CASCADE,
+      archived_data JSONB NOT NULL,
+      reason VARCHAR(128) NOT NULL,
+      archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
   console.log('[Migration] All migrations completed successfully.');
 }
 

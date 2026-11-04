@@ -176,6 +176,25 @@ describe('Phase 1: Tenancy, Identity & Capabilities', () => {
 describe('Phase 3: Catalog & Inventory Ledger', () => {
   let createdProductId: string;
 
+  beforeAll(async () => {
+    // Ensure initial test product fixture exists
+    await request('POST', '/api/v1/catalog/products', {
+      body: {
+        name: 'Ceramic Espresso Cup Set',
+        priceMinor: 89000,
+        initialStock: 25,
+        variants: [
+          {
+            sku: 'CUP-CERAMIC-WHT',
+            priceMinor: 89000,
+            initialStock: 15,
+            optionValues: { Color: 'White' }
+          }
+        ]
+      }
+    });
+  });
+
   it('TC-CAT-001: should list catalog products', async () => {
     const res = await request('GET', '/api/v1/catalog/products');
     expect(res.status).toBe(200);
@@ -281,6 +300,25 @@ describe('Phase 6: Appointments & Availability Engine', () => {
   let resourceId: string;
   let candidateSlot: any;
   let holdToken: string;
+
+  beforeAll(async () => {
+    // Provision isolated test fixture resource & offering
+    await query(
+      `INSERT INTO resources (id, store_id, name, type, staff_profile_id, is_active)
+       VALUES ('res-test-fixture', 'store-shoum-default', 'Test Stylist Room 1', 'SPACE', 'staff-admin-default', TRUE)
+       ON CONFLICT (id) DO NOTHING`
+    );
+    await query(
+      `INSERT INTO offerings (id, store_id, name, handle, description, duration_minutes, buffer_before_minutes, buffer_after_minutes, price_minor, deposit_required_minor, is_active)
+       VALUES ('off-test-fixture', 'store-shoum-default', 'Test Haircut Consultation', 'test-haircut-consultation', 'Test service offering', 45, 5, 10, 150000, 50000, TRUE)
+       ON CONFLICT (id) DO NOTHING`
+    );
+    await query(
+      `INSERT INTO offering_resources (offering_id, resource_id, is_primary)
+       VALUES ('off-test-fixture', 'res-test-fixture', TRUE)
+       ON CONFLICT DO NOTHING`
+    );
+  });
 
   it('TC-BOOK-001: should fetch service offerings', async () => {
     const res = await request('GET', '/api/v1/appointments/offerings');

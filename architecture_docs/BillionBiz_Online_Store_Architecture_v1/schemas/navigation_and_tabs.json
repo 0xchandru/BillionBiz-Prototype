@@ -1,0 +1,92 @@
+{
+  "onlineStore": [
+    {
+      "label": "Overview",
+      "route": "/admin/online-store",
+      "purpose": "status, checklist, URL and publish history"
+    },
+    {
+      "label": "Pages",
+      "route": "/admin/online-store/pages",
+      "purpose": "system and custom page inventory"
+    },
+    {
+      "label": "Store Editor",
+      "route": "/admin/online-store/editor",
+      "purpose": "Pages, Brand, Design and Settings tabs"
+    },
+    {
+      "label": "Themes",
+      "route": "/admin/online-store/themes",
+      "purpose": "theme library and versions"
+    },
+    {
+      "label": "Navigation",
+      "route": "/admin/online-store/navigation",
+      "purpose": "menus and menu items"
+    },
+    {
+      "label": "Header & Footer",
+      "route": "EXISTING_ROUTE_PRESERVE",
+      "purpose": "existing editors; do not redesign"
+    },
+    {
+      "label": "Blog Posts",
+      "route": "/admin/online-store/blog",
+      "purpose": "conditional on blog capability"
+    },
+    {
+      "label": "Media Library",
+      "route": "/admin/online-store/media",
+      "purpose": "tenant asset library and picker"
+    }
+  ],
+  "editorTabs": [
+    {
+      "label": "Pages",
+      "owns": [
+        "page selection",
+        "template assignment",
+        "page metadata",
+        "SEO overrides",
+        "visibility"
+      ]
+    },
+    {
+      "label": "Brand",
+      "owns": [
+        "display identity",
+        "logos",
+        "favicon",
+        "brand assets",
+        "social URLs"
+      ]
+    },
+    {
+      "label": "Design",
+      "owns": [
+        "theme preset",
+        "colors",
+        "typography",
+        "buttons",
+        "forms",
+        "surfaces",
+        "spacing",
+        "motion"
+      ]
+    },
+    {
+      "label": "Settings",
+      "owns": [
+        "domains",
+        "visibility",
+        "SEO defaults",
+        "redirects",
+        "sitemap",
+        "robots",
+        "social sharing",
+        "storefront preferences"
+      ]
+    }
+  ]
+}

@@ -58,6 +58,63 @@ tenancyRouter.get('/stores/:id', requireAuth, resolveTenant, async (req: Request
   });
 });
 
+// PATCH /api/v1/tenancy/stores/:id (Update store business identity, single source of truth across Admin and Store Editor)
+tenancyRouter.patch(
+  '/stores/:id',
+  requireAuth,
+  resolveTenant,
+  requirePermission('store.capabilities.manage'),
+  async (req: Request, res: Response) => {
+    const storeId = req.params.id as string;
+    const orgId = req.tenant!.organizationId;
+    const { name, storeName, slug, currency, timezone } = req.body;
+    const businessName = name || storeName;
+
+    const storeRes = await query(`SELECT id, organization_id, slug, name FROM stores WHERE id = $1 AND organization_id = $2`, [storeId, orgId]);
+    if (storeRes.rowCount === 0) {
+      return res.status(404).json({ error: 'STORE_NOT_FOUND', message: 'Store not found' });
+    }
+
+    await withTransaction(async (client) => {
+      if (businessName && businessName.trim()) {
+        const cleanName = businessName.trim();
+        await client.query(`UPDATE stores SET name = $1, updated_at = NOW() WHERE id = $2`, [cleanName, storeId]);
+        await client.query(`UPDATE organizations SET name = $1, updated_at = NOW() WHERE id = $2`, [cleanName, orgId]);
+        await client.query(
+          `INSERT INTO storefront_settings (store_id, brand_name, updated_at)
+           VALUES ($1, $2, NOW())
+           ON CONFLICT (store_id) DO UPDATE SET brand_name = $2, updated_at = NOW()`,
+          [storeId, cleanName]
+        );
+      }
+
+      if (currency) {
+        await client.query(`UPDATE stores SET currency = $1, updated_at = NOW() WHERE id = $2`, [currency, storeId]);
+      }
+      if (timezone) {
+        await client.query(`UPDATE stores SET timezone = $1, updated_at = NOW() WHERE id = $2`, [timezone, storeId]);
+      }
+
+      if (slug && slug.trim()) {
+        const cleanSlug = slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+        await client.query(`UPDATE stores SET slug = $1, updated_at = NOW() WHERE id = $2`, [cleanSlug, storeId]);
+        const platformDomain = `${cleanSlug}.stores.chandraprakash.codes`;
+        await client.query(
+          `UPDATE store_domains SET domain = $1 WHERE store_id = $2 AND is_primary = TRUE`,
+          [platformDomain, storeId]
+        );
+        await client.query(
+          `UPDATE storefront_settings SET primary_domain = $1, updated_at = NOW() WHERE store_id = $2`,
+          [platformDomain, storeId]
+        );
+      }
+    });
+
+    const updated = await query(`SELECT * FROM stores WHERE id = $1`, [storeId]);
+    res.json({ message: 'Store business identity updated successfully', store: updated.rows[0] });
+  }
+);
+
 // PATCH /api/v1/tenancy/stores/:id/capabilities (REQ-CAP-001, REQ-CAP-002, T-005)
 tenancyRouter.patch(
   '/stores/:id/capabilities',

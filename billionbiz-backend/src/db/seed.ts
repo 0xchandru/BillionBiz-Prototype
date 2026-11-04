@@ -1,5 +1,6 @@
-import { query } from './pool.js';
+import { query, withTransaction } from './pool.js';
 import bcrypt from 'bcryptjs';
+import { provisionDefaultStorefront } from '../modules/storefront/storefrontProvisioner.js';
 
 export async function seedDatabase() {
   console.log('[Seed] Seeding default platform data...');
@@ -216,66 +217,7 @@ export async function seedDatabase() {
     [counterId]
   );
 
-  // 6. Default Categories & Sample Products
-  const catFashion = 'cat-fashion-01';
-  await query(
-    `INSERT INTO categories (id, store_id, name, slug, description, is_active)
-     VALUES ($1, $2, 'Apparel & Fashion', 'apparel-fashion', 'Premium fashion, accessories, and wear', TRUE)
-     ON CONFLICT (store_id, slug) DO NOTHING`,
-    [catFashion, storeId]
-  );
-
-  const prod1Id = 'prod-desk-lamp-01';
-  await query(
-    `INSERT INTO products (id, store_id, name, handle, description, category_id, brand, product_type, status, media, options)
-     VALUES ($1, $2, 'Modern Nordic Desk Lamp', 'modern-nordic-desk-lamp', 'Minimalist matte aluminum architectural desk lamp with touch dimmer.', $3, 'Lumina Nordic', 'PHYSICAL', 'ACTIVE',
-       '[{"url": "https://images.unsplash.com/photo-1507473885765-e6ed057f782c?w=600&h=600&fit=crop", "alt": "Modern Desk Lamp"}]'::jsonb,
-       '[{"name": "Color", "values": ["Matte Black", "Brushed Brass"]}]'::jsonb
-     )
-     ON CONFLICT (store_id, handle) DO NOTHING`,
-    [prod1Id, storeId, catFashion]
-  );
-
-  const variant1Id = 'var-desk-lamp-black';
-  await query(
-    `INSERT INTO product_variants (id, product_id, sku, barcode, option_values, price_minor, compare_at_minor, cost_minor, weight_grams, is_active)
-     VALUES ($1, $2, 'LAMP-NORDIC-BLK', '8901234567890', '{"Color": "Matte Black"}'::jsonb, 192000, 240000, 110000, 1200, TRUE)
-     ON CONFLICT (id) DO NOTHING`,
-    [variant1Id, prod1Id]
-  );
-
-  await query(
-    `INSERT INTO inventory_balances (id, variant_id, location_id, on_hand, reserved, available)
-     VALUES ('inv-bal-lamp-blk', $1, $2, 45, 3, 42)
-     ON CONFLICT (variant_id, location_id) DO UPDATE SET on_hand = 45, available = 42`,
-    [variant1Id, invLocId]
-  );
-
-  // 7. Default Service Offerings & Resource for Appointments
-  const service1Id = 'srv-haircut-styling';
-  await query(
-    `INSERT INTO offerings (id, store_id, name, handle, description, duration_minutes, buffer_before_minutes, buffer_after_minutes, price_minor, deposit_required_minor, is_active)
-     VALUES ($1, $2, 'Master Haircut & Style Consultation', 'master-haircut-style', 'Full hair analysis, customized cut, wash, and blow dry styling with senior stylist.', 45, 5, 10, 150000, 50000, TRUE)
-     ON CONFLICT (store_id, handle) DO NOTHING`,
-    [service1Id, storeId]
-  );
-
-  const res1Id = 'res-stylist-shoum-01';
-  await query(
-    `INSERT INTO resources (id, store_id, name, type, staff_profile_id, is_active)
-     VALUES ($1, $2, 'Master Stylist Room 1', 'SPACE', $3, TRUE)
-     ON CONFLICT (id) DO NOTHING`,
-    [res1Id, storeId, staffProfileId]
-  );
-
-  await query(
-    `INSERT INTO offering_resources (offering_id, resource_id, is_primary)
-     VALUES ($1, $2, TRUE)
-     ON CONFLICT DO NOTHING`,
-    [service1Id, res1Id]
-  );
-
-  // Shifts: Monday to Saturday 10:00 to 19:00
+  // 6. Default Staff Shifts (Mon - Sat, 10:00 to 19:00 for operational readiness)
   for (let day = 1; day <= 6; day++) {
     await query(
       `INSERT INTO staff_shifts (id, staff_profile_id, day_of_week, start_time, end_time, is_active)
@@ -285,54 +227,18 @@ export async function seedDatabase() {
     );
   }
 
-  // 8. Sample Customer & Initial Order
-  const custId = 'cust-david-01';
-  await query(
-    `INSERT INTO customers (id, store_id, email, phone, first_name, last_name, total_orders, total_spent_minor)
-     VALUES ($1, $2, 'david.johnson@example.com', '+919123456789', 'David', 'Johnson', 1, 192000)
-     ON CONFLICT (id) DO NOTHING`,
-    [custId, storeId]
-  );
-
-  const orderId = 'ord-bbz-1001';
-  await query(
-    `INSERT INTO orders (id, store_id, order_number, customer_id, channel, status, payment_status, fulfillment_status, currency, subtotal_minor, total_minor)
-     VALUES ($1, $2, 'BBZ-1001', $3, 'STOREFRONT', 'COMPLETED', 'CAPTURED', 'FULFILLED', 'INR', 192000, 192000)
-     ON CONFLICT (store_id, order_number) DO NOTHING`,
-    [orderId, storeId, custId]
-  );
-
-  await query(
-    `INSERT INTO order_lines (id, order_id, product_id, variant_id, sku, title, variant_title, unit_price_minor, quantity, total_minor)
-     VALUES ('line-bbz-1001-1', $1, $2, $3, 'LAMP-NORDIC-BLK', 'Modern Nordic Desk Lamp', 'Matte Black', 192000, 1, 192000)
-     ON CONFLICT (id) DO NOTHING`,
-    [orderId, prod1Id, variant1Id]
-  );
-
-  // 10. Default Store Pages & Theme (Store Editor Native Persistence)
-  await query(
-    `INSERT INTO store_themes (id, store_id, preset_name, palette, typography, buttons, effects, custom_css, version)
-     VALUES ('thm-shoum-default', $1, 'modern', '{"primary":"#0066cc","secondary":"#6c757d"}'::jsonb, '{"heading":"Inter","body":"Inter"}'::jsonb, '{}'::jsonb, '{}'::jsonb, '', 1)
-     ON CONFLICT (store_id) DO NOTHING`,
-    [storeId]
-  );
-
-  const initialPages = [
-    { id: 'landing-page', name: 'Landing page', path: '/', type: 'landing', category: 'storefront', seoTitle: 'BillionBiz | Build, Launch & Grow Your Business' },
-    { id: 'maintenance-page', name: 'Maintenance', path: '/maintenance', type: 'maintenance', category: 'system', seoTitle: 'Under Maintenance - BillionBiz' },
-    { id: 'booking-page', name: 'Booking', path: '/booking', type: 'booking', category: 'commerce', seoTitle: 'Book an Appointment - BillionBiz' },
-    { id: 'order-confirmation-page', name: 'Order Confirmation', path: '/order-confirmation', type: 'order-confirmation', category: 'commerce', seoTitle: 'Order Confirmed - BillionBiz' },
-    { id: 'order-tracking-page', name: 'Order Tracking', path: '/order-tracking', type: 'order-tracking', category: 'commerce', seoTitle: 'Track Your Package - BillionBiz' }
-  ];
-
-  for (const p of initialPages) {
-    await query(
-      `INSERT INTO store_pages (id, store_id, name, path, type, category, status, seo_title, page_props)
-       VALUES ($1, $2, $3, $4, $5, $6, 'published', $7, '{}'::jsonb)
-       ON CONFLICT (id) DO NOTHING`,
-      [p.id, storeId, p.name, p.path, p.type, p.category, p.seoTitle]
-    );
-  }
+  // 7. Storefront Native Persistence (Default Starter Pages, Domain & Theme)
+  // Clean truthful empty state: Zero fake products, fake orders, fake customers, or fake bookings!
+  await withTransaction(async (client) => {
+    await provisionDefaultStorefront({
+      client,
+      storeId,
+      storeName: 'Shoum',
+      storeSlug: 'shoum',
+      mode: 'BOTH',
+      userId
+    });
+  });
 
   console.log('[Seed] Database seeding completed successfully.');
 }

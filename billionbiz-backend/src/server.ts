@@ -62,6 +62,7 @@ app.use(
     ]
   })
 );
+app.options('*', cors());
 app.use(express.json({ limit: '10mb' }));
 
 // Request logging in dev

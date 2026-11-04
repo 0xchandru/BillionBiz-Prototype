@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "template": {
+    "type": "product-detail",
+    "name": "Default Product Detail",
+    "version": 1,
+    "allowedPageTypes": [
+      "product-detail"
+    ],
+    "dataContext": {
+      "kind": "catalogue-product",
+      "resource": "route.handle"
+    },
+    "regions": [
+      "main"
+    ],
+    "phase1Renderer": "system-managed-product-template",
+    "phase2Composition": {
+      "sections": []
+    }
+  },
+  "rules": [
+    "Product resource resolves by route handle through Catalogue.",
+    "Page settings may change presentation, never product title, price, stock or variants.",
+    "Cart and checkout mutations call owning services.",
+    "Required commerce controls cannot be removed in future section editor."
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "templateType": "home",
+  "sectionInstance": {
+    "id": "sec_01JEXAMPLE",
+    "type": "hero-banner",
+    "schemaVersion": 1,
+    "enabled": true,
+    "order": 0,
+    "settings": {
+      "layout": "split-left",
+      "width": "wide",
+      "background": {
+        "mode": "token",
+        "token": "surface.page"
+      },
+      "mobileImagePosition": "below-text"
+    },
+    "blocks": [
+      {
+        "id": "blk_heading",
+        "type": "heading",
+        "schemaVersion": 1,
+        "enabled": true,
+        "order": 0,
+        "settings": {
+          "text": "Discover the collection",
+          "level": "h1",
+          "alignment": "left"
+        }
+      },
+      {
+        "id": "blk_text",
+        "type": "rich-text",
+        "schemaVersion": 1,
+        "enabled": true,
+        "order": 1,
+        "settings": {
+          "text": "A short brand introduction."
+        }
+      },
+      {
+        "id": "blk_primary_cta",
+        "type": "button",
+        "schemaVersion": 1,
+        "enabled": true,
+        "order": 2,
+        "settings": {
+          "label": "Shop now",
+          "variant": "primary",
+          "href": {
+            "kind": "system-route",
+            "value": "/products"
+          }
+        }
+      },
+      {
+        "id": "blk_image",
+        "type": "image",
+        "schemaVersion": 1,
+        "enabled": true,
+        "order": 3,
+        "settings": {
+          "assetId": "tenant-asset-id",
+          "alt": "Accessible image description",
+          "aspectRatio": "4:5",
+          "fit": "cover"
+        }
+      }
+    ]
+  }
+}
