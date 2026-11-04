@@ -20,6 +20,31 @@ BillionBiz is a production-ready, multi-tenant merchant commerce operating platf
 
 ---
 
+## Backend Windows Service & `bbiz` CLI
+
+The backend can run permanently as an **Automatic Windows Background Service** on boot, managed globally using the `bbiz` CLI:
+
+```bash
+# Check status (port 8080, DB, Cloudflare tunnel)
+bbiz status
+
+# Start / Stop / Restart
+bbiz start
+bbiz stop
+bbiz restart
+
+# Live logs & health test
+bbiz logs -f
+bbiz health
+
+# Install as an automatic service on laptop boot
+bbiz service install
+```
+
+> For the comprehensive architecture and CLI manual, see **[`SERVICE_AND_CLI_GUIDE.md`](file:///c:/Users/cyber/OneDrive/Desktop/Shoum/BillionBiz-Prototype/billionbiz-backend/SERVICE_AND_CLI_GUIDE.md)**.
+
+---
+
 ## Quick Start
 
 ### 1. Backend Setup
