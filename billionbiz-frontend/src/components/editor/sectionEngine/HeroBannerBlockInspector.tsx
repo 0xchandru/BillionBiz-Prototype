@@ -75,7 +75,7 @@ export const HeroBannerBlockInspector: React.FC<HeroBannerBlockInspectorProps> =
     });
   }, [document, pageId, section, updateSectionInstance]);
 
-  const blocks = document.blocks || [];
+  const blocks = (document.blocks || []) as BlockInstance[];
   const selectedBlock = blocks.find((block) => block.id === selectedBlockId) || blocks[0] || null;
   const selectedDefinition = selectedBlock ? getBlockDefinition(selectedBlock.type) : undefined;
 
