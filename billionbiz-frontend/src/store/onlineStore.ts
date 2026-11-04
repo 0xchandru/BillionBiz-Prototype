@@ -109,6 +109,13 @@ export interface OnlineStoreState {
 
 export type SiteState = OnlineStoreState;
 
+const createSectionId = (): string => {
+  const suffix = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+  return `sec-${suffix}`;
+};
+
 // Helper to create a section with default props
 const createSection = (id: string, type: string, overrides?: Partial<SectionData>): SectionData => {
   if (type === 'HeroBanner' && !overrides) {
@@ -568,7 +575,7 @@ export const useOnlineStore = create<OnlineStoreState>()(
   addSection: (pageId, sectionType, insertIndex) => set((state) => {
     const pages = state.pages.map(page => {
       if (page.id !== pageId) return page;
-      const newSection = createSection(`sec-${Date.now()}`, sectionType);
+      const newSection = createSection(createSectionId(), sectionType);
       
       const sections = [...page.sections];
       
