@@ -24,6 +24,42 @@ export interface SystemPageDefinition {
   pageProps?: Record<string, any>;
 }
 
+const createStarterFeaturedCollectionSection = () => ({
+  id: `sec-${uuidv4()}`,
+  type: 'FeaturedCollection',
+  name: 'Featured Collection',
+  isHidden: false,
+  schemaVersion: 1,
+  enabled: true,
+  settings: {
+    heading: 'Featured collection',
+    description: '',
+    linkText: 'View all',
+    linkUrl: '/shop',
+    layout: 'grid',
+    columns: 4,
+    productLimit: 8,
+    emptyStateText: 'Your active products will appear here once you add them to your catalogue.'
+  },
+  blocks: [{
+    id: `blk-${uuidv4()}`,
+    type: 'product-card-template',
+    schemaVersion: 1,
+    enabled: true,
+    settings: {
+      showPrice: true,
+      showCompareAt: true,
+      showVendor: false,
+      showAddToCart: true
+    },
+    designOverrides: {},
+    responsiveOverrides: {}
+  }],
+  designOverrides: {},
+  responsiveOverrides: {},
+  props: {}
+});
+
 const createStarterHeroSection = (storeName: string, mode: 'COMMERCE' | 'SERVICES' | 'BOTH') => {
   const isServices = mode === 'SERVICES';
   const buttonLabel = isServices ? 'Explore services' : 'Explore products';
@@ -108,7 +144,12 @@ export function getSystemPageCatalog(storeName: string, mode: 'COMMERCE' | 'SERV
       templateKey: 'home',
       seoTitle: `${storeName} | Official Online Store`,
       seoDescription: `Welcome to the official online store of ${storeName}. Discover our latest offerings.`,
-      initialSections: [createStarterHeroSection(storeName, mode)],
+      initialSections: mode === 'SERVICES'
+        ? [createStarterHeroSection(storeName, mode)]
+        : [
+            createStarterHeroSection(storeName, mode),
+            createStarterFeaturedCollectionSection()
+          ],
       pageProps: { showHero: true, gridColumns: 4 }
     },
     {
