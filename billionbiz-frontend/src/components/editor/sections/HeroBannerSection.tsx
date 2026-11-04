@@ -81,6 +81,9 @@ const HeroBannerSection: React.FC<HeroBannerProps> = ({ props }) => {
   const settings = props.settings || props;
   const designOverrides = props.designOverrides || {};
   const layout = settings.layout || props.selectedLayout || props.layout || 'split-right';
+  const verticalAlignment = ['start', 'center', 'end'].includes(settings.verticalAlignment)
+    ? settings.verticalAlignment
+    : 'center';
   const isCentered = layout === 'centered' || layout === 'center';
   const isSplitLeft = layout === 'split-left' || layout === 'right';
 
@@ -115,7 +118,8 @@ const HeroBannerSection: React.FC<HeroBannerProps> = ({ props }) => {
     ),
     '--hero-content-width': widthMap[settings.contentWidth] || widthMap.wide,
     '--hero-min-height': `${Math.max(280, Math.min(900, Number(settings.minHeight || 520)))}px`,
-    '--hero-image-fit': image?.settings?.fit === 'contain' ? 'contain' : 'cover'
+    '--hero-image-fit': image?.settings?.fit === 'contain' ? 'contain' : 'cover',
+    alignItems: verticalAlignment
   } as React.CSSProperties;
 
   const navigateTo = (event: React.MouseEvent<HTMLAnchorElement>, href: string, openInNewTab: boolean) => {
