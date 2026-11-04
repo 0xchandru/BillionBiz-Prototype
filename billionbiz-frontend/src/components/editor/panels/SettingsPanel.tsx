@@ -23,15 +23,15 @@ interface NavGroupDef {
 
 const SETTINGS_GROUPS: NavGroupDef[] = [
   {
-    title: 'Store Operations',
+    title: 'STORE OPERATIONS',
     items: [
-      { id: 'launch-checklist', label: 'Launch Checklist', description: 'Readiness progress & essential setup', icon: CheckCircle2 },
-      { id: 'language-region', label: 'Language & Region', description: 'Display language, currency & units', icon: Globe },
-      { id: 'notifications', label: 'Alerts & Notifications', description: 'Announcement banners & order alerts', icon: Bell },
+      { id: 'launch-checklist', label: 'Launch readiness', description: 'Setup checks based on your store data', icon: CheckCircle2 },
+      { id: 'language-region', label: 'Regional defaults', description: 'Store currency and timezone', icon: Globe },
+      { id: 'notifications', label: 'Announcements', description: 'Storefront announcement bar and messages', icon: Bell },
     ]
   },
   {
-    title: 'Policies & Legal',
+    title: 'POLICIES & LEGAL',
     items: [
       { id: 'refund-policy', label: 'Refund & Returns', description: 'Return conditions & refund rules', icon: Shield },
       { id: 'privacy-policy', label: 'Privacy Policy', description: 'Data privacy & cookies consent', icon: FileText },
@@ -40,11 +40,11 @@ const SETTINGS_GROUPS: NavGroupDef[] = [
     ]
   },
   {
-    title: 'Advanced',
+    title: 'CONNECTIONS & DEVELOPER',
     items: [
-      { id: 'integrations', label: 'Integrations', description: 'Google Analytics & Meta Pixel', icon: Plug, tag: 'Soon' },
-      { id: 'custom-code', label: 'Custom Code', description: 'Head & body script injection', icon: Code, tag: 'Soon' },
-      { id: 'api-webhooks', label: 'API & Webhooks', description: 'Developer keys & endpoints', icon: Key, tag: 'Soon' },
+      { id: 'integrations', label: 'Integrations', description: 'Connected analytics and marketing providers', icon: Plug, tag: 'Not connected' },
+      { id: 'custom-code', label: 'Custom code', description: 'Controlled head and body integrations', icon: Code, tag: 'Not connected' },
+      { id: 'api-webhooks', label: 'API & webhooks', description: 'Developer credentials and event endpoints', icon: Key, tag: 'Not connected' },
     ]
   }
 ];
@@ -62,8 +62,8 @@ export const SettingsPanel: React.FC = () => {
     <div className={styles.contextPanelInner}>
       <div className={styles.contextPanelHeader}>
         <div>
-          <h3 className={styles.contextPanelTitle}>Store Settings</h3>
-          <p className={styles.contextPanelDesc}>Operations, legal policies &amp; advanced config</p>
+          <h3 className={styles.contextPanelTitle}>Store setup</h3>
+          <p className={styles.contextPanelDesc}>Regional behavior, legal pages and platform connections</p>
         </div>
         <button
           onClick={() => setLeftSidebarCollapsed(!isLeftSidebarCollapsed)}
