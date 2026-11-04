@@ -87,6 +87,22 @@ const FeaturedCollectionSection: React.FC<{ props: Record<string, any> }> = ({ p
   const showCompareAt = cardSettings.showCompareAt !== false;
   const showVendor = cardSettings.showVendor === true;
   const showAddToCart = cardSettings.showAddToCart !== false;
+  const showDescription = cardSettings.showDescription === true;
+  const imageRatio = ({
+    square: '1 / 1',
+    portrait: '4 / 5',
+    tall: '3 / 4',
+    landscape: '4 / 3'
+  } as Record<string, string>)[cardSettings.imageRatio] || '1 / 1';
+  const imageFit = cardSettings.imageFit === 'contain' ? 'contain' : 'cover';
+  const titleSize = ({
+    small: 12,
+    medium: 14,
+    large: 16
+  } as Record<string, number>)[cardSettings.titleSize] || 14;
+  const addToCartLabel = String(cardSettings.addToCartLabel || 'Add to cart').slice(0, 24);
+  const chooseOptionsLabel = String(cardSettings.chooseOptionsLabel || 'Choose options').slice(0, 24);
+  const actionStyle = cardSettings.actionStyle || 'primary';
   const currency = safeCurrencyFormatter(props.currencyCode || props.dataContext?.currencyCode);
 
   const products: StoreProduct[] = useMemo(() => {
@@ -319,7 +335,7 @@ const FeaturedCollectionSection: React.FC<{ props: Record<string, any> }> = ({ p
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          aspectRatio: '1 / 1',
+                          aspectRatio: imageRatio,
                           overflow: 'hidden',
                           background: 'var(--theme-bg-surface, #f8fafc)',
                           textDecoration: 'none'
@@ -331,7 +347,7 @@ const FeaturedCollectionSection: React.FC<{ props: Record<string, any> }> = ({ p
                             alt={image?.alt || product.name}
                             loading="lazy"
                             decoding="async"
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            style={{ width: '100%', height: '100%', objectFit: imageFit }}
                           />
                         ) : (
                           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7, color: 'var(--theme-text-muted, #64748b)' }}>
@@ -349,10 +365,24 @@ const FeaturedCollectionSection: React.FC<{ props: Record<string, any> }> = ({ p
                         <a
                           href={productPath}
                           onClick={(event) => navigate(event, productPath)}
-                          style={{ color: headingColor, textDecoration: 'none', fontSize: 14, fontWeight: 650, lineHeight: 1.4 }}
+                          style={{ color: headingColor, textDecoration: 'none', fontSize: titleSize, fontWeight: 650, lineHeight: 1.4 }}
                         >
                           {product.name}
                         </a>
+                        {showDescription && product.description && (
+                          <p style={{
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                            margin: 0,
+                            color: bodyColor,
+                            fontSize: 11,
+                            lineHeight: 1.5
+                          }}>
+                            {product.description}
+                          </p>
+                        )}
                         {showPrice && (
                           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 7 }}>
                             {minPrice !== null ? (
@@ -390,15 +420,24 @@ const FeaturedCollectionSection: React.FC<{ props: Record<string, any> }> = ({ p
                               padding: '9px 12px',
                               border: 0,
                               borderRadius: 'var(--theme-btn-radius, 9px)',
-                              background: 'var(--theme-btn-primary-bg, var(--theme-brand-primary, #0f172a))',
-                              color: 'var(--theme-btn-primary-text, #ffffff)',
+                              background: actionStyle === 'secondary'
+                                ? 'var(--theme-btn-secondary-bg, #f1f5f9)'
+                                : actionStyle === 'outline'
+                                  ? 'transparent'
+                                  : 'var(--theme-btn-primary-bg, var(--theme-brand-primary, #0f172a))',
+                              color: actionStyle === 'secondary'
+                                ? 'var(--theme-btn-secondary-text, #0f172a)'
+                                : actionStyle === 'outline'
+                                  ? 'var(--theme-brand-primary, #0f172a)'
+                                  : 'var(--theme-btn-primary-text, #ffffff)',
+                              border: actionStyle === 'outline' ? '1px solid var(--theme-brand-primary, #0f172a)' : 0,
                               fontSize: 12,
                               fontWeight: 650,
                               cursor: 'pointer'
                             }}
                           >
                             <ShoppingBag size={14} />
-                            Add to cart
+                            {addToCartLabel}
                           </button>
                         ) : variants.length > 1 ? (
                           <a
@@ -416,7 +455,7 @@ const FeaturedCollectionSection: React.FC<{ props: Record<string, any> }> = ({ p
                               fontWeight: 650
                             }}
                           >
-                            Choose options
+                            {chooseOptionsLabel}
                           </a>
                         ) : (
                           <a
