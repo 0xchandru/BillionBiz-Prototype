@@ -64,7 +64,14 @@ const validFeaturedCollection = (): any => ({
       showPrice: true,
       showCompareAt: true,
       showVendor: false,
-      showAddToCart: true
+      showDescription: false,
+      showAddToCart: true,
+      imageRatio: 'square',
+      imageFit: 'cover',
+      titleSize: 'medium',
+      addToCartLabel: 'Add to cart',
+      chooseOptionsLabel: 'Choose options',
+      actionStyle: 'primary'
     })
   ],
   designOverrides: {},
@@ -83,6 +90,18 @@ describe('BillionBiz versioned section document validation', () => {
     const result = validatePageSectionDocument([validFeaturedCollection()]);
     expect(result.valid).toBe(true);
     expect(result.issues).toHaveLength(0);
+  });
+
+  it('rejects unregistered product-card styles and unsafe button labels', () => {
+    const featured = validFeaturedCollection();
+    featured.blocks[0].settings.imageRatio = 'wide-and-tall';
+    featured.blocks[0].settings.actionStyle = 'javascript';
+    featured.blocks[0].settings.addToCartLabel = 'A'.repeat(25);
+    const result = validatePageSectionDocument([featured]);
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.path.endsWith('.settings.imageRatio'))).toBe(true);
+    expect(result.issues.some((issue) => issue.path.endsWith('.settings.actionStyle'))).toBe(true);
+    expect(result.issues.some((issue) => issue.path.endsWith('.settings.addToCartLabel'))).toBe(true);
   });
 
   it('rejects copied product arrays in Featured Collection settings', () => {
