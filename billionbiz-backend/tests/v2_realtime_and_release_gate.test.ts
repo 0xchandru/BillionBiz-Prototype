@@ -42,6 +42,9 @@ describe('V2 Realtime, Concurrency & Release Gate Suite', () => {
     } catch {
       body = text;
     }
+    if (res.status === 404) {
+      console.error('[CI test request returned 404]', method, path, body);
+    }
     return { status: res.status, body };
   }
 
