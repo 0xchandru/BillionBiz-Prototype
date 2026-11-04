@@ -184,7 +184,12 @@ export const EditorTopBar: React.FC = () => {
 
     if (isPageEditor) {
       if (selectedPageId === 'header-global' || selectedPageId === 'footer-global') {
-        useEditorContextStore.getState().syncHeaderToSiteStore();
+        const editorContext = useEditorContextStore.getState();
+        if (selectedPageId === 'header-global') {
+          editorContext.syncHeaderToSiteStore();
+        } else {
+          editorContext.syncFooterToSiteStore();
+        }
         if (!landingPage) throw new Error('The home page is not available in the current store.');
         await savePageDraftToBackend(landingPage.id);
         return;
