@@ -56,7 +56,6 @@ export const EditorTopBar: React.FC = () => {
     markSaved,
     lastPublishedSnapshots,
     unpublishPage,
-    publishPage,
     savePageDraftToBackend,
     saveThemeToBackend,
     saveSettingsToBackend,
@@ -157,7 +156,7 @@ export const EditorTopBar: React.FC = () => {
     pages.find((page) => page.id === 'landing-page') ||
     pages[0];
 
-  const persistCurrentScope = async () => {
+  const persistCurrentScope = useCallback(async () => {
     if (isTheme) {
       await saveThemeToBackend(theme);
       return;
@@ -185,7 +184,21 @@ export const EditorTopBar: React.FC = () => {
     if (hasUnsavedChanges) {
       throw new Error('Select a page, brand, design or settings area before saving.');
     }
-  };
+  }, [
+    isTheme,
+    isStoreBrand,
+    isSettings,
+    isPageEditor,
+    selectedPageId,
+    landingPage,
+    pages,
+    theme,
+    settings,
+    hasUnsavedChanges,
+    saveThemeToBackend,
+    saveSettingsToBackend,
+    savePageDraftToBackend
+  ]);
 
   const handleSave = async () => {
     if (isSaving) return;
@@ -237,7 +250,8 @@ export const EditorTopBar: React.FC = () => {
     isPageEditor,
     activeScopeName,
     selectedPageId,
-    isSaving
+    isSaving,
+    persistCurrentScope
   ]);
 
   const editorEngineStore = useEditorContextStore();
