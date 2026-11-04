@@ -13,6 +13,7 @@ import { PolicyPageView } from './pages/PolicyPageView';
 import { ContactPageView } from './pages/ContactPageView';
 import { System404View } from './pages/System404View';
 import { Hammer } from 'lucide-react';
+import { sanitizeHtml } from '../../utils/sanitizeHtml';
 
 export interface StorefrontRendererProps {
   store?: {
@@ -261,7 +262,7 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
           </h1>
           <div className="prose dark:prose-invert max-w-none text-sm text-slate-700 dark:text-slate-300">
             {matchedCustomPage.content ? (
-              <div dangerouslySetInnerHTML={{ __html: matchedCustomPage.content }} />
+              <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(matchedCustomPage.content) }} />
             ) : (
               <p className="text-slate-500 italic">This page has no content published yet.</p>
             )}
