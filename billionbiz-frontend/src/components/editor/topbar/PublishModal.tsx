@@ -139,15 +139,18 @@ export const PublishModal: React.FC<PublishModalProps> = ({
         if (isFooter) editorContext.syncFooterToSiteStore();
       }
 
-      // Header and Footer are stored as part of the shared home-page document.
-      // Publishing is whole-store and atomic, so persist that complete document
-      // (or the selected page) before creating the immutable release.
-      const draftPage = isHeader || isFooter ? landingPage : selectedPage;
-      if (!draftPage) {
-        throw new Error('The selected page could not be resolved for publishing.');
+      // The backend publishes the entire store atomically. Flush every
+      // persisted page document first so edits made on another page cannot be
+      // silently omitted from the release.
+      const currentPages = useSiteStore.getState().pages;
+      const unpersistedPages = currentPages.filter((page) => page.draftVersion === undefined);
+      if (unpersistedPages.length > 0) {
+        throw new Error(
+          `These pages have not finished loading from the server: ${unpersistedPages.map((page) => page.name).join(', ')}. Reload the editor and retry publishing.`
+        );
       }
 
-      await savePageDraftToBackend(draftPage.id);
+      await Promise.all(currentPages.map((page) => savePageDraftToBackend(page.id)));
       await saveThemeToBackend(theme);
       await saveSettingsToBackend(settings);
       await publishStoreToBackend(`Published ${scopeName} from Store Editor`);
