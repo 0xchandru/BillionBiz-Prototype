@@ -862,6 +862,7 @@ storefrontRouter.post(
 
     let releaseNumber = 1;
     let releaseId = `rel-${uuidv4()}`;
+    let publicationValidationIssues: Array<{ pageId: string; pageName: string; path: string; issues: Array<{ path: string; message: string }> }> = [];
 
     await withTransaction(async (client) => {
       // 1. Get next release number
@@ -905,10 +906,8 @@ storefrontRouter.post(
           : [{ pageId: page.id, pageName: page.name, path: page.path, issues: validation.issues }];
       });
       if (invalidPages.length > 0) {
-        const error = new Error('Publication blocked because one or more pages contain invalid section documents.');
-        (error as Error & { code?: string; details?: unknown }).code = 'INVALID_STOREFRONT_DOCUMENT';
-        (error as Error & { code?: string; details?: unknown }).details = invalidPages;
-        throw error;
+        publicationValidationIssues = invalidPages;
+        return;
       }
 
       // 4. Snapshot brand, navigation, settings
@@ -971,6 +970,14 @@ storefrontRouter.post(
         changes: { releaseNumber, contentHash, pagesCount: pagesRes.rowCount }
       });
     });
+
+    if (publicationValidationIssues.length > 0) {
+      return res.status(400).json({
+        error: 'INVALID_STOREFRONT_DOCUMENT',
+        message: 'Publication blocked because one or more pages contain invalid section documents.',
+        pages: publicationValidationIssues
+      });
+    }
 
     try {
       await enqueueOutbox({
