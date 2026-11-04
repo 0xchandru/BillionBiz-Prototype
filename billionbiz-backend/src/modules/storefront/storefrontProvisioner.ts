@@ -24,6 +24,76 @@ export interface SystemPageDefinition {
   pageProps?: Record<string, any>;
 }
 
+const createStarterHeroSection = (storeName: string, mode: 'COMMERCE' | 'SERVICES' | 'BOTH') => {
+  const isServices = mode === 'SERVICES';
+  const buttonLabel = isServices ? 'Explore services' : 'Explore products';
+  const buttonHref = isServices ? '/booking' : '/shop';
+  return {
+    id: `sec-${uuidv4()}`,
+    type: 'HeroBanner',
+    name: 'Hero Banner',
+    isHidden: false,
+    schemaVersion: 1,
+    enabled: true,
+    settings: {
+      layout: 'split-right',
+      contentWidth: 'wide',
+      verticalAlignment: 'center',
+      minHeight: 520
+    },
+    blocks: [
+      {
+        id: `blk-${uuidv4()}`,
+        type: 'eyebrow',
+        schemaVersion: 1,
+        enabled: true,
+        settings: { text: storeName.slice(0, 60) },
+        designOverrides: {},
+        responsiveOverrides: {}
+      },
+      {
+        id: `blk-${uuidv4()}`,
+        type: 'heading',
+        schemaVersion: 1,
+        enabled: true,
+        settings: { text: 'Make room for what you love.', level: 'h1' },
+        designOverrides: {},
+        responsiveOverrides: {}
+      },
+      {
+        id: `blk-${uuidv4()}`,
+        type: 'rich-text',
+        schemaVersion: 1,
+        enabled: true,
+        settings: { text: 'Explore the collection and discover something that feels right for you.' },
+        designOverrides: {},
+        responsiveOverrides: {}
+      },
+      {
+        id: `blk-${uuidv4()}`,
+        type: 'button',
+        schemaVersion: 1,
+        enabled: true,
+        settings: { label: buttonLabel, href: buttonHref, variant: 'primary', openInNewTab: false },
+        designOverrides: {},
+        responsiveOverrides: {}
+      },
+      {
+        id: `blk-${uuidv4()}`,
+        type: 'image',
+        schemaVersion: 1,
+        enabled: true,
+        settings: { src: '', alt: '', fit: 'cover' },
+        designOverrides: {},
+        responsiveOverrides: {}
+      }
+    ],
+    designOverrides: {},
+    responsiveOverrides: {},
+    props: {}
+  };
+};
+
 export function getSystemPageCatalog(storeName: string, mode: 'COMMERCE' | 'SERVICES' | 'BOTH'): SystemPageDefinition[] {
   const isServices = mode === 'SERVICES';
   const hasCommerce = mode === 'COMMERCE' || mode === 'BOTH';
@@ -38,8 +108,8 @@ export function getSystemPageCatalog(storeName: string, mode: 'COMMERCE' | 'SERV
       templateKey: 'home',
       seoTitle: `${storeName} | Official Online Store`,
       seoDescription: `Welcome to the official online store of ${storeName}. Discover our latest offerings.`,
-      initialSections: [],
-      pageProps: { showHero: false, gridColumns: 4 }
+      initialSections: [createStarterHeroSection(storeName, mode)],
+      pageProps: { showHero: true, gridColumns: 4 }
     },
     {
       name: 'Product Listing',
@@ -262,7 +332,7 @@ export async function provisionDefaultStorefront(options: ProvisionStorefrontOpt
       JSON.stringify(defaultNav),
       JSON.stringify({ showCart: true, showWishlist: true, showAccount: true }),
       storeName,
-      'Handcrafted Quality & Direct Commerce',
+      '',
       platformDomain
     ]
   );
