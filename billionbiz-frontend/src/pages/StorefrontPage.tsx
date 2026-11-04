@@ -83,7 +83,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ slug = 'shoum' }
     <StorefrontRenderer
       store={storeData.store}
       brand={storeData.brand}
-      themeTokens={storeData.theme?.tokens}
+      themeTokens={storeData.theme}
       settings={storeData.settings}
       pages={storeData.pages}
       products={storeData.products}
