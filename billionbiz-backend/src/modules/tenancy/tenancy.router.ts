@@ -4,6 +4,7 @@ import { query, withTransaction } from '../../db/pool.js';
 import { requireAuth, requirePermission } from '../../middleware/auth.js';
 import { resolveTenant } from '../../middleware/tenant.js';
 import { recordAudit } from '../../core/auditAndOutbox.js';
+import { validateSubdomainSlug, PLATFORM_MAIN_DOMAIN } from '../../core/subdomains.js';
 
 export const tenancyRouter = Router();
 
@@ -75,40 +76,72 @@ tenancyRouter.patch(
       return res.status(404).json({ error: 'STORE_NOT_FOUND', message: 'Store not found' });
     }
 
-    await withTransaction(async (client) => {
-      if (businessName && businessName.trim()) {
-        const cleanName = businessName.trim();
-        await client.query(`UPDATE stores SET name = $1, updated_at = NOW() WHERE id = $2`, [cleanName, storeId]);
-        await client.query(`UPDATE organizations SET name = $1, updated_at = NOW() WHERE id = $2`, [cleanName, orgId]);
-        await client.query(
-          `INSERT INTO storefront_settings (store_id, brand_name, updated_at)
-           VALUES ($1, $2, NOW())
-           ON CONFLICT (store_id) DO UPDATE SET brand_name = $2, updated_at = NOW()`,
-          [storeId, cleanName]
-        );
+    let validatedSlug: string | undefined;
+    if (slug !== undefined && slug !== null) {
+      const validation = validateSubdomainSlug(slug);
+      if (!validation.isValid) {
+        return res.status(400).json({
+          error: validation.errorCode,
+          message: validation.error
+        });
       }
+      validatedSlug = validation.normalizedSlug;
 
-      if (currency) {
-        await client.query(`UPDATE stores SET currency = $1, updated_at = NOW() WHERE id = $2`, [currency, storeId]);
+      const conflictCheck = await query(
+        `SELECT id FROM stores WHERE LOWER(slug) = $1 AND id != $2`,
+        [validatedSlug, storeId]
+      );
+      if (conflictCheck.rowCount && conflictCheck.rowCount > 0) {
+        return res.status(409).json({
+          error: 'SUBDOMAIN_TAKEN',
+          message: 'This store subdomain is already taken. Please try another one.'
+        });
       }
-      if (timezone) {
-        await client.query(`UPDATE stores SET timezone = $1, updated_at = NOW() WHERE id = $2`, [timezone, storeId]);
-      }
+    }
 
-      if (slug && slug.trim()) {
-        const cleanSlug = slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
-        await client.query(`UPDATE stores SET slug = $1, updated_at = NOW() WHERE id = $2`, [cleanSlug, storeId]);
-        const platformDomain = `${cleanSlug}.stores.chandraprakash.codes`;
-        await client.query(
-          `UPDATE store_domains SET domain = $1 WHERE store_id = $2 AND is_primary = TRUE`,
-          [platformDomain, storeId]
-        );
-        await client.query(
-          `UPDATE storefront_settings SET primary_domain = $1, updated_at = NOW() WHERE store_id = $2`,
-          [platformDomain, storeId]
-        );
+    try {
+      await withTransaction(async (client) => {
+        if (businessName && businessName.trim()) {
+          const cleanName = businessName.trim();
+          await client.query(`UPDATE stores SET name = $1, updated_at = NOW() WHERE id = $2`, [cleanName, storeId]);
+          await client.query(`UPDATE organizations SET name = $1, updated_at = NOW() WHERE id = $2`, [cleanName, orgId]);
+          await client.query(
+            `INSERT INTO storefront_settings (store_id, brand_name, updated_at)
+             VALUES ($1, $2, NOW())
+             ON CONFLICT (store_id) DO UPDATE SET brand_name = $2, updated_at = NOW()`,
+            [storeId, cleanName]
+          );
+        }
+
+        if (currency) {
+          await client.query(`UPDATE stores SET currency = $1, updated_at = NOW() WHERE id = $2`, [currency, storeId]);
+        }
+        if (timezone) {
+          await client.query(`UPDATE stores SET timezone = $1, updated_at = NOW() WHERE id = $2`, [timezone, storeId]);
+        }
+
+        if (validatedSlug) {
+          await client.query(`UPDATE stores SET slug = $1, updated_at = NOW() WHERE id = $2`, [validatedSlug, storeId]);
+          const primaryDomain = `${validatedSlug}.${PLATFORM_MAIN_DOMAIN}`;
+          await client.query(
+            `UPDATE store_domains SET domain = $1 WHERE store_id = $2 AND is_primary = TRUE`,
+            [primaryDomain, storeId]
+          );
+          await client.query(
+            `UPDATE storefront_settings SET primary_domain = $1, updated_at = NOW() WHERE store_id = $2`,
+            [primaryDomain, storeId]
+          );
+        }
+      });
+    } catch (err: any) {
+      if (err.code === '23505' && (err.constraint === 'uq_stores_slug_lower' || String(err.detail).includes('slug'))) {
+        return res.status(409).json({
+          error: 'SUBDOMAIN_TAKEN',
+          message: 'This store subdomain is already taken. Please try another one.'
+        });
       }
-    });
+      throw err;
+    }
 
     const updated = await query(`SELECT * FROM stores WHERE id = $1`, [storeId]);
     res.json({ message: 'Store business identity updated successfully', store: updated.rows[0] });

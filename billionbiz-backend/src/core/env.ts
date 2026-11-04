@@ -27,6 +27,18 @@ const envSchema = z.object({
   HOST: z.string().default('0.0.0.0'),
   DATABASE_URL: z.string().default('postgres://postgres:postgres@localhost:5432/billionbiz'),
   JWT_SECRET: z.string().default('billionbiz-secret-jwt-key-2026-production-ready'),
+  ROOT_DOMAIN: z.string().default('chandraprakash.codes'),
+  MAIN_WEBSITE_URL: z.string().default('https://www.chandraprakash.codes'),
+  ADMIN_URL: z.string().default('https://admin.chandraprakash.codes'),
+  ACCOUNTS_URL: z.string().default('https://accounts.chandraprakash.codes'),
+  STAFF_URL: z.string().default('https://staff.chandraprakash.codes'),
+  POS_URL: z.string().default('https://pos.chandraprakash.codes'),
+  OPS_URL: z.string().default('https://ops.chandraprakash.codes'),
+  API_URL: z.string().default('https://api.chandraprakash.codes'),
+  STORE_DOMAIN_PATTERN: z.string().default('*.chandraprakash.codes'),
+  ALLOWED_ORIGINS: z.string().default(
+    'https://www.chandraprakash.codes,https://admin.chandraprakash.codes,https://accounts.chandraprakash.codes,https://staff.chandraprakash.codes,https://pos.chandraprakash.codes,https://ops.chandraprakash.codes'
+  ),
   CORS_ALLOWED_ORIGINS: z.string().default(
     'https://chandraprakash.codes,https://www.chandraprakash.codes,https://admin.chandraprakash.codes,https://accounts.chandraprakash.codes,https://staff.chandraprakash.codes,https://pos.chandraprakash.codes,https://ops.chandraprakash.codes,https://api.chandraprakash.codes,http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://localhost:8080'
   ),

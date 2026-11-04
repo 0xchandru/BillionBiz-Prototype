@@ -894,6 +894,29 @@ export async function runMigrations() {
     );
   `);
 
+  // 20. Reserved Subdomains & Global Store Slug Uniqueness
+  await query(`
+    UPDATE stores s
+    SET slug = s.slug || '-' || SUBSTRING(s.id FROM 5 FOR 8)
+    WHERE s.id NOT IN (
+      SELECT DISTINCT ON (LOWER(slug)) id
+      FROM stores
+      ORDER BY LOWER(slug), created_at ASC
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_stores_slug_lower ON stores (LOWER(slug));
+
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'chk_stores_slug_format'
+      ) THEN
+        ALTER TABLE stores ADD CONSTRAINT chk_stores_slug_format 
+        CHECK (slug ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$');
+      END IF;
+    END $$;
+  `);
+
   console.log('[Migration] All migrations completed successfully.');
 }
 

@@ -323,7 +323,7 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
   const storeRes = await query(
     `SELECT id, organization_id, name, slug, currency, timezone, status
      FROM stores
-     WHERE slug = $1 AND status != 'SUSPENDED'`,
+     WHERE LOWER(slug) = LOWER($1) AND status != 'SUSPENDED'`,
     [slug]
   );
 

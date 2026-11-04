@@ -15,31 +15,76 @@ import { extensionsRouter } from './modules/extensions/extensions.router.js';
 import { dashboardRouter } from './modules/dashboard/dashboard.router.js';
 import { notificationsRouter } from './modules/notifications/notifications.router.js';
 import { realtimeRouter, realtimeGateway } from './core/realtimeGateway.js';
+import { isReservedSubdomain, PLATFORM_MAIN_DOMAIN } from './core/subdomains.js';
 import { pool } from './db/pool.js';
 
 export const app = express();
 export const server = http.createServer(app);
 const PORT = env.PORT || 8080;
 
-// Universal CORS & Preflight Middleware (Reflects origin and requested headers dynamically)
+// Explicit allowlist of production origins (Section 8)
+const ALLOWED_EXACT_ORIGINS = new Set([
+  'https://www.chandraprakash.codes',
+  'https://admin.chandraprakash.codes',
+  'https://accounts.chandraprakash.codes',
+  'https://staff.chandraprakash.codes',
+  'https://pos.chandraprakash.codes',
+  'https://ops.chandraprakash.codes',
+  'https://chandraprakash.codes'
+]);
+
+const DEV_ORIGIN_REGEX = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
+export function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return false;
+  const lower = origin.trim().toLowerCase();
+
+  if (ALLOWED_EXACT_ORIGINS.has(lower)) {
+    return true;
+  }
+
+  // Dynamic merchant store subdomains: https://<slug>.chandraprakash.codes
+  const storeSubMatch = lower.match(/^https:\/\/([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)\.chandraprakash\.codes$/);
+  if (storeSubMatch) {
+    const slug = storeSubMatch[1];
+    if (!isReservedSubdomain(slug)) {
+      return true;
+    }
+  }
+
+  // Legacy stores subdomains: https://<slug>.stores.chandraprakash.codes
+  const legacyStoreMatch = lower.match(/^https:\/\/([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)\.stores\.chandraprakash\.codes$/);
+  if (legacyStoreMatch) {
+    return true;
+  }
+
+  // Development origins
+  if (process.env.NODE_ENV !== 'production' || DEV_ORIGIN_REGEX.test(lower)) {
+    return true;
+  }
+
+  return false;
+}
+
+// Strict CORS & Preflight Middleware with Explicit Origin Allowlist
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin) {
+
+  if (origin && isAllowedOrigin(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  }
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  
-  const reqHeaders = req.headers['access-control-request-headers'];
-  if (reqHeaders) {
-    res.setHeader('Access-Control-Allow-Headers', reqHeaders);
-  } else {
-    res.setHeader(
-      'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, x-organization-id, x-store-id, x-store-slug, x-tenant-id, x-portal-domain, x-client-version, idempotency-key, ngrok-skip-browser-warning, x-correlation-id, Accept, Origin, X-Requested-With, Cache-Control, Pragma'
-    );
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    
+    const reqHeaders = req.headers['access-control-request-headers'];
+    if (reqHeaders) {
+      res.setHeader('Access-Control-Allow-Headers', reqHeaders);
+    } else {
+      res.setHeader(
+        'Access-Control-Allow-Headers',
+        'Content-Type, Authorization, x-organization-id, x-store-id, x-store-slug, x-tenant-id, x-portal-domain, x-client-version, idempotency-key, ngrok-skip-browser-warning, x-correlation-id, Accept, Origin, X-Requested-With, Cache-Control, Pragma'
+      );
+    }
   }
 
   if (req.method === 'OPTIONS') {
@@ -50,7 +95,13 @@ app.use((req, res, next) => {
 
 app.use(
   cors({
-    origin: (origin, callback) => callback(null, true),
+    origin: (origin, callback) => {
+      if (!origin || isAllowedOrigin(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`Origin ${origin} not allowed by CORS`));
+      }
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
@@ -79,7 +130,7 @@ app.use(
     ]
   })
 );
-app.options('*', cors());
+app.options('*', (req, res) => res.status(204).end());
 app.use(express.json({ limit: '10mb' }));
 
 // Request logging in dev
@@ -141,6 +192,28 @@ app.use('/api/v1/extensions', extensionsRouter);
 app.use('/api/v1/dashboard', dashboardRouter);
 app.use('/api/v1/notifications', notificationsRouter);
 app.use('/api/v1/realtime', realtimeRouter);
+
+// Authoritative Backend API Identity Endpoint (Section 3.G - api.chandraprakash.codes)
+app.get(['/', '/api/v1'], (req, res) => {
+  res.json({
+    status: 'ONLINE',
+    service: 'BillionBiz Backend API',
+    version: '2.3.0',
+    subdomain: 'api',
+    domain: PLATFORM_MAIN_DOMAIN,
+    documentation: `https://www.${PLATFORM_MAIN_DOMAIN}`,
+    environment: env.NODE_ENV,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Explicit 404 for Unmatched API Endpoints (Returns JSON, never HTML)
+app.use((req, res, next) => {
+  res.status(404).json({
+    error: 'API_ENDPOINT_NOT_FOUND',
+    message: `API route '${req.method} ${req.originalUrl}' does not exist on api.${PLATFORM_MAIN_DOMAIN}.`
+  });
+});
 
 // Global Error Handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

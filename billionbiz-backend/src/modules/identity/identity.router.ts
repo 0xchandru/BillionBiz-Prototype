@@ -7,6 +7,12 @@ import { generateToken, requireAuth } from '../../middleware/auth.js';
 import { recordAudit, enqueueOutbox } from '../../core/auditAndOutbox.js';
 import { sendEmail } from '../../core/notificationWorker.js';
 import { provisionDefaultStorefront } from '../storefront/storefrontProvisioner.js';
+import {
+  validateSubdomainSlug,
+  generateCandidateSlug,
+  isReservedSubdomain,
+  PLATFORM_MAIN_DOMAIN
+} from '../../core/subdomains.js';
 
 export const identityRouter = Router();
 
@@ -126,7 +132,24 @@ identityRouter.post('/register', async (req: Request, res: Response) => {
   const locId = `loc-${uuidv4()}`;
   const staffProfileId = `stf-${uuidv4()}`;
   const passwordHash = await bcrypt.hash(password, 10);
-  const storeSlug = storeName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+  const rawRequestedSlug = (req.body.slug as string)?.trim() || generateCandidateSlug(storeName);
+  const slugValidation = validateSubdomainSlug(rawRequestedSlug);
+  if (!slugValidation.isValid) {
+    return res.status(400).json({
+      error: slugValidation.errorCode,
+      message: slugValidation.error
+    });
+  }
+  const storeSlug = slugValidation.normalizedSlug;
+
+  const existingSlug = await query(`SELECT id FROM stores WHERE LOWER(slug) = $1`, [storeSlug]);
+  if (existingSlug.rowCount && existingSlug.rowCount > 0) {
+    return res.status(409).json({
+      error: 'SUBDOMAIN_TAKEN',
+      message: 'This store subdomain is already taken. Please try another one.'
+    });
+  }
 
   // Generate 32-byte cryptographic email verification token
   const rawVerifyToken = crypto.randomBytes(32).toString('hex');
@@ -141,7 +164,8 @@ identityRouter.post('/register', async (req: Request, res: Response) => {
     { step: 'publish_live', title: 'Publish your store', desc: 'Make your store publicly accessible to customers.' }
   ];
 
-  await withTransaction(async (client) => {
+  try {
+    await withTransaction(async (client) => {
     // 1. Create User
     await client.query(
       `INSERT INTO users (id, email, password_hash, full_name, email_verified)
@@ -226,7 +250,16 @@ identityRouter.post('/register', async (req: Request, res: Response) => {
         [`chk-${uuidv4()}`, storeId, item.step, item.title, item.desc]
       );
     }
-  });
+    });
+  } catch (err: any) {
+    if (err.code === '23505' && (err.constraint === 'uq_stores_slug_lower' || String(err.detail).includes('slug'))) {
+      return res.status(409).json({
+        error: 'SUBDOMAIN_TAKEN',
+        message: 'This store subdomain is already taken. Please try another one.'
+      });
+    }
+    throw err;
+  }
 
   // 10. Enqueue Outbox Email Verification Event
   await enqueueOutbox({
@@ -885,39 +918,38 @@ identityRouter.get('/onboarding-checklist', requireAuth, async (req: Request, re
 
 // GET /api/v1/auth/check-domain (Real-Time Subdomain Availability Checker)
 identityRouter.get('/check-domain', async (req: Request, res: Response) => {
-  const rawSlug = (req.query.slug as string || req.query.domain as string || '').trim().toLowerCase();
-  const cleanSlug = rawSlug.replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  const rawSlug = (req.query.slug as string || req.query.domain as string || '');
+  const validation = validateSubdomainSlug(rawSlug);
 
-  if (!cleanSlug || cleanSlug.length < 2) {
+  if (!validation.isValid) {
     return res.status(400).json({
       available: false,
-      slug: cleanSlug,
-      message: 'Domain must be at least 2 characters long'
-    });
-  }
-
-  // Reserved platform subdomains
-  const reserved = ['admin', 'api', 'app', 'pos', 'ops', 'staff', 'accounts', 'stores', 'store', 'www', 'mail', 'auth', 'billing'];
-  if (reserved.includes(cleanSlug)) {
-    return res.json({
-      available: false,
-      slug: cleanSlug,
-      fullDomain: `${cleanSlug}.stores.chandraprakash.codes`,
-      message: `'${cleanSlug}' is a reserved platform domain`
+      slug: validation.normalizedSlug,
+      error: validation.errorCode,
+      message: validation.error
     });
   }
 
   const existing = await query(
     `SELECT id FROM stores WHERE LOWER(slug) = $1`,
-    [cleanSlug]
+    [validation.normalizedSlug]
   );
 
-  const available = existing.rowCount === 0;
-  res.json({
-    available,
-    slug: cleanSlug,
-    fullDomain: `${cleanSlug}.stores.chandraprakash.codes`,
-    message: available ? 'Domain is available!' : 'This domain is already taken. Please choose another.'
+  if (existing.rowCount && existing.rowCount > 0) {
+    return res.status(409).json({
+      available: false,
+      slug: validation.normalizedSlug,
+      fullDomain: `${validation.normalizedSlug}.${PLATFORM_MAIN_DOMAIN}`,
+      error: 'SUBDOMAIN_TAKEN',
+      message: 'This store subdomain is already taken. Please try another one.'
+    });
+  }
+
+  res.status(200).json({
+    available: true,
+    slug: validation.normalizedSlug,
+    fullDomain: `${validation.normalizedSlug}.${PLATFORM_MAIN_DOMAIN}`,
+    message: 'Domain is available!'
   });
 });
 
@@ -1328,15 +1360,23 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
 
   const displayName = fullName?.trim() || (isEmail ? value.split('@')[0] : `Merchant ${value.slice(-4)}`);
   const passwordHash = password && password.trim().length >= 6 ? await bcrypt.hash(password.trim(), 10) : null;
-  const rawSlug = (slug || storeName).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-  const storeSlug = rawSlug || `store-${uuidv4().substring(0, 6)}`;
 
-  // Check if store domain/slug already exists (when explicitly requested)
-  if (slug) {
-    const slugCheck = await query(`SELECT id FROM stores WHERE LOWER(slug) = $1`, [storeSlug]);
-    if (slugCheck.rowCount && slugCheck.rowCount > 0) {
-      return res.status(409).json({ error: 'DOMAIN_TAKEN', message: `The store domain '${storeSlug}' is already taken. Please choose another domain.` });
-    }
+  const rawRequestedSlug = (slug as string)?.trim() || generateCandidateSlug(storeName);
+  const slugValidation = validateSubdomainSlug(rawRequestedSlug);
+  if (!slugValidation.isValid) {
+    return res.status(400).json({
+      error: slugValidation.errorCode,
+      message: slugValidation.error
+    });
+  }
+  const storeSlug = slugValidation.normalizedSlug;
+
+  const slugCheck = await query(`SELECT id FROM stores WHERE LOWER(slug) = $1`, [storeSlug]);
+  if (slugCheck.rowCount && slugCheck.rowCount > 0) {
+    return res.status(409).json({
+      error: 'SUBDOMAIN_TAKEN',
+      message: 'This store subdomain is already taken. Please try another one.'
+    });
   }
 
   const mode = (capabilityMode || 'COMMERCE').toUpperCase(); // Default to 'COMMERCE' (Ecommerce store)
@@ -1350,7 +1390,8 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
     { step: 'publish_live', title: 'Publish your store', desc: 'Make your store publicly accessible to customers.' }
   ];
 
-  await withTransaction(async (client) => {
+  try {
+    await withTransaction(async (client) => {
     // 1. Create User
     await client.query(
       `INSERT INTO users (id, email, phone, password_hash, full_name, email_verified, phone_verified)
@@ -1385,7 +1426,13 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
       `INSERT INTO store_domains (id, store_id, domain, is_primary, is_verified, ssl_status)
        VALUES ($1, $2, $3, TRUE, TRUE, 'ACTIVE')
        ON CONFLICT (domain) DO UPDATE SET is_primary = TRUE, is_verified = TRUE`,
-      [`dom-${uuidv4()}`, storeId, `${storeSlug}.stores.chandraprakash.codes`]
+      [`dom-${uuidv4()}`, storeId, `${storeSlug}.${PLATFORM_MAIN_DOMAIN}`]
+    );
+    await client.query(
+      `INSERT INTO store_domains (id, store_id, domain, is_primary, is_verified, ssl_status)
+       VALUES ($1, $2, $3, FALSE, TRUE, 'ACTIVE')
+       ON CONFLICT (domain) DO UPDATE SET is_verified = TRUE`,
+      [`dom-${uuidv4()}`, storeId, `${storeSlug}.stores.${PLATFORM_MAIN_DOMAIN}`]
     );
 
     // 4. Capabilities & Storefront Settings
@@ -1440,7 +1487,16 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
         [`chk-${uuidv4()}`, storeId, item.step, item.title, item.desc]
       );
     }
-  });
+    });
+  } catch (err: any) {
+    if (err.code === '23505' && (err.constraint === 'uq_stores_slug_lower' || String(err.detail).includes('slug'))) {
+      return res.status(409).json({
+        error: 'SUBDOMAIN_TAKEN',
+        message: 'This store subdomain is already taken. Please try another one.'
+      });
+    }
+    throw err;
+  }
 
   const token = generateToken({
     userId,
@@ -1460,7 +1516,7 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
       await sendEmail({
         to: value,
         subject: `Welcome to BillionBiz! Your Store "${storeName}" is Ready`,
-        text: `Hello ${displayName},\n\nYour store "${storeName}" has been successfully provisioned on BillionBiz!\n\nYou can access your dashboard anytime at: https://admin.chandraprakash.codes/dashboard\n${!passwordHash ? 'You can log in securely anytime using email verification codes.' : 'You can log in with your password or email verification codes.'}\n\nStorefront Web Address: https://${storeSlug}.stores.chandraprakash.codes\n\nBest regards,\nThe BillionBiz Team`,
+        text: `Hello ${displayName},\n\nYour store "${storeName}" has been successfully provisioned on BillionBiz!\n\nYou can access your dashboard anytime at: https://admin.chandraprakash.codes/dashboard\n${!passwordHash ? 'You can log in securely anytime using email verification codes.' : 'You can log in with your password or email verification codes.'}\n\nStorefront Web Address: https://${storeSlug}.${PLATFORM_MAIN_DOMAIN}\n\nBest regards,\nThe BillionBiz Team`,
         html: `
           <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 32px 16px; color: #0f172a;">
             <div style="max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
@@ -1472,7 +1528,7 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
 
               <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 24px;">
                 <p style="margin: 0 0 8px 0; font-size: 13px; color: #64748b;"><strong>Merchant Portal:</strong> <a href="https://admin.chandraprakash.codes/dashboard" style="color: #2563eb; text-decoration: none;">admin.chandraprakash.codes/dashboard</a></p>
-                <p style="margin: 0 0 8px 0; font-size: 13px; color: #64748b;"><strong>Storefront Address:</strong> <a href="https://${storeSlug}.stores.chandraprakash.codes" style="color: #2563eb; text-decoration: none;">https://${storeSlug}.stores.chandraprakash.codes</a></p>
+                <p style="margin: 0 0 8px 0; font-size: 13px; color: #64748b;"><strong>Storefront Address:</strong> <a href="https://${storeSlug}.${PLATFORM_MAIN_DOMAIN}" style="color: #2563eb; text-decoration: none;">https://${storeSlug}.${PLATFORM_MAIN_DOMAIN}</a></p>
                 <p style="margin: 0; font-size: 13px; color: #64748b;"><strong>Login Method:</strong> ${!passwordHash ? 'Instant Email Verification Code / OTP (No password required)' : 'Password or Email OTP'}</p>
               </div>
 

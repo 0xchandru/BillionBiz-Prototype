@@ -1,31 +1,42 @@
 import { Request, Response, NextFunction } from 'express';
 import { query } from '../db/pool.js';
+import { isReservedSubdomain, PLATFORM_MAIN_DOMAIN } from '../core/subdomains.js';
 
 export async function resolveTenant(req: Request, res: Response, next: NextFunction) {
   let orgId = (req.headers['x-organization-id'] as string) || req.auth?.organizationId;
   let storeId = (req.headers['x-store-id'] as string) || req.auth?.storeId;
   const locationId = req.headers['x-location-id'] as string | undefined;
 
-  // Resolve store from slug header, query parameter, or Host header (*.stores.chandraprakash.codes)
+  // Resolve store from slug header, query parameter, or Host header (*.chandraprakash.codes or *.stores.chandraprakash.codes)
   const host = (req.headers['x-forwarded-host'] as string) || req.headers.host || '';
   const hostClean = host.toLowerCase().split(':')[0];
   const hostParts = hostClean.split('.');
   let hostSlug: string | undefined;
 
-  if (hostParts.length >= 4 && hostParts[1] === 'stores') {
+  if (hostParts.length >= 4 && hostParts[1] === 'stores' && hostClean.endsWith(PLATFORM_MAIN_DOMAIN)) {
     hostSlug = hostParts[0];
-  } else if (hostClean && !hostClean.includes('localhost') && !hostClean.includes('127.0.0.1') && !hostClean.endsWith('chandraprakash.codes')) {
+  } else if (hostParts.length === 3 && hostClean.endsWith(PLATFORM_MAIN_DOMAIN)) {
+    const candidateSub = hostParts[0];
+    if (!isReservedSubdomain(candidateSub)) {
+      hostSlug = candidateSub;
+    }
+  } else if (hostClean && !hostClean.includes('localhost') && !hostClean.includes('127.0.0.1') && !hostClean.endsWith(PLATFORM_MAIN_DOMAIN)) {
     // Custom domain resolution
     const domainRes = await query(
       `SELECT d.store_id, s.organization_id
        FROM store_domains d
        JOIN stores s ON s.id = d.store_id
-       WHERE d.domain = $1 AND d.is_verified = TRUE AND s.status != 'SUSPENDED'`,
+       WHERE LOWER(d.domain) = LOWER($1) AND d.is_verified = TRUE AND s.status != 'SUSPENDED'`,
       [hostClean]
     );
     if (domainRes.rowCount && domainRes.rowCount > 0) {
       storeId = domainRes.rows[0].store_id;
       orgId = domainRes.rows[0].organization_id;
+    } else {
+      return res.status(404).json({
+        error: 'STORE_NOT_FOUND',
+        message: 'Store not found'
+      });
     }
   }
 
@@ -33,17 +44,17 @@ export async function resolveTenant(req: Request, res: Response, next: NextFunct
 
   if (explicitSlug) {
     const slugRes = await query(
-      `SELECT id, organization_id, status FROM stores WHERE slug = $1 AND status != 'SUSPENDED'`,
+      `SELECT id, organization_id, status FROM stores WHERE LOWER(slug) = LOWER($1) AND status != 'SUSPENDED'`,
       [explicitSlug]
     );
     if (slugRes.rowCount && slugRes.rowCount > 0) {
       storeId = slugRes.rows[0].id;
       orgId = slugRes.rows[0].organization_id;
-    } else if (!storeId) {
+    } else {
       // Host or slug was explicitly provided but does not match any active store => return 404, never fallback
       return res.status(404).json({
         error: 'STORE_NOT_FOUND',
-        message: `No active storefront found for '${explicitSlug}'`
+        message: 'Store not found'
       });
     }
   }
