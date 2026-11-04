@@ -81,11 +81,11 @@ export const EditorTopBar: React.FC = () => {
   const isSettings = activePanel === 'settings';
   const isLandingPageEditor =
     !location.pathname.startsWith('/editor/pages') &&
-    (location.pathname.startsWith('/editor/landing-page') || (isPageEditor && selectedPageId === 'landing-page'));
+    (location.pathname.startsWith('/editor/landing-page') || (isPageEditor && activePage?.path === '/'));
 
   // Helper to determine status and baseline per editing scope
   const getPublishScopeState = () => {
-    const landingPage = pages.find((p) => p.id === 'landing-page') || pages[0];
+    const landingPage = pages.find((p) => p.path === '/') || pages.find((p) => p.id === 'landing-page') || pages[0];
 
     if (selectedPageId === 'header-global') {
       const currentSections = (landingPage?.sections || []).filter(isHeaderComponent);
@@ -113,9 +113,11 @@ export const EditorTopBar: React.FC = () => {
       return { isLive, isSavedDraft, hasUnpublished, name: 'Global Footer' };
     }
 
-    if (selectedPageId === 'landing-page') {
+    if (selectedPageId === 'landing-page' || pages.find((page) => page.id === selectedPageId)?.path === '/') {
       const currentSections = (landingPage?.sections || []).filter(isHomepageBodySection);
-      const snapshot = landingPage?.lastPublishedSnapshot || lastPublishedSnapshots?.['landing-page'];
+      const snapshot = landingPage?.lastPublishedSnapshot ||
+        lastPublishedSnapshots?.[landingPage?.id || ''] ||
+        lastPublishedSnapshots?.['landing-page'];
       const hasBaseline = Boolean(snapshot?.publishedAt && Array.isArray(snapshot?.sections));
       const hasUnpublished = Boolean(
         !hasBaseline ||
@@ -768,11 +770,11 @@ export const EditorTopBar: React.FC = () => {
                 <button
                   className={styles.btnPrimary}
                   onClick={handlePublish}
-                  title={selectedPageId === 'landing-page' ? `Review & publish ${activeScopeName} changes to live storefront` : `Publish ${activeScopeName} directly to live storefront`}
+                  title={activePage?.path === '/' ? `Review & publish ${activeScopeName} changes to live storefront` : `Publish ${activeScopeName} directly to live storefront`}
                 >
                   <UploadCloud size={13} />
                   <span>Publish</span>
-                  {selectedPageId === 'landing-page' && <ChevronDown size={11} style={{ opacity: 0.8 }} />}
+                  {activePage?.path === '/' && <ChevronDown size={11} style={{ opacity: 0.8 }} />}
                 </button>
               </>
             ) : null /* In /editor/pages list view: hide save and publish buttons */}
