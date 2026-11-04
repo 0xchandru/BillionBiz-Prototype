@@ -83,9 +83,10 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
   }, [device]);
   const [internalPath, setInternalPath] = useState<string>(currentPath);
   const activePath = previewMode ? (currentPath || internalPath) : (window.location.pathname || currentPath || '/');
+  const brandDisplayName = brand?.brand_name || brand?.name || store?.name || 'Online Store';
 
   const seoDefaults = (settings as any)?.seoDefaults || (settings as any)?.seo_defaults || {};
-  const normalizedActivePath = activePath.replace(/\\/+$/, '') || '/';
+  const normalizedActivePath = activePath.replace(/\/+$/, '') || '/';
   const activePageMetadata = pages.find((page: any) =>
     (page.path || '/') === normalizedActivePath
   ) || pages.find((page: any) => page.slug && `/${page.slug}` === normalizedActivePath);
@@ -96,8 +97,8 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
     const pageName = activePageMetadata?.name || (normalizedActivePath === '/' ? 'Home' : normalizedActivePath.split('/').filter(Boolean).pop() || 'Page');
     const template = String(seoDefaults.titleTemplate || '{page} · {store}');
     const generatedTitle = template
-      .replace(/\\{page\\}/g, pageName)
-      .replace(/\\{store\\}/g, brandDisplayName);
+      .replace(/\{page\}/g, pageName)
+      .replace(/\{store\}/g, brandDisplayName);
     const title = activePageMetadata?.seo_title || activePageMetadata?.seoTitle || generatedTitle;
     const description = activePageMetadata?.seo_description ||
       activePageMetadata?.seoDescription ||
@@ -109,7 +110,6 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
     document.title = title;
 
     const setMeta = (selector: string, attribute: string, value: string) => {
-      if (!value) return;
       let element = document.head.querySelector(selector) as HTMLMetaElement | null;
       if (!element) {
         element = document.createElement('meta');
@@ -126,7 +126,7 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
     setMeta('meta[property="og:description"]', 'content', description);
     setMeta('meta[property="og:image"]', 'content', activePageMetadata?.social_image || activePageMetadata?.socialImage || seoDefaults.socialImage || '');
 
-    const canonicalBase = String(seoDefaults.canonicalBase || '').trim().replace(/\\/+$/, '');
+    const canonicalBase = String(seoDefaults.canonicalBase || '').trim().replace(/\/+$/, '');
     const pageCanonical = activePageMetadata?.canonical_url || activePageMetadata?.canonicalUrl;
     const canonicalUrl = pageCanonical || (canonicalBase ? `${canonicalBase}${normalizedActivePath === '/' ? '' : normalizedActivePath}` : `${window.location.origin}${normalizedActivePath}`);
     let canonicalLink = document.head.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
@@ -149,7 +149,6 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
     }
   };
 
-  const brandDisplayName = brand?.brand_name || brand?.name || store?.name || 'Online Store';
   const homePageForChrome = pages.find((page: any) => page.path === '/' || page.id === 'landing-page');
   const headerSectionForChrome = homePageForChrome?.sections?.find((section: any) => section.type === 'Header');
   const footerSectionForChrome = homePageForChrome?.sections?.find((section: any) =>
