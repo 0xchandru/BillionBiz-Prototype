@@ -1493,8 +1493,28 @@ storefrontRouter.patch(
       }
     }
 
+    if (password !== undefined && (typeof password !== 'string' || password.trim().length < 4 || password.trim().length > 128)) {
+      return res.status(400).json({
+        error: 'INVALID_STOREFRONT_PASSWORD',
+        message: 'Storefront passwords must contain between 4 and 128 characters.'
+      });
+    }
+
+    if (passwordEnabled === true && (!password || typeof password !== 'string' || password.trim().length < 4)) {
+      const existingPassword = await query(
+        `SELECT password_hash FROM storefront_settings WHERE store_id = $1`,
+        [storeId]
+      );
+      if (!existingPassword.rows[0]?.password_hash) {
+        return res.status(400).json({
+          error: 'STOREFRONT_PASSWORD_REQUIRED',
+          message: 'Set a storefront password before enabling password protection.'
+        });
+      }
+    }
+
     let passwordHash: string | null = null;
-    if (password && password.trim().length >= 4) {
+    if (password) {
       passwordHash = await bcrypt.hash(password.trim(), 10);
     }
 
