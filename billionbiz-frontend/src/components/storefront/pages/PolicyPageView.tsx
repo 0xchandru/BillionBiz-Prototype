@@ -1,5 +1,6 @@
 import React from 'react';
 import { ShieldCheck, FileText, RotateCcw } from 'lucide-react';
+import { sanitizeHtml } from '../../../utils/sanitizeHtml';
 
 interface PolicyPageViewProps {
   type: 'privacy' | 'terms' | 'refund';
@@ -54,7 +55,7 @@ export const PolicyPageView: React.FC<PolicyPageViewProps> = ({
       {customContent ? (
         <div
           className="prose dark:prose-invert max-w-none text-sm text-slate-700 dark:text-slate-300 leading-relaxed"
-          dangerouslySetInnerHTML={{ __html: customContent }}
+          dangerouslySetInnerHTML={{ __html: sanitizeHtml(customContent) }}
         />
       ) : (
         <div className="space-y-8 text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
