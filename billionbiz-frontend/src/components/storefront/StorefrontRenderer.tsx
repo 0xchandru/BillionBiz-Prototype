@@ -64,9 +64,9 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
 }) => {
   const [internalPath, setInternalPath] = useState<string>(currentPath);
   const passwordSessionKey = `storefront_password_unlocked:${store?.slug || store?.id || 'store'}`;
-  const [isPasswordUnlocked, setIsPasswordUnlocked] = useState<boolean>(() => {
-    return typeof window !== 'undefined' && sessionStorage.getItem(passwordSessionKey) === 'true';
-  });
+  const [, setPasswordSessionRevision] = useState(0);
+  const isPasswordUnlocked = typeof window !== 'undefined' &&
+    sessionStorage.getItem(passwordSessionKey) === 'true';
 
   const activePath = previewMode ? (currentPath || internalPath) : (window.location.pathname || currentPath || '/');
 
@@ -127,7 +127,7 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
             if (!result.verified) return false;
 
             sessionStorage.setItem(passwordSessionKey, 'true');
-            setIsPasswordUnlocked(true);
+            setPasswordSessionRevision((revision) => revision + 1);
             return true;
           }}
         />
