@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, Suspense, lazy } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { useLandingEditorStore } from '../../store/landingEditorStore';
 import { useSiteStore } from '../../store/siteStore';
 import styles from '../../pages/editor/EditorLayout.module.css';
@@ -50,15 +50,6 @@ export const EditorCanvas: React.FC = () => {
 
    // ─── Determine what to render in the canvas ───
    const renderCanvasContent = () => {
-      const renderFallback = (
-         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '300px', color: '#64748b', fontSize: '13px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-               <div style={{ width: '16px', height: '16px', border: '2px solid #e2e8f0', borderTopColor: 'var(--primary, #2563eb)', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} />
-               <span>Loading view...</span>
-            </div>
-         </div>
-      );
-
       switch (activePanel) {
          case 'pages':
          case 'brand':
