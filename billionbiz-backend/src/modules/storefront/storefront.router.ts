@@ -822,12 +822,6 @@ storefrontRouter.post(
         [releaseId, storeId]
       );
 
-      // The release row must exist before its id is written to the FK pointer.
-      await client.query(
-        `UPDATE storefront_settings SET active_release_id = $1, updated_at = NOW() WHERE store_id = $2`,
-        [rollbackReleaseId, storeId]
-      );
-
       await client.query(
         `UPDATE stores SET status = 'ACTIVE', updated_at = NOW() WHERE id = $1`,
         [storeId]
@@ -1052,6 +1046,12 @@ storefrontRouter.post(
           req.auth?.userId,
           `Rollback to release ${sourceRes.rows[0].release_number}`
         ]
+      );
+
+      // Insert the rollback release before activating its foreign-key pointer.
+      await client.query(
+        `UPDATE storefront_settings SET active_release_id = $1, updated_at = NOW() WHERE store_id = $2`,
+        [rollbackReleaseId, storeId]
       );
 
       await client.query(
