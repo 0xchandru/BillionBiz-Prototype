@@ -12,6 +12,7 @@ export interface RealtimeMessage {
   aggregateId?: string;
   payload?: any;
   timestamp?: string;
+  cursor?: string;
 }
 
 type RealtimeFrame = {
@@ -57,6 +58,7 @@ export function normalizeRealtimeFrame(value: unknown): RealtimeMessage[] {
 }
 
 export function getRealtimeCursor(event: RealtimeMessage): string | null {
+  if (event.cursor) return event.cursor;
   if (!event.timestamp || !event.id) return null;
   const timestamp = new Date(event.timestamp);
   if (!Number.isFinite(timestamp.getTime())) return null;
@@ -126,8 +128,8 @@ export function useRealtime(onEvent?: (event: RealtimeMessage) => void) {
 
             // Large catch-up windows are paged; continue until the server says
             // the backlog is drained. Each next cursor is timestamp + event id.
+            if (frame.nextCursor) cursorRef.current = frame.nextCursor;
             if (frame.hasMore && frame.nextCursor && ws.readyState === WebSocket.OPEN) {
-              cursorRef.current = frame.nextCursor;
               ws.send(JSON.stringify({ action: 'catchup', cursor: frame.nextCursor }));
             }
             return;
