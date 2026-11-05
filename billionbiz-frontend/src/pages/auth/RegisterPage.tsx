@@ -227,7 +227,7 @@ export default function RegisterPage() {
       });
 
       if ((res as any)?.devOtpPreview) {
-        const preview = String((res as any).previewCode);
+        const preview = String((res as any).devOtpPreview);
         setOtpCode(preview);
         setQuotaNotice(`Development preview only: verification code auto-filled. No external email was sent.`);
       } else {
