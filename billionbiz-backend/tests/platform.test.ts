@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import crypto from 'crypto';
 import { app } from '../src/server.js';
 import { pool, query } from '../src/db/pool.js';
 import { runMigrations } from '../src/db/migrate.js';
@@ -40,6 +41,7 @@ async function request(
       path: path.split('?')[0],
       headers,
       body: options.body || {},
+      rawBody: Buffer.from(JSON.stringify(options.body || {})),
       query: {},
       ip: '127.0.0.1',
       get: (h: string) => headers[h.toLowerCase()],
