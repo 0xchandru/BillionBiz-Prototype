@@ -367,11 +367,11 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(staff)
     }),
-  getWorkingHours: () => apiClient<{ workingHours: any[] }>('/appointments/working-hours'),
-  updateWorkingHours: (workingHours: any[]) =>
+  getWorkingHours: () => apiClient<{ shifts: any[]; timezone: string }>('/appointments/working-hours'),
+  updateWorkingHours: (shifts: any[]) =>
     apiClient<any>('/appointments/working-hours', {
       method: 'PUT',
-      body: JSON.stringify({ workingHours })
+      body: JSON.stringify({ shifts })
     }),
   getBookingSettings: () => apiClient<{ settings: any }>('/appointments/settings'),
   updateBookingSettings: (settings: any) =>
@@ -385,6 +385,10 @@ export const api = {
     apiClient<{ holdToken: string; expiresAt: string }>('/appointments/holds', {
       method: 'POST',
       body: JSON.stringify(payload)
+    }),
+  releaseBookingHold: (holdToken: string) =>
+    apiClient<any>(`/appointments/holds/${encodeURIComponent(holdToken)}`, {
+      method: 'DELETE'
     }),
   createBooking: (payload: any) =>
     apiClient<{ message: string; bookingId: string; bookingNumber: string }>('/appointments/bookings', {
@@ -437,7 +441,7 @@ export const api = {
   // Team
   getTeamMembers: () => apiClient<{ members: any[] }>('/team/members'),
   createTeamMember: (member: any) =>
-    apiClient<{ message: string; staffId: string }>('/team/members', {
+    apiClient<{ message: string; staffId?: string; staff?: { id: string; displayName: string } }>('/team/members', {
       method: 'POST',
       body: JSON.stringify(member)
     }),
