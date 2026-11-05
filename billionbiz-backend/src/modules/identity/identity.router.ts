@@ -1256,28 +1256,15 @@ identityRouter.post('/otp/verify', async (req: Request, res: Response) => {
   }
 
   const { isEmail, value } = normalizeIdentifier(identifier);
-  const otpType = (type || 'REGISTER').toUpperCase();
-
-  const otpRes = await query(
-    `SELECT id, identifier, code, expires_at, is_used
-     FROM verification_otps
-     WHERE identifier = $1 AND code = $2 AND type = $3 AND is_used = FALSE
-     ORDER BY created_at DESC
-     LIMIT 1`,
-    [value, code.trim(), otpType]
-  );
-
-  if (otpRes.rowCount === 0) {
-    return res.status(400).json({ error: 'INVALID_OTP', message: 'Invalid or already used verification code' });
+  const otpType = typeof type === 'string' ? type.trim().toUpperCase() : 'REGISTER';
+  if (!['REGISTER', 'LOGIN', 'RECOVERY'].includes(otpType)) {
+    return res.status(400).json({ error: 'INVALID_OTP_TYPE', message: 'Unsupported verification flow' });
   }
 
-  const otpRecord = otpRes.rows[0];
-  if (new Date() > new Date(otpRecord.expires_at)) {
-    return res.status(400).json({ error: 'EXPIRED_OTP', message: 'Verification code has expired. Please request a new code.' });
+  const otpCheck = await consumeOtp(value, otpType, String(code).trim());
+  if (!otpCheck.ok) {
+    return res.status(otpCheck.status).json({ error: otpCheck.error, message: otpCheck.message });
   }
-
-  // Mark as used
-  await query(`UPDATE verification_otps SET is_used = TRUE WHERE id = $1`, [otpRecord.id]);
 
   if (otpType === 'LOGIN') {
     // Fetch user and log in immediately
@@ -1372,20 +1359,16 @@ identityRouter.post('/login-unified', async (req: Request, res: Response) => {
 
   const user = userRes.rows[0];
 
-  // If OTP is provided
+  // If OTP is provided, verify and atomically consume it before issuing a session.
   if (otp) {
-    const otpRes = await query(
-      `SELECT id, expires_at FROM verification_otps
-       WHERE identifier = $1 AND code = $2 AND type = 'LOGIN' AND is_used = FALSE
-       ORDER BY created_at DESC LIMIT 1`,
-      [value, otp.trim()]
-    );
-
-    if (otpRes.rowCount === 0 || new Date() > new Date(otpRes.rows[0].expires_at)) {
-      return res.status(401).json({ error: 'INVALID_OTP', message: 'Invalid or expired OTP code' });
+    const otpCheck = await consumeOtp(value, 'LOGIN', String(otp).trim());
+    if (!otpCheck.ok) {
+      return res.status(otpCheck.status === 400 ? 401 : otpCheck.status).json({
+        error: otpCheck.error,
+        message: otpCheck.message
+      });
     }
 
-    await query(`UPDATE verification_otps SET is_used = TRUE WHERE id = $1`, [otpRes.rows[0].id]);
   } else if (password) {
     if (!user.password_hash) {
       return res.status(400).json({
