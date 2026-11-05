@@ -95,6 +95,16 @@ catalogRouter.post(
       return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'Product name is required' });
     }
 
+    if (categoryId) {
+      const category = await query(
+        `SELECT id FROM categories WHERE id = $1 AND store_id = $2 AND is_active = TRUE`,
+        [categoryId, storeId]
+      );
+      if (category.rowCount === 0) {
+        return res.status(404).json({ error: 'CATEGORY_NOT_FOUND', message: 'The selected category was not found in this store' });
+      }
+    }
+
     const handle = (rawHandle || name)
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
