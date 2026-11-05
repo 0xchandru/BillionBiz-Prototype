@@ -610,4 +610,64 @@ describe('Phase 8: Realtime Operational Dashboard Metrics', () => {
     expect(res.body.metrics.totalRevenueMinor).toBeGreaterThan(0);
     expect(Array.isArray(res.body.recentOrders)).toBe(true);
   });
+  it('SEC-WEBHOOK-001: rejects unsigned Razorpay webhook events', async () => {
+    const body = { event: 'payment.captured', payload: {} };
+    const response = await request('POST', '/api/v1/extensions/razorpay/webhook', {
+      body
+    });
+    expect(response.status).toBe(401);
+    expect(response.body.error).toBe('INVALID_WEBHOOK_SIGNATURE');
+  });
+
+  it('SEC-WEBHOOK-002: verifies signatures and stores webhook events as received exactly once', async () => {
+    const eventId = `evt-test-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+    const event = {
+      event: 'payment.captured',
+      account_id: 'acc_test',
+      contains: ['payment'],
+      payload: { payment: { entity: { id: `pay-${eventId}` } } }
+    };
+    const signature = crypto
+      .createHmac('sha256', 'billionbiz-test-razorpay-webhook-secret')
+      .update(JSON.stringify(event))
+      .digest('hex');
+    const headers = {
+      'x-razorpay-signature': signature,
+      'x-razorpay-event-id': eventId
+    };
+
+    const first = await request('POST', '/api/v1/extensions/razorpay/webhook', { headers, body: event });
+    expect(first.status).toBe(200);
+    expect(first.body.status).toBe('ACKNOWLEDGED');
+
+    const duplicate = await request('POST', '/api/v1/extensions/razorpay/webhook', { headers, body: event });
+    expect(duplicate.status).toBe(200);
+    expect(duplicate.body.status).toBe('ALREADY_RECEIVED');
+
+    const stored = await query(
+      `SELECT is_verified, processing_status, processed_at
+       FROM provider_webhook_inbox
+       WHERE provider = 'RAZORPAY' AND event_id = $1`,
+      [eventId]
+    );
+    expect(stored.rowCount).toBe(1);
+    expect(stored.rows[0].is_verified).toBe(true);
+    expect(stored.rows[0].processing_status).toBe('RECEIVED');
+    expect(stored.rows[0].processed_at).toBeNull();
+  });
+
+  it('SEC-WEBHOOK-003: rejects signed webhook events without a stable event ID', async () => {
+    const event = { event: 'payment.captured', payload: {} };
+    const signature = crypto
+      .createHmac('sha256', 'billionbiz-test-razorpay-webhook-secret')
+      .update(JSON.stringify(event))
+      .digest('hex');
+    const response = await request('POST', '/api/v1/extensions/razorpay/webhook', {
+      headers: { 'x-razorpay-signature': signature },
+      body: event
+    });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('MISSING_WEBHOOK_EVENT_ID');
+  });
+
 });
