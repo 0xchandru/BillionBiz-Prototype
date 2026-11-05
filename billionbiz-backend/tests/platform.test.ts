@@ -175,6 +175,8 @@ describe('Phase 1: Tenancy, Identity & Capabilities', () => {
 
 describe('Phase 3: Catalog & Inventory Ledger', () => {
   let createdProductId: string;
+  let createdCategoryId: string;
+  let createdCategorySlug: string;
 
   beforeAll(async () => {
     // Ensure initial test product fixture exists
@@ -202,10 +204,46 @@ describe('Phase 3: Catalog & Inventory Ledger', () => {
     expect(res.body.products.length).toBeGreaterThan(0);
   });
 
+  it('TC-CAT-002: should persist, update and reject duplicate category slugs', async () => {
+    createdCategorySlug = `test-category-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    const created = await request('POST', '/api/v1/catalog/categories', {
+      body: {
+        name: 'Test Category',
+        slug: createdCategorySlug,
+        description: 'Category CRUD integration fixture'
+      }
+    });
+
+    expect(created.status).toBe(201);
+    expect(created.body.category.id).toBeDefined();
+    createdCategoryId = created.body.category.id;
+
+    const duplicate = await request('POST', '/api/v1/catalog/categories', {
+      body: { name: 'Duplicate Category', slug: createdCategorySlug }
+    });
+    expect(duplicate.status).toBe(409);
+    expect(duplicate.body.error).toBe('CATEGORY_SLUG_EXISTS');
+
+    const updatedSlug = `${createdCategorySlug}-updated`;
+    const updated = await request('PATCH', `/api/v1/catalog/categories/${createdCategoryId}`, {
+      body: {
+        name: 'Updated Test Category',
+        slug: updatedSlug,
+        description: 'Updated category description'
+      }
+    });
+    expect(updated.status).toBe(200);
+    expect(updated.body.category.name).toBe('Updated Test Category');
+    expect(updated.body.category.slug).toBe(updatedSlug);
+
+    createdCategorySlug = updatedSlug;
+  });
+
   it('TC-CAT-003: should create a new product with variant matrix and initial stock', async () => {
     const res = await request('POST', '/api/v1/catalog/products', {
       body: {
         name: 'Ceramic Espresso Cup Set',
+        categoryId: createdCategoryId,
         priceMinor: 89000,
         initialStock: 25,
         variants: [
@@ -227,6 +265,18 @@ describe('Phase 3: Catalog & Inventory Ledger', () => {
     expect(res.status).toBe(201);
     expect(res.body.productId).toBeDefined();
     createdProductId = res.body.productId;
+  });
+
+  it('TC-CAT-004: should prevent archiving categories with linked products', async () => {
+    const res = await request('DELETE', `/api/v1/catalog/categories/${createdCategoryId}`);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('CATEGORY_IN_USE');
+    expect(res.body.productsCount).toBeGreaterThan(0);
+
+    const categories = await request('GET', '/api/v1/catalog/categories');
+    const category = categories.body.categories.find((item: any) => item.id === createdCategoryId);
+    expect(category).toBeDefined();
+    expect(category.products_count).toBeGreaterThan(0);
   });
 
   it('TC-INV-001: should record immutable stock movements on adjustment', async () => {
