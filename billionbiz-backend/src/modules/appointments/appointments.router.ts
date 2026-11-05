@@ -56,6 +56,27 @@ const minutesFromTime = (value: unknown): number | null => {
   return hour * 60 + minute;
 };
 
+const localDateAndMinutes = (instant: Date, timeZone: string) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(instant);
+  const values: Record<string, string> = {};
+  for (const part of parts) if (part.type !== 'literal') values[part.type] = part.value;
+  const date = `${values.year}-${values.month}-${values.day}`;
+  const parsed = parseDateOnly(date);
+  return {
+    date,
+    dayOfWeek: parsed?.dayOfWeek ?? -1,
+    minuteOfDay: Number(values.hour) * 60 + Number(values.minute)
+  };
+};
+
 const isValidTimeZone = (value: unknown): value is string => {
   if (typeof value !== 'string' || value.length > 64) return false;
   try {
