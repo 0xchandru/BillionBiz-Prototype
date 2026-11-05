@@ -311,9 +311,10 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ status, notes })
     }),
-  fulfillOrder: (id: string, fulfillment: { carrier?: string; trackingNumber?: string }) =>
-    apiClient(`/orders/${id}/fulfill`, {
+  fulfillOrder: (id: string, fulfillment: { carrier: string; trackingNumber: string }, idempotencyKey?: string) =>
+    apiClient<{ message: string; fulfillmentId: string; orderId: string; trackingNumber: string; carrier: string; status: string }>(`/orders/${id}/fulfill`, {
       method: 'POST',
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
       body: JSON.stringify(fulfillment)
     }),
 
@@ -330,19 +331,22 @@ export const api = {
 
   // Returns & Refunds
   getReturns: () => apiClient<{ returns: any[] }>('/orders/returns'),
-  createReturn: (data: any) =>
-    apiClient<{ message: string; returnId: string }>('/orders/returns', {
+  createReturn: (data: { orderId: string; reason: string; refundAmountMinor: number; items?: unknown[]; restockDisposition?: 'RESTOCK' | 'NOT_RESTOCK' }, idempotencyKey?: string) =>
+    apiClient<{ message: string; returnId: string; returnNumber: string }>('/orders/returns', {
       method: 'POST',
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
       body: JSON.stringify(data)
     }),
-  approveReturn: (id: string, notes?: string) =>
+  approveReturn: (id: string, idempotencyKey?: string) =>
     apiClient<any>(`/orders/returns/${id}/approve`, {
       method: 'POST',
-      body: JSON.stringify({ notes })
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+      body: JSON.stringify({})
     }),
-  rejectReturn: (id: string, reason: string) =>
+  rejectReturn: (id: string, reason: string, idempotencyKey?: string) =>
     apiClient<any>(`/orders/returns/${id}/reject`, {
       method: 'POST',
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
       body: JSON.stringify({ reason })
     }),
   refundReturn: (id: string, payload: any = {}) =>
