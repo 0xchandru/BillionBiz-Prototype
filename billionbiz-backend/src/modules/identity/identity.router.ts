@@ -1741,7 +1741,7 @@ identityRouter.post('/login-unified', async (req: Request, res: Response) => {
 
 // POST /api/v1/auth/register-streamlined (Streamlined Onboarding with Storefront Type & Optional Password)
 identityRouter.post('/register-streamlined', async (req: Request, res: Response) => {
-  const { identifier, storeName, capabilityMode, password, fullName, slug } = req.body;
+  const { identifier, storeName, capabilityMode, password, fullName, slug, plan: requestedPlan } = req.body;
   if (!identifier || !storeName) {
     return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'Identifier and store name are required' });
   }
@@ -1783,6 +1783,9 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
     });
   }
   const storeSlug = slugValidation.normalizedSlug;
+  const planCode = typeof requestedPlan === 'string' && /^[a-z0-9_-]{2,64}$/i.test(requestedPlan)
+    ? requestedPlan.toUpperCase()
+    : 'FREE_TRIAL';
 
   const slugCheck = await query(`SELECT id FROM stores WHERE LOWER(slug) = $1`, [storeSlug]);
   if (slugCheck.rowCount && slugCheck.rowCount > 0) {
@@ -1877,7 +1880,8 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
       storeName,
       storeSlug,
       mode: mode as any,
-      userId
+      userId,
+      planCode
     });
 
     // 9. Onboarding Checklist
@@ -1916,15 +1920,15 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
     try {
       await sendEmail({
         to: value,
-        subject: `Welcome to BillionBiz! Your Store "${storeName}" is Ready`,
-        text: `Hello ${displayName},\n\nYour store "${storeName}" has been successfully provisioned on BillionBiz!\n\nYou can access your dashboard anytime at: ${env.ADMIN_URL}/dashboard\n${!passwordHash ? 'You can log in securely anytime using email verification codes.' : 'You can log in with your password or email verification codes.'}\n\nStorefront Web Address: https://${storeSlug}.${PLATFORM_MAIN_DOMAIN}\n\nBest regards,\nThe BillionBiz Team`,
+        subject: `Welcome to BillionBiz! Your Store Is Provisioning`,
+        text: `Hello ${displayName},\n\nYour store "${storeName}" has been created on the ${planCode} plan. Store project and domain provisioning are starting now. The public address will become available after DNS and HTTPS checks pass.\n\nMerchant dashboard: ${env.ADMIN_URL}/dashboard\nStorefront address: https://${storeSlug}.${PLATFORM_MAIN_DOMAIN}\n\n${!passwordHash ? 'Sign in using an email or phone verification code.' : 'Sign in with your password or a verification code.'}\n\nBest regards,\nThe BillionBiz Team`,
         html: `
           <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 32px 16px; color: #0f172a;">
             <div style="max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-              <span style="display: inline-block; padding: 4px 12px; background: #dcfce7; color: #15803d; border-radius: 99px; font-size: 11px; font-weight: 700; text-transform: uppercase;">Store Activated</span>
+              <span style="display: inline-block; padding: 4px 12px; background: #fef3c7; color: #92400e; border-radius: 99px; font-size: 11px; font-weight: 700; text-transform: uppercase;">Store Provisioning</span>
               <h1 style="font-size: 24px; font-weight: 800; color: #0f172a; margin: 12px 0 6px 0;">Welcome, ${displayName}!</h1>
               <p style="font-size: 15px; color: #64748b; line-height: 1.5; margin: 0 0 20px 0;">
-                Your online store <strong>${storeName}</strong> has been successfully configured.
+                Your online store <strong>${storeName}</strong> was created on the <strong>${planCode}</strong> plan. Project and domain provisioning are starting. The public URL will become available after DNS and HTTPS checks pass.
               </p>
 
               <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 24px;">
@@ -1951,7 +1955,7 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
 
   res.status(201).json({
     success: true,
-    message: 'Store created successfully',
+    message: 'Store created; project and domain provisioning are in progress.',
     token,
     user: {
       id: userId,
@@ -1962,7 +1966,7 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
       phoneVerified: !isEmail
     },
     organization: { id: orgId, name: `${storeName} Organization` },
-    store: { id: storeId, name: storeName, slug: storeSlug, status: 'DRAFT' },
+    store: { id: storeId, name: storeName, slug: storeSlug, planCode, provisioningStatus: 'PENDING', domainStatus: 'PENDING', status: 'ACTIVE' },
     portalDestination
   });
 });

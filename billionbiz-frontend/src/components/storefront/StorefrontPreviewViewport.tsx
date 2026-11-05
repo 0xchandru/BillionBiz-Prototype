@@ -17,6 +17,7 @@ interface StorefrontPreviewViewportProps {
 }
 
 const getPixelWidth = (device: StorefrontPreviewDevice, customWidth: number): number | null => {
+  if (device === 'desktop') return 1280;
   if (device === 'mobile') return 375;
   if (device === 'tablet') return 768;
   if (device === 'custom') return Math.max(300, Math.min(1440, Math.round(customWidth)));

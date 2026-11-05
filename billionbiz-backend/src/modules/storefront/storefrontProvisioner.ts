@@ -10,6 +10,7 @@ export interface ProvisionStorefrontOptions {
   storeSlug: string;
   mode: 'COMMERCE' | 'SERVICES' | 'BOTH';
   userId?: string;
+  planCode?: string;
 }
 
 export interface SystemPageDefinition {
@@ -325,7 +326,7 @@ export async function provisionDefaultStorefront(options: ProvisionStorefrontOpt
   releaseId: string;
   pageCount: number;
 }> {
-  const { client, storeId, storeName, storeSlug, mode, userId } = options;
+  const { client, storeId, storeName, storeSlug, mode, userId, planCode = 'FREE_TRIAL' } = options;
   const slugValidation = validateSubdomainSlug(storeSlug);
   if (!slugValidation.isValid || slugValidation.normalizedSlug !== storeSlug) {
     const error = new Error(slugValidation.error || 'Store handle is invalid or reserved.');
@@ -338,7 +339,7 @@ export async function provisionDefaultStorefront(options: ProvisionStorefrontOpt
   // hostname to another tenant during a retry or lazy-provisioning request.
   await client.query(
     `INSERT INTO store_domains (id, store_id, domain, is_primary, is_verified, ssl_status)
-     VALUES ($1, $2, $3, TRUE, TRUE, 'ACTIVE')
+     VALUES ($1, $2, $3, TRUE, FALSE, 'PENDING')
      ON CONFLICT DO NOTHING`,
     [`dom-${uuidv4()}`, storeId, platformDomain]
   );
@@ -351,6 +352,27 @@ export async function provisionDefaultStorefront(options: ProvisionStorefrontOpt
     const error = new Error('The requested platform subdomain is already mapped to another store.');
     (error as Error & { code?: string }).code = 'STORE_DOMAIN_CONFLICT';
     throw error;
+  }
+
+  await client.query(
+    `INSERT INTO storefront_provisioning (store_id, plan_code, status, project_name, domain_status, https_status)
+     VALUES ($1, $2, 'PENDING', $3, 'PENDING', 'PENDING')
+     ON CONFLICT (store_id) DO UPDATE SET plan_code = EXCLUDED.plan_code, updated_at = NOW()`,
+    [storeId, planCode, `billionbiz-store-${storeSlug}`]
+  );
+
+  const defaultUnits = [
+    ['pcs', 'Pieces'], ['nos', 'Numbers'], ['g', 'Grams'], ['kg', 'Kilograms'], ['mg', 'Milligrams'],
+    ['ml', 'Millilitres'], ['l', 'Litres'], ['pair', 'Pairs'], ['set', 'Sets'], ['dozen', 'Dozen'],
+    ['mm', 'Millimetres'], ['cm', 'Centimetres'], ['m', 'Metres'], ['ft', 'Feet'], ['sq_ft', 'Square feet'],
+    ['box', 'Boxes'], ['pack', 'Packs'], ['roll', 'Rolls'], ['bottle', 'Bottles'], ['hour', 'Hours']
+  ];
+  for (const [code, label] of defaultUnits) {
+    await client.query(
+      `INSERT INTO selling_units (id, store_id, code, label, is_default, is_enabled)
+       VALUES ($1, $2, $3, $4, $5, TRUE) ON CONFLICT (store_id, code) DO NOTHING`,
+      [`unit-${storeId}-${code}`, storeId, code, label, code === 'pcs']
+    );
   }
 
   // 2. Default Store Navigation

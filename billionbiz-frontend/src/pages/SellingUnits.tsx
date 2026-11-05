@@ -1,0 +1,15 @@
+import { useEffect, useState } from 'react';
+import { Plus, Ruler } from 'lucide-react';
+import { api } from '../api/services';
+
+export default function SellingUnitsPage() {
+  const [units, setUnits] = useState<any[]>([]);
+  const [code, setCode] = useState('');
+  const [label, setLabel] = useState('');
+  const [error, setError] = useState('');
+  const load = async () => { const result = await api.getSellingUnits(); setUnits(result.units || []); };
+  useEffect(() => { void load().catch((reason) => setError(reason.message || 'Could not load selling units.')); }, []);
+  const toggle = async (unit: any, enabled: boolean) => { try { await api.saveSellingUnit({ code: unit.code, label: unit.label, enabled, isCustom: unit.is_custom }); await load(); } catch (reason: any) { setError(reason.message || 'Could not change this selling unit.'); } };
+  const add = async (event: React.FormEvent) => { event.preventDefault(); try { await api.saveSellingUnit({ code: code.toLowerCase().replace(/\s+/g, '_'), label, enabled: true, isCustom: true }); setCode(''); setLabel(''); setError(''); await load(); } catch (reason: any) { setError(reason.message || 'Could not add selling unit.'); } };
+  return <main style={{ padding: 28, maxWidth: 1200, margin: 'auto' }}><header style={{ display: 'flex', gap: 12, alignItems: 'center' }}><Ruler size={24} color="#0d9488" /><div><h1 style={{ margin: 0 }}>Selling Units</h1><p style={{ color: '#64748b' }}>Manage the units your store can use for product pricing and quantity.</p></div></header>{error && <div role="alert" style={{ background: '#fff7ed', color: '#9a3412', padding: 12, margin: '16px 0' }}>{error}</div>}<form onSubmit={add} style={{ display: 'flex', gap: 10, padding: 16, border: '1px solid #e2e8f0', borderRadius: 10, margin: '18px 0', background: '#fff' }}><input required value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Custom unit name" style={{ flex: 1, padding: 9 }} /><input required value={code} onChange={(event) => setCode(event.target.value)} placeholder="Code (e.g. crate)" style={{ flex: 1, padding: 9 }} /><button type="submit" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Plus size={15} />Add unit</button></form><div style={{ border: '1px solid #e2e8f0', borderRadius: 10, background: '#fff', overflow: 'hidden' }}>{units.map((unit) => <div key={unit.id} style={{ padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9' }}><div><strong>{unit.label}</strong> <span style={{ color: '#64748b' }}>({unit.code})</span>{unit.is_custom && <small style={{ marginLeft: 8, color: '#0d9488' }}>Custom</small>}{unit.in_use && <small style={{ marginLeft: 8, color: '#b45309' }}>In use</small>}</div><label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={unit.is_enabled} disabled={unit.in_use || unit.is_default} onChange={(event) => void toggle(unit, event.target.checked)} />Enabled</label></div>)}</div></main>;
+}

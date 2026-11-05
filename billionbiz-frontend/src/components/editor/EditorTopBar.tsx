@@ -24,6 +24,7 @@ import { PageSelectorDropdown } from './topbar/PageSelectorDropdown';
 import { MoreOptionsMenu } from './topbar/MoreOptionsMenu';
 import { useEditorContextStore } from '../../store/editorContextStore';
 import { useAuthStore } from '../../store/authStore';
+import { api } from '../../api/services';
 import { getStoreUrl } from '../../utils/subdomain';
 import { AuditButton } from './topbar/AuditButton';
 import { VersionCompareModal } from './engine/VersionCompareModal';
@@ -245,11 +246,12 @@ export const EditorTopBar: React.FC = () => {
     setIsSaving(true);
     try {
       await persistCurrentScope();
+      await api.publishStore(`Auto-published from editor Save · ${activeScopeName}`);
       if (getCurrentDraftFingerprint() === savedFingerprint) {
         markSaved();
-        showToast(`${activeScopeName} saved successfully`);
+        showToast(`${activeScopeName} saved and published to your live store`);
       } else {
-        showToast('Saved the current snapshot. Newer edits are still pending.');
+        showToast('Published the saved snapshot. Newer edits are still pending.');
       }
     } catch (error: any) {
       showToast(`Save failed: ${error?.message || 'Please retry.'}`);

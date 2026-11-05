@@ -263,7 +263,7 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
       cleanPath === '/login' ||
       cleanPath === '/customer'
     ) {
-      return <AccountPageView onNavigate={handleNavigate} brandName={brandDisplayName} />;
+      return <AccountPageView onNavigate={handleNavigate} brandName={brandDisplayName} storeSlug={store?.slug} />;
     }
 
     // 8. Services / Booking

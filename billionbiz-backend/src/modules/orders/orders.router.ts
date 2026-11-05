@@ -5,7 +5,7 @@ import { requireAuth, requirePermission } from '../../middleware/auth.js';
 import { resolveTenant } from '../../middleware/tenant.js';
 import { requireCapability } from '../../middleware/capabilities.js';
 import { handleIdempotency } from '../../middleware/idempotency.js';
-import { recordAudit, publishOutboxEvent, broadcastCommittedOutboxEvent } from '../../core/auditAndOutbox.js';
+import { enqueueOutbox, recordAudit, publishOutboxEvent, broadcastCommittedOutboxEvent } from '../../core/auditAndOutbox.js';
 import type { RealtimeEvent } from '../../core/realtimeGateway.js';
 
 export const ordersRouter = Router();
@@ -589,7 +589,9 @@ ordersRouter.get(
     const customerId = req.params.id as string;
 
     const custRes = await query(
-      `SELECT * FROM customers WHERE id = $1 AND store_id = $2`,
+      `SELECT id, store_id, email, phone, first_name, last_name, default_address,
+              total_orders, total_spent_minor, created_at, updated_at
+       FROM customers WHERE id = $1 AND store_id = $2`,
       [customerId, storeId]
     );
 
@@ -714,10 +716,42 @@ ordersRouter.post(
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'OPEN')`,
       [ticketId, storeId, ticketNumber, customerId || null, customerName, customerEmail || null, subject, description || '', priority]
     );
+    if (String(description || '').trim()) await query(
+      `INSERT INTO customer_ticket_messages (id, ticket_id, author_type, author_id, body) VALUES ($1,$2,'STAFF',$3,$4)`,
+      [`msg-${uuidv4()}`, ticketId, req.auth?.userId || null, String(description).trim()]
+    );
 
     res.status(201).json({ message: 'Ticket created successfully', id: ticketId, ticketNumber });
   }
 );
+
+ordersRouter.get('/tickets/:id/messages', requireAuth, resolveTenant, async (req, res) => {
+  const ticket = await query(`SELECT id, customer_email, ticket_number, subject FROM customer_tickets WHERE id = $1 AND store_id = $2`, [req.params.id, req.tenant!.storeId]);
+  if (!ticket.rowCount) return res.status(404).json({ error: 'TICKET_NOT_FOUND', message: 'Ticket not found.' });
+  const result = await query(`SELECT id, author_type, author_id, body, created_at FROM customer_ticket_messages WHERE ticket_id = $1 ORDER BY created_at`, [req.params.id]);
+  res.json({ messages: result.rows });
+});
+
+ordersRouter.post('/tickets/:id/messages', requireAuth, resolveTenant, async (req, res) => {
+  const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+  if (!body) return res.status(400).json({ error: 'EMPTY_MESSAGE', message: 'Write a reply before sending.' });
+  const ticket = await query(`SELECT id, customer_email, ticket_number, subject FROM customer_tickets WHERE id = $1 AND store_id = $2`, [req.params.id, req.tenant!.storeId]);
+  if (!ticket.rowCount) return res.status(404).json({ error: 'TICKET_NOT_FOUND', message: 'Ticket not found.' });
+  const id = `msg-${uuidv4()}`;
+  await withTransaction(async (client) => {
+    await client.query(`INSERT INTO customer_ticket_messages (id, ticket_id, author_type, author_id, body) VALUES ($1,$2,'STAFF',$3,$4)`, [id, req.params.id, req.auth?.userId || null, body]);
+    await client.query(`UPDATE customer_tickets SET updated_at = NOW(), status = CASE WHEN status = 'RESOLVED' THEN 'IN_PROGRESS' ELSE status END WHERE id = $1`, [req.params.id]);
+  });
+  if (ticket.rows[0].customer_email) await enqueueOutbox({
+    organizationId: req.tenant!.organizationId,
+    storeId: req.tenant!.storeId,
+    eventType: 'SUPPORT_TICKET_REPLY',
+    aggregateType: 'CUSTOMER_TICKET',
+    aggregateId: String(req.params.id),
+    payload: { email: ticket.rows[0].customer_email, ticketNumber: ticket.rows[0].ticket_number, subject: ticket.rows[0].subject, message: body }
+  });
+  res.status(201).json({ id, message: 'Reply sent.' });
+});
 
 // PATCH /api/v1/orders/tickets/:id (Update Status/Priority)
 ordersRouter.patch(

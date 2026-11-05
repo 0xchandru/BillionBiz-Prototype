@@ -10,12 +10,115 @@ import { handleIdempotency } from '../../middleware/idempotency.js';
 import { recordAudit, enqueueOutbox } from '../../core/auditAndOutbox.js';
 import { realtimeGateway } from '../../core/realtimeGateway.js';
 import { provisionDefaultStorefront } from './storefrontProvisioner.js';
+import { getStoreProjectPort, syncStoreProjects } from './storeProjectManager.js';
 import { PLATFORM_MAIN_DOMAIN } from '../../core/subdomains.js';
 import { env } from '../../core/env.js';
 import { resolveCname } from 'node:dns/promises';
 import { validatePageSectionDocument } from './sectionDocumentValidation.js';
 
 export const storefrontRouter = Router();
+
+async function resolvePublicStore(slug: string) {
+  const found = await query(`SELECT id, name, slug FROM stores WHERE LOWER(slug) = LOWER($1) AND status = 'ACTIVE'`, [slug]);
+  return found.rows[0] as { id: string; name: string; slug: string } | undefined;
+}
+
+function getStoreCustomer(req: Request): { storeId: string; customerId: string; email: string } | null {
+  const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (!token) return null;
+  try {
+    const payload = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;
+    if (payload.type !== 'store-customer' || !payload.storeId || !payload.customerId || !payload.email) return null;
+    return { storeId: String(payload.storeId), customerId: String(payload.customerId), email: String(payload.email) };
+  } catch { return null; }
+}
+
+storefrontRouter.post('/by-slug/:slug/customers/register', async (req: Request, res: Response) => {
+  const store = await resolvePublicStore(String(req.params.slug));
+  const { email: rawEmail, password, firstName = '', lastName = '' } = req.body || {};
+  const email = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : '';
+  if (!store) return res.status(404).json({ error: 'STORE_NOT_FOUND', message: 'This store is unavailable.' });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || typeof password !== 'string' || password.length < 8) return res.status(400).json({ error: 'INVALID_CUSTOMER_ACCOUNT', message: 'Use a valid email address and a password with at least 8 characters.' });
+  const existing = await query(`SELECT id FROM customers WHERE store_id = $1 AND LOWER(email) = $2`, [store.id, email]);
+  if (existing.rowCount) return res.status(409).json({ error: 'CUSTOMER_EXISTS', message: 'An account with this email already exists. Sign in instead.' });
+  const customerId = `cust-${uuidv4()}`;
+  const passwordHash = await bcrypt.hash(password, 12);
+  await query(`INSERT INTO customers (id, store_id, email, first_name, last_name, password_hash) VALUES ($1,$2,$3,$4,$5,$6)`, [customerId, store.id, email, String(firstName).trim(), String(lastName).trim(), passwordHash]);
+  const token = jwt.sign({ type: 'store-customer', storeId: store.id, customerId, email }, JWT_SECRET, { expiresIn: '14d' });
+  res.status(201).json({ token, customer: { id: customerId, email, firstName, lastName } });
+});
+
+storefrontRouter.post('/by-slug/:slug/customers/login', async (req: Request, res: Response) => {
+  const store = await resolvePublicStore(String(req.params.slug));
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const password = req.body?.password;
+  if (!store) return res.status(404).json({ error: 'STORE_NOT_FOUND', message: 'This store is unavailable.' });
+  const customer = await query(`SELECT id, email, first_name, last_name, password_hash FROM customers WHERE store_id = $1 AND LOWER(email) = $2`, [store.id, email]);
+  if (!customer.rowCount || !customer.rows[0].password_hash || typeof password !== 'string' || !(await bcrypt.compare(password, customer.rows[0].password_hash))) return res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Email or password is incorrect.' });
+  const profile = customer.rows[0];
+  const token = jwt.sign({ type: 'store-customer', storeId: store.id, customerId: profile.id, email: profile.email }, JWT_SECRET, { expiresIn: '14d' });
+  res.json({ token, customer: { id: profile.id, email: profile.email, firstName: profile.first_name, lastName: profile.last_name } });
+});
+
+storefrontRouter.get('/customer/orders', async (req: Request, res: Response) => {
+  const customer = getStoreCustomer(req);
+  if (!customer) return res.status(401).json({ error: 'CUSTOMER_AUTH_REQUIRED', message: 'Sign in to view your orders.' });
+  const result = await query(`SELECT id, order_number, status, payment_status, fulfillment_status, currency, total_minor, created_at FROM orders WHERE store_id = $1 AND customer_id = $2 ORDER BY created_at DESC LIMIT 100`, [customer.storeId, customer.customerId]);
+  res.json({ orders: result.rows });
+});
+
+storefrontRouter.get('/customer/profile', async (req: Request, res: Response) => {
+  const customer = getStoreCustomer(req);
+  if (!customer) return res.status(401).json({ error: 'CUSTOMER_AUTH_REQUIRED', message: 'Sign in to view your profile.' });
+  const result = await query(`SELECT id, email, first_name, last_name, phone, default_address FROM customers WHERE id = $1 AND store_id = $2`, [customer.customerId, customer.storeId]);
+  if (!result.rowCount) return res.status(404).json({ error: 'CUSTOMER_NOT_FOUND', message: 'Customer account was not found.' });
+  res.json({ customer: result.rows[0] });
+});
+
+storefrontRouter.post('/customer/tickets', async (req: Request, res: Response) => {
+  const customer = getStoreCustomer(req);
+  if (!customer) return res.status(401).json({ error: 'CUSTOMER_AUTH_REQUIRED', message: 'Sign in to contact store support.' });
+  const { subject, message } = req.body || {};
+  if (typeof subject !== 'string' || !subject.trim() || typeof message !== 'string' || !message.trim()) return res.status(400).json({ error: 'INVALID_TICKET', message: 'Subject and message are required.' });
+  const profile = await query(`SELECT first_name, last_name FROM customers WHERE id = $1 AND store_id = $2`, [customer.customerId, customer.storeId]);
+  const ticketId = `tkt-${uuidv4()}`;
+  const ticketNumber = `TKT-${Date.now().toString().slice(-6)}`;
+  await withTransaction(async (client) => {
+    await client.query(`INSERT INTO customer_tickets (id, store_id, ticket_number, customer_id, customer_name, customer_email, subject, description) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [ticketId, customer.storeId, ticketNumber, customer.customerId, `${profile.rows[0]?.first_name || ''} ${profile.rows[0]?.last_name || ''}`.trim() || customer.email, customer.email, subject.trim(), message.trim()]);
+    await client.query(`INSERT INTO customer_ticket_messages (id, ticket_id, author_type, author_id, body) VALUES ($1,$2,'CUSTOMER',$3,$4)`, [`msg-${uuidv4()}`, ticketId, customer.customerId, message.trim()]);
+  });
+  res.status(201).json({ id: ticketId, ticketNumber });
+});
+
+storefrontRouter.get('/customer/tickets', async (req: Request, res: Response) => {
+  const customer = getStoreCustomer(req);
+  if (!customer) return res.status(401).json({ error: 'CUSTOMER_AUTH_REQUIRED', message: 'Sign in to view support tickets.' });
+  const result = await query(`SELECT id, ticket_number, subject, status, priority, created_at, updated_at FROM customer_tickets WHERE store_id = $1 AND customer_id = $2 ORDER BY created_at DESC`, [customer.storeId, customer.customerId]);
+  res.json({ tickets: result.rows });
+});
+
+storefrontRouter.get('/customer/tickets/:id/messages', async (req: Request, res: Response) => {
+  const customer = getStoreCustomer(req);
+  if (!customer) return res.status(401).json({ error: 'CUSTOMER_AUTH_REQUIRED', message: 'Sign in to view support tickets.' });
+  const access = await query(`SELECT id FROM customer_tickets WHERE id = $1 AND store_id = $2 AND customer_id = $3`, [req.params.id, customer.storeId, customer.customerId]);
+  if (!access.rowCount) return res.status(404).json({ error: 'TICKET_NOT_FOUND', message: 'Support ticket was not found.' });
+  const messages = await query(`SELECT id, author_type, body, created_at FROM customer_ticket_messages WHERE ticket_id = $1 ORDER BY created_at`, [req.params.id]);
+  res.json({ messages: messages.rows });
+});
+
+storefrontRouter.post('/customer/tickets/:id/messages', async (req: Request, res: Response) => {
+  const customer = getStoreCustomer(req);
+  if (!customer) return res.status(401).json({ error: 'CUSTOMER_AUTH_REQUIRED', message: 'Sign in to reply to support.' });
+  const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
+  if (!body) return res.status(400).json({ error: 'EMPTY_MESSAGE', message: 'Write a reply before sending.' });
+  const access = await query(`SELECT id FROM customer_tickets WHERE id = $1 AND store_id = $2 AND customer_id = $3`, [req.params.id, customer.storeId, customer.customerId]);
+  if (!access.rowCount) return res.status(404).json({ error: 'TICKET_NOT_FOUND', message: 'Support ticket was not found.' });
+  await withTransaction(async (client) => {
+    await client.query(`INSERT INTO customer_ticket_messages (id, ticket_id, author_type, author_id, body) VALUES ($1,$2,'CUSTOMER',$3,$4)`, [`msg-${uuidv4()}`, req.params.id, customer.customerId, body]);
+    await client.query(`UPDATE customer_tickets SET status = CASE WHEN status IN ('RESOLVED','CLOSED') THEN 'OPEN' ELSE status END, updated_at = NOW() WHERE id = $1`, [req.params.id]);
+  });
+  res.status(201).json({ message: 'Reply sent.' });
+});
 
 // GET /api/v1/storefront/theme
 storefrontRouter.get('/theme', requireAuth, resolveTenant, async (req: Request, res: Response) => {
@@ -1585,6 +1688,64 @@ storefrontRouter.get('/domains', requireAuth, resolveTenant, async (req: Request
     [storeId]
   );
   res.json({ domains: domainsRes.rows });
+});
+
+// Readiness is based on live DNS and HTTPS probes. A database mapping alone
+// must never be presented as a public storefront.
+storefrontRouter.get('/provisioning/status', requireAuth, resolveTenant, async (req: Request, res: Response) => {
+  const storeId = req.tenant!.storeId;
+  const row = await query(
+    `SELECT sp.*, sd.id AS domain_id, sd.domain, sd.is_verified, sd.ssl_status
+     FROM stores s LEFT JOIN storefront_provisioning sp ON sp.store_id = s.id
+     LEFT JOIN store_domains sd ON sd.store_id = s.id AND sd.is_primary = TRUE
+     WHERE s.id = $1 LIMIT 1`, [storeId]);
+  if (!row.rowCount) return res.status(404).json({ error: 'STORE_NOT_FOUND', message: 'Store was not found.' });
+  const state = row.rows[0];
+  let dnsStatus = 'PENDING';
+  let httpsStatus = 'PENDING';
+  let dnsError = '';
+  const expected = env.STORE_DOMAIN_CNAME_TARGET?.trim().toLowerCase().replace(/\.$/, '');
+  if (state.domain && expected) {
+    try {
+      const cnames = await resolveCname(state.domain);
+      dnsStatus = cnames.some((value) => value.trim().toLowerCase().replace(/\.$/, '') === expected) ? 'ACTIVE' : 'MISMATCH';
+      if (dnsStatus !== 'ACTIVE') dnsError = 'DNS does not point at the configured storefront runtime.';
+    } catch {
+      dnsStatus = 'PENDING';
+      dnsError = 'Store domain does not resolve to a CNAME yet.';
+    }
+    if (dnsStatus === 'ACTIVE') {
+      try {
+        const response = await fetch(`https://${state.domain}/`, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(5000) });
+        httpsStatus = response.status >= 200 && response.status < 400 ? 'ACTIVE' : 'PENDING';
+      } catch { httpsStatus = 'PENDING'; }
+    }
+  } else if (!expected) dnsError = 'Set STORE_DOMAIN_CNAME_TARGET to enable DNS verification.';
+  if (state.domain_id && dnsStatus === 'ACTIVE' && httpsStatus === 'ACTIVE') {
+    await query(`UPDATE store_domains SET is_verified = TRUE, ssl_status = 'ACTIVE' WHERE id = $1`, [state.domain_id]);
+    await query(`UPDATE storefront_provisioning SET status = 'LIVE', domain_status = 'ACTIVE', https_status = 'ACTIVE', last_error = NULL, updated_at = NOW() WHERE store_id = $1`, [storeId]);
+  } else {
+    await query(`UPDATE storefront_provisioning SET domain_status = $2, https_status = $3, last_error = $4, updated_at = NOW() WHERE store_id = $1`, [storeId, dnsStatus, httpsStatus, dnsError || (dnsStatus === 'ACTIVE' ? 'HTTPS certificate or storefront response is not ready.' : null)]);
+  }
+  res.json({
+    status: dnsStatus === 'ACTIVE' && httpsStatus === 'ACTIVE' ? 'LIVE' : (state.status || 'PENDING'),
+    projectName: state.project_name || `billionbiz-store-${req.tenant!.storeId}`,
+    localProjectPath: state.local_project_path || null,
+    deploymentUrl: state.deployment_url || null,
+    previewUrl: `http://${state.domain?.split('.')[0] || 'store'}.localhost:${getStoreProjectPort(state.domain?.split('.')[0] || 'store')}`,
+    domain: state.domain,
+    domainStatus: dnsStatus,
+    httpsStatus,
+    error: dnsError || (httpsStatus !== 'ACTIVE' ? 'Public HTTPS is not ready yet.' : null),
+    attempts: Number(state.attempts || 0)
+  });
+});
+
+storefrontRouter.post('/provisioning/retry', requireAuth, resolveTenant, requirePermission('store.editor.edit'), async (req: Request, res: Response) => {
+  const storeId = req.tenant!.storeId;
+  await query(`UPDATE storefront_provisioning SET status = 'PENDING', last_error = NULL, updated_at = NOW() WHERE store_id = $1`, [storeId]);
+  await syncStoreProjects();
+  res.json({ message: 'Store project provisioning was retried. Check readiness again shortly.' });
 });
 
 // POST /api/v1/storefront/domains

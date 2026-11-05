@@ -135,7 +135,22 @@ export async function syncStoreProjects(): Promise<void> {
       try {
         const projectDir = await writeProjectFiles(store, port);
         startProject(store, projectDir, port);
+        await pool.query(
+          `INSERT INTO storefront_provisioning (store_id, plan_code, status, project_name, local_project_path, attempts)
+           VALUES ($1, 'FREE_TRIAL', 'LOCAL_READY', $2, $3, 1)
+           ON CONFLICT (store_id) DO UPDATE SET status = CASE WHEN storefront_provisioning.status = 'LIVE' THEN 'LIVE' ELSE 'LOCAL_READY' END,
+             project_name = EXCLUDED.project_name, local_project_path = EXCLUDED.local_project_path,
+             attempts = storefront_provisioning.attempts + 1, last_error = NULL, updated_at = NOW()`,
+          [store.id, safeProjectName(store.slug), projectDir]
+        );
       } catch (error) {
+        await pool.query(
+          `INSERT INTO storefront_provisioning (store_id, plan_code, status, project_name, last_error, attempts)
+           VALUES ($1, 'FREE_TRIAL', 'FAILED', $2, $3, 1)
+           ON CONFLICT (store_id) DO UPDATE SET status = 'FAILED', last_error = EXCLUDED.last_error,
+             attempts = storefront_provisioning.attempts + 1, updated_at = NOW()`,
+          [store.id, safeProjectName(store.slug), error instanceof Error ? error.message : String(error)]
+        ).catch(() => undefined);
         console.error(`[Store Project ${store.slug}] Provisioning failed:`, error);
       }
     }

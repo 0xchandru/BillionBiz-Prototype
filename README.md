@@ -69,6 +69,14 @@ In development, the backend discovers active stores and provisions an independen
 
 Projects use the shared storefront renderer and backend APIs, while each project has its own generated configuration, port, and server process. Configure `BILLIONBIZ_FRONTEND_ROOT` or `BILLIONBIZ_STORE_PROJECTS_DIR` when the frontend or generated projects live outside their default paths. This local server manager runs only when `NODE_ENV=development`.
 
+#### Public Storefront Readiness
+
+New stores remain pending until the public subdomain resolves to the configured `STORE_DOMAIN_CNAME_TARGET` and the HTTPS storefront responds successfully. The Online Store overview links to the locally managed project while public DNS is pending; a local preview does not mean the public hostname is live. Configure Cloudflare wildcard DNS for the deployed shared storefront runtime and set the matching backend CNAME target before expecting public readiness.
+
+#### Store Media Uploads
+
+Product, category, and bundle image uploads use short-lived Cloudflare R2 presigned PUT URLs. Configure `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, and `R2_PUBLIC_BASE_URL` in the backend environment. Set bucket CORS to allow `PUT` from the admin origin with the `Content-Type` request header. Keep the R2 secret in the backend environment only.
+
 ---
 
 ## Verification & Testing

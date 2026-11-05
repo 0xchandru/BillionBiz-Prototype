@@ -375,6 +375,16 @@ export class NotificationOutboxService {
         break;
       }
 
+      case 'SUPPORT_TICKET_REPLY': {
+        if (payload.email) await sendEmail({
+          to: payload.email,
+          subject: `New reply to ${payload.ticketNumber || 'your support ticket'}`,
+          text: `The ${payload.storeName || 'store'} team replied to "${payload.subject || 'your support request'}":\n\n${payload.message}\n\nReply in your customer account to continue the conversation.`,
+          html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#0f172a"><h2>Support ticket reply</h2><p>The store team replied to <strong>${String(payload.subject || 'your support request').replace(/[<>&]/g, '')}</strong> (${String(payload.ticketNumber || '').replace(/[<>&]/g, '')}).</p><blockquote style="padding:12px 16px;border-left:3px solid #0d9488;background:#f8fafc;white-space:pre-wrap">${String(payload.message || '').replace(/[<>&]/g, (char: string) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[char] || char))}</blockquote><p>Sign in to your customer account to continue the conversation.</p></div>`
+        }, `idemp-support-${event.id}`);
+        break;
+      }
+
       case 'BOOKING_CONFIRMED': {
         const emailContent = renderEmailTemplate('BOOKING_CONFIRMATION', payload);
         if (payload.email) {

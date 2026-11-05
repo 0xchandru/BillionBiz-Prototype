@@ -71,6 +71,8 @@ export const navSections: NavSection[] = [
     items: [
       { id: 'products', label: 'Products', path: '/products' },
       { id: 'categories', label: 'Categories', path: '/products/categories' },
+      { id: 'bundles', label: 'Bundles', path: '/products/bundles' },
+      { id: 'selling-units', label: 'Selling Units', path: '/products/units' },
       { id: 'inventory', label: 'Inventory', path: '/products/inventory' },
       { id: 'price-lists', label: 'Price Lists', path: '/products/pricelists' },
     ]

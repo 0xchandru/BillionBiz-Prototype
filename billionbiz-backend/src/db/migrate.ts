@@ -1030,6 +1030,107 @@ export async function runMigrations() {
       ON booking_holds (store_id, resource_id, expires_at);
   `);
 
+  // 24. Ecommerce catalog, customer support, and storefront deployment state.
+  // Existing catalog rows are preserved and backfilled into the new relations.
+  await query(`
+    ALTER TABLE categories ADD COLUMN IF NOT EXISTS image_url TEXT;
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);
+    ALTER TABLE products ADD COLUMN IF NOT EXISTS selling_unit VARCHAR(64) NOT NULL DEFAULT 'pcs';
+    ALTER TABLE products ADD COLUMN IF NOT EXISTS minimum_quantity NUMERIC(12,3) NOT NULL DEFAULT 1;
+    ALTER TABLE products ADD COLUMN IF NOT EXISTS quantity_step NUMERIC(12,3) NOT NULL DEFAULT 1;
+    ALTER TABLE products ADD COLUMN IF NOT EXISTS publish_at TIMESTAMPTZ;
+    ALTER TABLE products ADD COLUMN IF NOT EXISTS shipping_profile JSONB NOT NULL DEFAULT '{}'::jsonb;
+    ALTER TABLE products ADD COLUMN IF NOT EXISTS specifications JSONB NOT NULL DEFAULT '{}'::jsonb;
+    ALTER TABLE products ADD COLUMN IF NOT EXISTS key_features JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE products ADD COLUMN IF NOT EXISTS size_chart JSONB NOT NULL DEFAULT '{}'::jsonb;
+    ALTER TABLE products ADD COLUMN IF NOT EXISTS volume_prices JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+    CREATE TABLE IF NOT EXISTS product_categories (
+      product_id VARCHAR(64) NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      category_id VARCHAR(64) NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+      position INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (product_id, category_id)
+    );
+    INSERT INTO product_categories (product_id, category_id, position)
+      SELECT id, category_id, 0 FROM products WHERE category_id IS NOT NULL
+      ON CONFLICT DO NOTHING;
+    CREATE INDEX IF NOT EXISTS idx_product_categories_category ON product_categories(category_id);
+
+    CREATE TABLE IF NOT EXISTS selling_units (
+      id VARCHAR(64) PRIMARY KEY,
+      store_id VARCHAR(64) NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+      code VARCHAR(64) NOT NULL,
+      label VARCHAR(128) NOT NULL,
+      is_default BOOLEAN NOT NULL DEFAULT FALSE,
+      is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      is_custom BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (store_id, code)
+    );
+    INSERT INTO selling_units (id, store_id, code, label, is_default, is_enabled)
+      SELECT 'unit-' || s.id || '-' || u.code, s.id, u.code, u.label, u.code = 'pcs', TRUE
+      FROM stores s CROSS JOIN (VALUES
+        ('pcs','Pieces'),('nos','Numbers'),('g','Grams'),('kg','Kilograms'),('mg','Milligrams'),
+        ('ml','Millilitres'),('l','Litres'),('pair','Pairs'),('set','Sets'),('dozen','Dozen'),
+        ('mm','Millimetres'),('cm','Centimetres'),('m','Metres'),('ft','Feet'),('sq_ft','Square feet'),
+        ('box','Boxes'),('pack','Packs'),('roll','Rolls'),('bottle','Bottles'),('hour','Hours')
+      ) AS u(code,label)
+      ON CONFLICT (store_id, code) DO NOTHING;
+
+    CREATE TABLE IF NOT EXISTS product_bundles (
+      id VARCHAR(64) PRIMARY KEY,
+      store_id VARCHAR(64) NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+      name VARCHAR(255) NOT NULL,
+      slug VARCHAR(255) NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      pricing_type VARCHAR(24) NOT NULL DEFAULT 'PERCENT_OFF',
+      pricing_value NUMERIC(12,2) NOT NULL DEFAULT 0,
+      media JSONB NOT NULL DEFAULT '[]'::jsonb,
+      status VARCHAR(24) NOT NULL DEFAULT 'DRAFT',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (store_id, slug)
+    );
+    CREATE TABLE IF NOT EXISTS product_bundle_items (
+      bundle_id VARCHAR(64) NOT NULL REFERENCES product_bundles(id) ON DELETE CASCADE,
+      variant_id VARCHAR(64) NOT NULL REFERENCES product_variants(id) ON DELETE RESTRICT,
+      quantity NUMERIC(12,3) NOT NULL DEFAULT 1 CHECK (quantity > 0),
+      position INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (bundle_id, variant_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS customer_ticket_messages (
+      id VARCHAR(64) PRIMARY KEY,
+      ticket_id VARCHAR(64) NOT NULL REFERENCES customer_tickets(id) ON DELETE CASCADE,
+      author_type VARCHAR(16) NOT NULL CHECK (author_type IN ('CUSTOMER','STAFF')),
+      author_id VARCHAR(64),
+      body TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_ticket_messages_thread ON customer_ticket_messages(ticket_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS storefront_provisioning (
+      store_id VARCHAR(64) PRIMARY KEY REFERENCES stores(id) ON DELETE CASCADE,
+      plan_code VARCHAR(64) NOT NULL DEFAULT 'FREE_TRIAL',
+      status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+      project_name VARCHAR(255),
+      local_project_path TEXT,
+      deployment_url TEXT,
+      deployment_id VARCHAR(255),
+      domain_status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+      https_status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+      last_error TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    ALTER TABLE inventory_balances ALTER COLUMN on_hand TYPE NUMERIC(12,3) USING on_hand::numeric;
+    ALTER TABLE inventory_balances ALTER COLUMN reserved TYPE NUMERIC(12,3) USING reserved::numeric;
+    ALTER TABLE inventory_balances ALTER COLUMN available TYPE NUMERIC(12,3) USING available::numeric;
+    ALTER TABLE inventory_movements ALTER COLUMN quantity TYPE NUMERIC(12,3) USING quantity::numeric;
+    ALTER TABLE order_lines ALTER COLUMN quantity TYPE NUMERIC(12,3) USING quantity::numeric;
+  `);
+
   console.log('[Migration] All migrations completed successfully.');
 }
 

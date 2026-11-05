@@ -41,6 +41,8 @@ const ResourcesPage = lazy(() => import('../../pages/Resources'));
 
 const ProductsPage = lazy(() => import('../../pages/Products'));
 const CategoriesPage = lazy(() => import('../../pages/Categories'));
+const BundlesPage = lazy(() => import('../../pages/Bundles'));
+const SellingUnitsPage = lazy(() => import('../../pages/SellingUnits'));
 const InventoryPage = lazy(() => import('../../pages/Inventory'));
 const PriceListsPage = lazy(() => import('../../pages/PriceLists'));
 
@@ -132,6 +134,8 @@ export const renderAdminRoutes = (): React.ReactElement => (
       {/* Products & Catalogue Section - Dedicated Individual Pages */}
       <Route path="/products" element={<ProductsPage />} />
       <Route path="/products/categories" element={<CategoriesPage />} />
+      <Route path="/products/bundles" element={<BundlesPage />} />
+      <Route path="/products/units" element={<SellingUnitsPage />} />
       <Route path="/products/inventory" element={<InventoryPage />} />
       <Route path="/products/pricelists" element={<PriceListsPage />} />
 

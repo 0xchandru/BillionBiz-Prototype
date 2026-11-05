@@ -1526,6 +1526,13 @@
   z-index: 1060 !important;
 }
 
+.canvasArea[data-selection-enabled='false'] .activeSectionBorder,
+.canvasArea[data-selection-enabled='false'] .activeSectionBorder::after {
+  outline: none !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
 /* Sticky Header positioning & z-index isolation across all pages */
 .previewSectionStickyHeader {
   position: sticky !important;
@@ -3285,7 +3292,7 @@
   border-bottom: 1px solid var(--border-color, #e2e8f0);
   background-color: #f8fafc;
   padding: 0;
-  min-height: 52px;
+  min-height: 68px;
   flex-shrink: 0;
 }
 
@@ -3295,9 +3302,9 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-  padding: 8px 3px 6px;
-  font-size: 11px;
+  gap: 5px;
+  padding: 9px 4px 7px;
+  font-size: 12px;
   font-weight: 600;
   font-family: inherit;
   color: #64748b;
@@ -3334,7 +3341,7 @@
 }
 
 .horizontalTabLabel {
-  font-size: 10.5px;
+  font-size: 12px;
   letter-spacing: -0.1px;
   white-space: nowrap;
   line-height: 1.1;

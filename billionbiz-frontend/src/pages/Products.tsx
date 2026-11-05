@@ -23,6 +23,9 @@ export const ProductsPage: React.FC = () => {
   const [selectedVariant, setSelectedVariant] = useState<any | null>(null);
   const [adjustQty, setAdjustQty] = useState(5);
   const [submitting, setSubmitting] = useState(false);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [units, setUnits] = useState<any[]>([]);
+  const [editingProduct, setEditingProduct] = useState<any | null>(null);
 
   // New product form
   const [name, setName] = useState('');
@@ -30,6 +33,16 @@ export const ProductsPage: React.FC = () => {
   const [sku, setSku] = useState('');
   const [initialStock, setInitialStock] = useState('20');
   const [description, setDescription] = useState('');
+  const [categoryIds, setCategoryIds] = useState<string[]>([]);
+  const [sellingUnit, setSellingUnit] = useState('pcs');
+  const [minimumQuantity, setMinimumQuantity] = useState('1');
+  const [quantityStep, setQuantityStep] = useState('1');
+  const [comparePrice, setComparePrice] = useState('');
+  const [imageUrls, setImageUrls] = useState('');
+  const [variantOptionName, setVariantOptionName] = useState('Size');
+  const [variantOptionValues, setVariantOptionValues] = useState('');
+  const [visibility, setVisibility] = useState('ACTIVE');
+  const [uploadingImages, setUploadingImages] = useState(false);
 
   const loadData = async () => {
     try {
@@ -43,6 +56,32 @@ export const ProductsPage: React.FC = () => {
     }
   };
 
+  const loadProductOptions = async () => {
+    const [categoryResult, unitResult] = await Promise.allSettled([api.getCategories(), api.getSellingUnits()]);
+    if (categoryResult.status === 'fulfilled') setCategories(categoryResult.value.categories || []);
+    if (unitResult.status === 'fulfilled') setUnits((unitResult.value.units || []).filter((unit: any) => unit.is_enabled));
+  };
+
+  const resetProductForm = () => {
+    setEditingProduct(null); setName(''); setDescription(''); setSku(''); setCategoryIds([]);
+    setSellingUnit('pcs'); setMinimumQuantity('1'); setQuantityStep('1'); setComparePrice('');
+    setImageUrls(''); setVariantOptionName('Size'); setVariantOptionValues(''); setVisibility('ACTIVE');
+  };
+
+  const openProduct = (product?: any) => {
+    void loadProductOptions();
+    resetProductForm();
+    if (product) {
+      setEditingProduct(product); setName(product.name || ''); setDescription(product.description || '');
+      setSku(product.variants?.[0]?.sku || ''); setCategoryIds((product.categories || []).map((category: any) => category.id));
+      setSellingUnit(product.selling_unit || 'pcs'); setMinimumQuantity(String(product.minimum_quantity || 1));
+      setQuantityStep(String(product.quantity_step || 1)); setComparePrice(product.variants?.[0]?.compare_at_minor ? String(product.variants[0].compare_at_minor / 100) : '');
+      setImageUrls((product.media || []).map((media: any) => typeof media === 'string' ? media : media.url).filter(Boolean).join('\n'));
+      setVisibility(product.status || 'ACTIVE');
+    }
+    setIsCreateOpen(true);
+  };
+
   useEffect(() => {
     loadData();
   }, [search]);
@@ -52,29 +91,43 @@ export const ProductsPage: React.FC = () => {
     try {
       setSubmitting(true);
       const priceMinor = Math.round(parseFloat(price) * 100);
-      await api.createProduct({
+      const optionValues = [...new Set(variantOptionValues.split(',').map((value) => value.trim()).filter(Boolean))];
+      const createdVariants = optionValues.length ? optionValues.map((value, index) => ({
+        sku: optionValues.length === 1 ? (sku || undefined) : `${(sku || name).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12)}-${value.toUpperCase().replace(/[^A-Z0-9]/g, '')}`,
+        optionValues: { [variantOptionName || 'Option']: value }, priceMinor, compareAtMinor: comparePrice ? Math.round(Number(comparePrice) * 100) : null,
+        initialStock: Number(initialStock) || 0, barcode: undefined, position: index
+      })) : [{ sku: sku || undefined, priceMinor, compareAtMinor: comparePrice ? Math.round(Number(comparePrice) * 100) : null, initialStock: Number(initialStock) || 0 }];
+      const payload = {
         name,
         description,
         priceMinor,
-        initialStock: parseInt(initialStock, 10) || 0,
-        variants: [
-          {
-            sku: sku || `${name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8)}-DEF`,
-            priceMinor,
-            initialStock: parseInt(initialStock, 10) || 0
-          }
-        ]
-      });
+        initialStock: Number(initialStock) || 0, categoryIds, sellingUnit, minimumQuantity: Number(minimumQuantity), quantityStep: Number(quantityStep),
+        media: imageUrls.split('\n').map((url) => url.trim()).filter(Boolean).map((url) => ({ url })), status: visibility,
+        options: optionValues.length ? [{ name: variantOptionName || 'Option', values: optionValues }] : [],
+        variants: createdVariants
+      };
+      if (editingProduct) await api.updateProduct(editingProduct.id, { ...payload, variants: createdVariants.map((variant, index) => ({ ...variant, id: editingProduct.variants?.[index]?.id })) });
+      else await api.createProduct(payload);
       setIsCreateOpen(false);
-      setName('');
-      setDescription('');
-      setSku('');
+      resetProductForm();
       await loadData();
     } catch (err: any) {
       alert(err.message || 'Failed to create product');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleDeactivate = async (product: any) => {
+    if (!window.confirm(`Deactivate ${product.name}? It will no longer be available in the storefront.`)) return;
+    try { await api.deactivateProduct(product.id); await loadData(); } catch (err: any) { alert(err.message || 'Could not deactivate product.'); }
+  };
+  const reorderImage = (index: number, offset: number) => {
+    const items = imageUrls.split('\n').map((value) => value.trim()).filter(Boolean);
+    const nextIndex = index + offset;
+    if (nextIndex < 0 || nextIndex >= items.length) return;
+    [items[index], items[nextIndex]] = [items[nextIndex], items[index]];
+    setImageUrls(items.join('\n'));
   };
 
   const handleAdjustInventory = async (e: React.FormEvent) => {
@@ -137,7 +190,7 @@ export const ProductsPage: React.FC = () => {
             <span>Refresh</span>
           </button>
           <button
-            onClick={() => setIsCreateOpen(true)}
+            onClick={() => openProduct()}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -203,6 +256,7 @@ export const ProductsPage: React.FC = () => {
                 <th style={{ padding: '14px 18px' }}>Variants</th>
                 <th style={{ padding: '14px 18px' }}>Price</th>
                 <th style={{ padding: '14px 18px' }}>Stock Available</th>
+                <th style={{ padding: '14px 18px' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -251,6 +305,10 @@ export const ProductsPage: React.FC = () => {
                         {p.status}
                       </span>
                     </td>
+                    <td style={{ padding: '14px 18px', whiteSpace: 'nowrap' }}>
+                      <button type="button" onClick={() => openProduct(p)} style={{ border: '1px solid #cbd5e1', borderRadius: 6, padding: '5px 9px', background: '#fff', cursor: 'pointer', marginRight: 6 }}>Edit</button>
+                      <button type="button" onClick={() => void handleDeactivate(p)} style={{ border: '1px solid #fecaca', borderRadius: 6, padding: '5px 9px', background: '#fff7f7', color: '#b91c1c', cursor: 'pointer' }}>Deactivate</button>
+                    </td>
                     <td style={{ padding: '14px 18px', color: '#64748b' }}>
                       {p.variants?.length || 1} variant(s)
                     </td>
@@ -282,7 +340,7 @@ export const ProductsPage: React.FC = () => {
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.6)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
           <form onSubmit={handleCreate} style={{ background: '#ffffff', borderRadius: '16px', width: '100%', maxWidth: '520px', padding: '28px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>Create New Product</h3>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>{editingProduct ? 'Edit Product' : 'Create New Product'}</h3>
               <X size={20} style={{ cursor: 'pointer', color: '#64748b' }} onClick={() => setIsCreateOpen(false)} />
             </div>
 
@@ -298,11 +356,36 @@ export const ProductsPage: React.FC = () => {
               />
             </div>
 
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6, color: '#334155' }}>Categories (first selected is primary)</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, maxHeight: 96, overflow: 'auto', padding: 8, border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                {categories.map((category) => <label key={category.id} style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13 }}><input type="checkbox" checked={categoryIds.includes(category.id)} onChange={(event) => setCategoryIds((current) => event.target.checked ? [...current, category.id] : current.filter((id) => id !== category.id))} />{category.name}</label>)}
+                {!categories.length && <span style={{ color: '#64748b', fontSize: 12 }}>No categories yet. Create one in Catalogue → Categories.</span>}
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+              <label style={{ fontSize: 13, fontWeight: 600, color: '#334155' }}>Selling unit
+                <select value={sellingUnit} onChange={(event) => setSellingUnit(event.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 9, borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                  {(units.length ? units : [{ code: 'pcs', label: 'Pieces' }]).map((unit) => <option key={unit.code} value={unit.code}>{unit.label} ({unit.code})</option>)}
+                </select>
+              </label>
+              <label style={{ fontSize: 13, fontWeight: 600, color: '#334155' }}>Visibility
+                <select value={visibility} onChange={(event) => setVisibility(event.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 9, borderRadius: 8, border: '1px solid #e2e8f0' }}><option value="ACTIVE">Publish now</option><option value="DRAFT">Hidden / draft</option><option value="ARCHIVED">Archived</option></select>
+              </label>
+            </div>
+
+            {sellingUnit !== 'pcs' && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+              <label style={{ fontSize: 13, fontWeight: 600, color: '#334155' }}>Minimum quantity ({sellingUnit})<input type="number" min="0.001" step="0.001" value={minimumQuantity} onChange={(event) => setMinimumQuantity(event.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 9, border: '1px solid #e2e8f0', borderRadius: 8 }} /></label>
+              <label style={{ fontSize: 13, fontWeight: 600, color: '#334155' }}>Quantity step ({sellingUnit})<input type="number" min="0.001" step="0.001" value={quantityStep} onChange={(event) => setQuantityStep(event.target.value)} style={{ display: 'block', width: '100%', marginTop: 6, padding: 9, border: '1px solid #e2e8f0', borderRadius: 8 }} /></label>
+            </div>}
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Price (INR) *</label>
                 <input
                   type="number"
+                  min="0"
                   step="0.01"
                   required
                   value={price}
@@ -311,9 +394,15 @@ export const ProductsPage: React.FC = () => {
                 />
               </div>
               <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Compare price (INR)</label>
+                <input type="number" min="0" step="0.01" value={comparePrice} onChange={(event) => setComparePrice(event.target.value)} style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }} />
+              </div>
+              <div>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>Initial Stock Units</label>
                 <input
                   type="number"
+                  min="0"
+                  step={sellingUnit === 'pcs' ? '1' : '0.001'}
                   value={initialStock}
                   onChange={(e) => setInitialStock(e.target.value)}
                   style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }}
@@ -330,6 +419,19 @@ export const ProductsPage: React.FC = () => {
                 onChange={(e) => setSku(e.target.value)}
                 style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }}
               />
+            </div>
+
+            {!editingProduct && <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 10, marginBottom: 14 }}>
+              <label style={{ fontSize: 12, fontWeight: 600 }}>Variant option<input value={variantOptionName} onChange={(e) => setVariantOptionName(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 5, padding: 8, border: '1px solid #e2e8f0', borderRadius: 7 }} /></label>
+              <label style={{ fontSize: 12, fontWeight: 600 }}>Variant values (comma separated)<input value={variantOptionValues} onChange={(e) => setVariantOptionValues(e.target.value)} placeholder="Small, Medium, Large" style={{ display: 'block', width: '100%', marginTop: 5, padding: 8, border: '1px solid #e2e8f0', borderRadius: 7 }} /></label>
+            </div>}
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6 }}>Product image URLs (one per line; first image is primary)</label>
+              <textarea rows={2} value={imageUrls} onChange={(event) => setImageUrls(event.target.value)} placeholder="https://cdn.example.com/product.jpg" style={{ width: '100%', padding: 9, border: '1px solid #e2e8f0', borderRadius: 8, resize: 'vertical' }} />
+              <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" multiple disabled={uploadingImages} onChange={async (event) => { const files = Array.from(event.target.files || []); if (!files.length) return; setUploadingImages(true); try { const uploaded = await Promise.all(files.map((file) => api.uploadStoreMedia(file))); const current = imageUrls.split('\n').map((value) => value.trim()).filter(Boolean); setImageUrls([...current, ...uploaded.map((image) => image.url)].join('\n')); } catch (error: any) { alert(error.message || 'Image upload failed.'); } finally { setUploadingImages(false); event.target.value = ''; } }} style={{ marginTop: 8 }} />
+              {uploadingImages && <span style={{ display: 'block', fontSize: 12, color: '#64748b' }}>Uploading product images…</span>}
+              <div style={{ display: 'grid', gap: 5, marginTop: 8 }}>{imageUrls.split('\n').map((url) => url.trim()).filter(Boolean).map((url, index, list) => <div key={`${url}-${index}`} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{index === 0 ? 'Primary · ' : ''}{url}</span><button type="button" disabled={index === 0} onClick={() => reorderImage(index, -1)} aria-label="Move image up">↑</button><button type="button" disabled={index === list.length - 1} onClick={() => reorderImage(index, 1)} aria-label="Move image down">↓</button></div>)}</div>
             </div>
 
             <div style={{ marginBottom: '20px' }}>
@@ -365,7 +467,7 @@ export const ProductsPage: React.FC = () => {
                   cursor: 'pointer'
                 }}
               >
-                {submitting ? 'Creating...' : 'Save Product'}
+                {submitting ? 'Saving...' : 'Save Product'}
               </button>
             </div>
           </form>

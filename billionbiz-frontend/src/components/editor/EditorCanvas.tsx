@@ -16,8 +16,8 @@ export const EditorCanvas: React.FC = () => {
    const { 
      isRightSidebarOpen, 
      activePanel, 
-     selectedPageId, 
      selectedSectionId,
+     selectedPageId,
      pagesNavLevel 
    } = useLandingEditorStore();
    const { selectedTarget } = useEditorContextStore();
@@ -74,6 +74,7 @@ export const EditorCanvas: React.FC = () => {
       <div
          ref={containerRef}
          className={`${styles.canvasArea} ${isRightSidebarOpen ? styles.canvasShrink : ''}`}
+         data-selection-enabled={Boolean(isRightSidebarOpen && selectedSectionId && activePanel === 'pages')}
          style={{
             '--theme-primary': theme?.colors?.primary || '#198754',
             '--theme-secondary': theme?.colors?.secondary || '#ff6b00',

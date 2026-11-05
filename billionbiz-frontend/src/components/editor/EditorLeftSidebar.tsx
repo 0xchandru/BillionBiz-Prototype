@@ -867,7 +867,7 @@ export const EditorLeftSidebar: React.FC = () => {
                 title={tab.label}
                 type="button"
               >
-                <Icon size={18} className={styles.horizontalTabIcon} />
+                <Icon size={20} className={styles.horizontalTabIcon} />
                 <span className={styles.horizontalTabLabel}>{tab.label}</span>
               </button>
             );

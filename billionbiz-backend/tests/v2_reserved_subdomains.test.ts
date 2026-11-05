@@ -428,6 +428,12 @@ describe('Reserved Subdomains & DNS Validation Specification Tests', () => {
       );
       expect(storeRes.rowCount).toBe(1);
       const slug = storeRes.rows[0].slug;
+      // Registration now records a pending domain. Simulate DNS and HTTPS
+      // verification explicitly before exercising verified host resolution.
+      await query(
+        `UPDATE store_domains SET is_verified = TRUE, ssl_status = 'ACTIVE' WHERE store_id = $1 AND LOWER(domain) = LOWER($2)`,
+        [storeRes.rows[0].id, `${slug}.${PLATFORM_MAIN_DOMAIN}`]
+      );
       const domainRes = await query(
         `SELECT 1 FROM store_domains WHERE store_id = $1 AND LOWER(domain) = LOWER($2) AND is_verified = TRUE AND ssl_status = 'ACTIVE' LIMIT 1`,
         [storeRes.rows[0].id, `${slug}.${PLATFORM_MAIN_DOMAIN}`]

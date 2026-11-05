@@ -28,7 +28,9 @@ export const OnlineStoreOverview: React.FC = () => {
 
   const [loading, setLoading] = useState(true);
   const [storeData, setStoreData] = useState<any>(null);
-  const [pagesCount, setPagesCount] = useState({ total: 16, system: 15, custom: 1 });
+  const [pagesCount, setPagesCount] = useState({ total: 0, system: 0, custom: 0 });
+  const [provisioning, setProvisioning] = useState<any>(null);
+  const [retrying, setRetrying] = useState(false);
   const [validation, setValidation] = useState<{ canPublish: boolean; issues: any[] }>({
     canPublish: true,
     issues: []
@@ -37,10 +39,11 @@ export const OnlineStoreOverview: React.FC = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [renderRes, pagesRes, valRes] = await Promise.allSettled([
+      const [renderRes, pagesRes, valRes, provisioningRes] = await Promise.allSettled([
         apiClient<any>('/storefront/render'),
         apiClient<any>('/storefront/pages'),
-        apiClient<any>('/storefront/validate-publish')
+        apiClient<any>('/storefront/validate-publish'),
+        apiClient<any>('/storefront/provisioning/status')
       ]);
 
       if (renderRes.status === 'fulfilled' && renderRes.value && renderRes.value.store) {
@@ -61,10 +64,9 @@ export const OnlineStoreOverview: React.FC = () => {
           system: pages.filter((p: any) => p.is_system).length,
           custom: pages.filter((p: any) => !p.is_system).length
         });
-      } else {
-        // Fallback to starter catalog count
-        setPagesCount({ total: 16, system: 15, custom: 1 });
-      }
+      } else setPagesCount({ total: 0, system: 0, custom: 0 });
+
+      if (provisioningRes.status === 'fulfilled') setProvisioning(provisioningRes.value);
 
       if (valRes.status === 'fulfilled' && valRes.value) {
         setValidation(valRes.value);
@@ -81,6 +83,14 @@ export const OnlineStoreOverview: React.FC = () => {
   }, [storeSlug]);
 
   const localPreviewUrl = getStoreUrl(storeSlug);
+  const liveReady = provisioning?.status === 'LIVE' && provisioning?.domainStatus === 'ACTIVE' && provisioning?.httpsStatus === 'ACTIVE';
+  const storefrontUrl = liveReady ? localPreviewUrl : provisioning?.previewUrl || localPreviewUrl;
+  const retryProvisioning = async () => {
+    setRetrying(true);
+    try { await apiClient('/storefront/provisioning/retry', { method: 'POST', body: JSON.stringify({}) }); await loadData(); }
+    catch (error) { console.error('Store provisioning retry failed:', error); }
+    finally { setRetrying(false); }
+  };
 
   return (
     <div className={styles.overviewContainer}>
@@ -89,9 +99,9 @@ export const OnlineStoreOverview: React.FC = () => {
         <div className={styles.headerTextGroup}>
           <div className={styles.headerTitleRow}>
             <h1 className={styles.pageTitle}>Online Store</h1>
-            <span className={styles.liveBadge}>
-              <span className={styles.liveDot} />
-              Live &amp; Resolving
+            <span className={styles.liveBadge} style={!liveReady ? { background: '#fff7ed', color: '#9a3412', borderColor: '#fed7aa' } : undefined}>
+              <span className={styles.liveDot} style={!liveReady ? { background: '#d97706' } : undefined} />
+              {liveReady ? 'Live · DNS & HTTPS verified' : provisioning?.status === 'LOCAL_READY' ? 'Preview ready · domain pending' : 'Store provisioning'}
             </span>
           </div>
           <p className={styles.pageSubtitle}>
@@ -100,14 +110,18 @@ export const OnlineStoreOverview: React.FC = () => {
         </div>
 
         <div className={styles.headerActions}>
+          {!liveReady && <button type="button" onClick={() => void retryProvisioning()} disabled={retrying} className={styles.btnOutline}>
+            <RefreshCw size={15} className={retrying ? 'animate-spin' : ''} />
+            <span>{retrying ? 'Checking…' : 'Retry domain check'}</span>
+          </button>}
           <a
-            href={localPreviewUrl}
+            href={storefrontUrl}
             target="_blank"
             rel="noopener noreferrer"
             className={styles.btnOutline}
           >
             <Globe size={16} />
-            <span>View Storefront</span>
+            <span>{liveReady ? 'View Live Store' : 'Open Local Preview'}</span>
             <ExternalLink size={14} style={{ color: '#94a3b8' }} />
           </a>
           <button
@@ -126,14 +140,14 @@ export const OnlineStoreOverview: React.FC = () => {
         <div className={styles.kpiCard}>
           <div className={styles.kpiHeader}>
             <span className={styles.kpiLabel}>Subdomain</span>
-            <ShieldCheck size={16} style={{ color: '#059669' }} />
+            {liveReady ? <ShieldCheck size={16} style={{ color: '#059669' }} /> : <AlertTriangle size={16} style={{ color: '#d97706' }} />}
           </div>
           <div className={styles.kpiValue} title={platformDomain}>
             {platformDomain}
           </div>
           <div className={styles.kpiSub}>
-            <CheckCircle2 size={13} style={{ color: '#059669' }} />
-            <span className={styles.kpiSuccess}>Active SSL &amp; Isolated Tenant</span>
+            {liveReady ? <CheckCircle2 size={13} style={{ color: '#059669' }} /> : <Clock size={13} style={{ color: '#d97706' }} />}
+            <span className={liveReady ? styles.kpiSuccess : ''}>{liveReady ? 'DNS & HTTPS verified' : provisioning?.error || 'Waiting for DNS and HTTPS verification'}</span>
           </div>
         </div>
 
@@ -144,10 +158,10 @@ export const OnlineStoreOverview: React.FC = () => {
             <Clock size={16} style={{ color: '#2563eb' }} />
           </div>
           <div className={styles.kpiValue}>
-            Release #{storeData?.releaseNumber || 1}
+            {storeData?.releaseNumber ? `Release #${storeData.releaseNumber}` : 'No live release'}
           </div>
           <div className={styles.kpiSub}>
-            <span>Atomic snapshot live</span>
+            <span>{storeData?.releaseNumber ? 'Saved release snapshot' : 'Publish your store to create a release'}</span>
           </div>
         </div>
 

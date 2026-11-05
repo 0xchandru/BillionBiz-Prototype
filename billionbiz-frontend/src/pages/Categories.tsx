@@ -25,6 +25,8 @@ export const CategoriesPage: FC = () => {
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [description, setDescription] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   const fetchCategories = async () => {
     setLoading(true);
@@ -53,6 +55,7 @@ export const CategoriesPage: FC = () => {
     setName('');
     setSlug('');
     setDescription('');
+    setImageUrl('');
     setActionError(null);
     setShowAddModal(true);
   };
@@ -62,6 +65,7 @@ export const CategoriesPage: FC = () => {
     setName(category.name || '');
     setSlug(category.slug || '');
     setDescription(category.description || '');
+    setImageUrl(category.image_url || '');
     setActionError(null);
     setShowAddModal(true);
   };
@@ -93,7 +97,7 @@ export const CategoriesPage: FC = () => {
     setIsSubmitting(true);
     setActionError(null);
     try {
-      const payload = { name: normalizedName, slug: normalizedSlug, description: description.trim() };
+      const payload = { name: normalizedName, slug: normalizedSlug, description: description.trim(), imageUrl: imageUrl.trim() || undefined };
       if (editingCategory) {
         await api.updateCategory(editingCategory.id, payload);
       } else {
@@ -105,6 +109,7 @@ export const CategoriesPage: FC = () => {
       setName('');
       setSlug('');
       setDescription('');
+      setImageUrl('');
       await fetchCategories();
     } catch (err: any) {
       setActionError(err.message || 'The category could not be saved.');
@@ -323,6 +328,11 @@ export const CategoriesPage: FC = () => {
               </div>
 
               <div style={{ marginBottom: '24px' }}>
+                <label htmlFor="category-image" style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Category Image URL</label>
+                <input id="category-image" type="url" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://…" style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', marginBottom: '14px' }} />
+                <label htmlFor="category-image-upload" style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Or upload an image</label>
+                <input id="category-image-upload" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" disabled={uploadingImage} onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setUploadingImage(true); setActionError(null); try { const result = await api.uploadStoreMedia(file); setImageUrl(result.url); } catch (error: any) { setActionError(error.message || 'Image upload failed.'); } finally { setUploadingImage(false); event.target.value = ''; } }} style={{ width: '100%', marginBottom: 14 }} />
+                {uploadingImage && <p style={{ fontSize: 12, color: '#64748b' }}>Uploading image…</p>}
                 <label htmlFor="category-description" style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Description</label>
                 <textarea
                   id="category-description"

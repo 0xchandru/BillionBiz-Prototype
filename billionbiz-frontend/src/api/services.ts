@@ -287,13 +287,27 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(product)
     }),
+  updateProduct: (id: string, product: any) => apiClient<{ message: string; id: string }>(`/catalog/products/${id}`, { method: 'PATCH', body: JSON.stringify(product) }),
+  deactivateProduct: (id: string) => apiClient<{ message: string; id: string }>(`/catalog/products/${id}/deactivate`, { method: 'POST' }),
+  getSellingUnits: () => apiClient<{ units: any[] }>('/catalog/selling-units'),
+  uploadStoreMedia: async (file: File) => {
+    const signed = await apiClient<{ uploadUrl: string; publicUrl: string; requiredHeaders: Record<string, string> }>('/catalog/media/presign', { method: 'POST', body: JSON.stringify({ fileName: file.name, contentType: file.type, size: file.size }) });
+    const upload = await fetch(signed.uploadUrl, { method: 'PUT', headers: signed.requiredHeaders, body: file });
+    if (!upload.ok) throw new Error('Image upload failed. Check the store media bucket CORS settings and try again.');
+    return { url: signed.publicUrl };
+  },
+  saveSellingUnit: (payload: { code: string; label: string; enabled?: boolean; isCustom?: boolean }) => apiClient<{ message: string }>('/catalog/selling-units', { method: 'PUT', body: JSON.stringify(payload) }),
+  getBundles: () => apiClient<{ bundles: any[] }>('/catalog/bundles'),
+  createBundle: (payload: any) => apiClient<{ bundle: any }>('/catalog/bundles', { method: 'POST', body: JSON.stringify(payload) }),
+  updateBundle: (id: string, payload: any) => apiClient<{ bundle: any }>(`/catalog/bundles/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deactivateBundle: (id: string) => apiClient<{ message: string }>(`/catalog/bundles/${id}/deactivate`, { method: 'POST' }),
   getCategories: () => apiClient<{ categories: any[] }>('/catalog/categories'),
-  createCategory: (payload: { name: string; slug?: string; description?: string; parentId?: string }) =>
+  createCategory: (payload: { name: string; slug?: string; description?: string; parentId?: string; imageUrl?: string }) =>
     apiClient<{ message: string; category: any }>('/catalog/categories', {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
-  updateCategory: (id: string, payload: { name: string; slug: string; description?: string }) =>
+  updateCategory: (id: string, payload: { name: string; slug: string; description?: string; imageUrl?: string }) =>
     apiClient<{ message: string; category: any }>(`/catalog/categories/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(payload)
@@ -534,6 +548,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ notes })
     }),
+  getStoreProvisioningStatus: () => apiClient<any>('/storefront/provisioning/status'),
+  retryStoreProvisioning: () => apiClient<any>('/storefront/provisioning/retry', { method: 'POST', body: JSON.stringify({}) }),
   getReleases: () => apiClient<{ releases: any[] }>('/storefront/releases'),
   restoreRelease: (releaseId: string) =>
     apiClient(`/storefront/releases/${releaseId}/restore`, {
@@ -624,6 +640,8 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(payload)
     }),
+  getCustomerTicketMessages: (id: string) => apiClient<{ messages: any[] }>(`/orders/tickets/${id}/messages`),
+  replyCustomerTicket: (id: string, body: string) => apiClient<{ id: string }>(`/orders/tickets/${id}/messages`, { method: 'POST', body: JSON.stringify({ body }) }),
 
   // POS Shifts & Counters
   getPOSShifts: () => apiClient<{ shifts: any[] }>('/pos/shifts'),

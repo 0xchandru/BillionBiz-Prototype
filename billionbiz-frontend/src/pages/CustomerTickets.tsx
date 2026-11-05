@@ -12,6 +12,10 @@ export const CustomerTickets: FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeTicket, setActiveTicket] = useState<any | null>(null);
+  const [messages, setMessages] = useState<any[]>([]);
+  const [reply, setReply] = useState('');
+  const [replyBusy, setReplyBusy] = useState(false);
 
   // Form State
   const [customerName, setCustomerName] = useState('');
@@ -72,6 +76,20 @@ export const CustomerTickets: FC = () => {
     } catch (err: any) {
       alert(err.message || 'Failed to update ticket status');
     }
+  };
+
+  const openTicket = async (ticket: any) => {
+    setActiveTicket(ticket);
+    try { const result = await api.getCustomerTicketMessages(ticket.id); setMessages(result.messages || []); }
+    catch (err: any) { setError(err.message || 'Could not load ticket conversation.'); }
+  };
+  const sendReply = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!activeTicket || !reply.trim()) return;
+    setReplyBusy(true);
+    try { await api.replyCustomerTicket(activeTicket.id, reply.trim()); setReply(''); await openTicket(activeTicket); await fetchTickets(); }
+    catch (err: any) { setError(err.message || 'Could not send the reply.'); }
+    finally { setReplyBusy(false); }
   };
 
   const filteredTickets = tickets.filter((t) => {
@@ -206,7 +224,7 @@ export const CustomerTickets: FC = () => {
             </thead>
             <tbody>
               {filteredTickets.map((t) => (
-                <tr key={t.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                <tr key={t.id} onClick={() => void openTicket(t)} style={{ borderBottom: '1px solid #f1f5f9', cursor: 'pointer' }}>
                   <td style={{ padding: '16px 20px', fontFamily: 'monospace', color: '#083e47', fontWeight: 600 }}>
                     {t.ticket_number}
                   </td>
@@ -343,6 +361,17 @@ export const CustomerTickets: FC = () => {
       )}
 
       {/* Create Ticket Modal */}
+      {activeTicket && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1100, background: '#0f172a88', display: 'grid', placeItems: 'center', padding: 18 }}>
+          <section role="dialog" aria-modal="true" aria-label={`Ticket ${activeTicket.ticket_number}`} style={{ width: 'min(680px, 100%)', maxHeight: '90vh', overflow: 'auto', background: '#fff', borderRadius: 14, padding: 22 }}>
+            <header style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}><div><h2 style={{ margin: 0 }}>{activeTicket.subject}</h2><p style={{ color: '#64748b', fontSize: 13 }}>{activeTicket.ticket_number} · {activeTicket.customer_name} · {activeTicket.customer_email || 'No email'}</p></div><button type="button" onClick={() => setActiveTicket(null)}>Close</button></header>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0 16px', fontSize: 13 }}>Ticket status<select value={activeTicket.status} onChange={async (event) => { const status = event.target.value; await handleUpdateStatus(activeTicket.id, status); setActiveTicket({ ...activeTicket, status }); }}><option value="OPEN">Open</option><option value="IN_PROGRESS">In progress</option><option value="RESOLVED">Resolved</option><option value="CLOSED">Closed</option></select></label>
+            <div style={{ display: 'grid', gap: 10, maxHeight: 360, overflow: 'auto', padding: 12, background: '#f8fafc', borderRadius: 10 }}>{messages.map((message) => <div key={message.id} style={{ maxWidth: '86%', justifySelf: message.author_type === 'STAFF' ? 'end' : 'start', padding: 12, background: message.author_type === 'STAFF' ? '#e0f2fe' : '#fff', border: '1px solid #e2e8f0', borderRadius: 10 }}><div style={{ fontSize: 11, fontWeight: 700, color: '#475569', marginBottom: 4 }}>{message.author_type === 'STAFF' ? 'Store team' : activeTicket.customer_name}</div><div style={{ whiteSpace: 'pre-wrap', fontSize: 13 }}>{message.body}</div><time style={{ display: 'block', marginTop: 6, fontSize: 10, color: '#64748b' }}>{new Date(message.created_at).toLocaleString()}</time></div>)}</div>
+            <form onSubmit={sendReply} style={{ display: 'flex', gap: 8, marginTop: 14 }}><textarea required value={reply} onChange={(event) => setReply(event.target.value)} placeholder="Reply to the customer…" rows={3} style={{ flex: 1, padding: 10, border: '1px solid #cbd5e1', borderRadius: 8, resize: 'vertical' }} /><button type="submit" disabled={replyBusy || !reply.trim()} style={{ alignSelf: 'end', padding: '10px 14px' }}>{replyBusy ? 'Sending…' : 'Send reply'}</button></form>
+          </section>
+        </div>
+      )}
+
       {isModalOpen && (
         <div
           style={{
