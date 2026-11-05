@@ -101,6 +101,9 @@ const Header: FC<HeaderProps> = ({ onMenuClick }) => {
   }, []);
 
   const handleMarkRead = (id: string) => {
+    const notification = notifications.find((item) => item.id === id);
+    if (!notification || notification.is_read) return;
+
     api.markNotificationRead(id).then(() => {
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
       setUnreadCount(prev => Math.max(0, prev - 1));
@@ -242,14 +245,22 @@ const Header: FC<HeaderProps> = ({ onMenuClick }) => {
                   </div>
                 ) : (
                   notifications.map((n) => (
-                    <div
+                    <button
                       key={n.id}
+                      type="button"
                       onClick={() => handleMarkRead(n.id)}
+                      aria-label={n.is_read ? `Notification: ${n.title}` : `Mark notification as read: ${n.title}`}
+                      aria-pressed={Boolean(n.is_read)}
                       style={{
+                        display: 'block',
+                        width: '100%',
                         padding: '0.75rem 1rem',
+                        border: 0,
                         borderBottom: '1px solid #f8fafc',
                         backgroundColor: n.is_read ? '#ffffff' : '#f0fdfa',
-                        cursor: 'pointer'
+                        cursor: n.is_read ? 'default' : 'pointer',
+                        textAlign: 'left',
+                        fontFamily: 'inherit'
                       }}
                     >
                       <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#0f172a' }}>{n.title}</div>
@@ -257,7 +268,7 @@ const Header: FC<HeaderProps> = ({ onMenuClick }) => {
                       <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '0.35rem' }}>
                         {new Date(n.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </div>
-                    </div>
+                    </button>
                   ))
                 )}
               </div>
