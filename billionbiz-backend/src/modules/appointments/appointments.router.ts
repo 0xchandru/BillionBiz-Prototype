@@ -5,7 +5,8 @@ import { requireAuth, requirePermission } from '../../middleware/auth.js';
 import { resolveTenant } from '../../middleware/tenant.js';
 import { requireCapability } from '../../middleware/capabilities.js';
 import { handleIdempotency } from '../../middleware/idempotency.js';
-import { recordAudit } from '../../core/auditAndOutbox.js';
+import { recordAudit, publishOutboxEvent, broadcastCommittedOutboxEvent } from '../../core/auditAndOutbox.js';
+import type { RealtimeEvent } from '../../core/realtimeGateway.js';
 
 
 const parseDateOnly = (value: unknown): { year: number; month: number; day: number; dayOfWeek: number } | null => {
@@ -1000,12 +1001,13 @@ appointmentsRouter.post(
 
     const bookingId = 'bkg-' + uuidv4();
     const bookingNumber = 'APT-' + Date.now().toString().slice(-8) + '-' + uuidv4().slice(0, 4).toUpperCase();
+    let committedEvent: RealtimeEvent | null = null;
 
     try {
       await withTransaction(async (client) => {
         const [offeringRes, settingsRes, storeRes] = await Promise.all([
           client.query(
-            `SELECT id, duration_minutes, buffer_before_minutes, buffer_after_minutes, price_minor
+            `SELECT id, name, duration_minutes, buffer_before_minutes, buffer_after_minutes, price_minor
              FROM offerings WHERE id = $1 AND store_id = $2 AND is_active = TRUE`,
             [offeringId, storeId]
           ),
@@ -1188,8 +1190,30 @@ appointmentsRouter.post(
           targetId: bookingId,
           changes: { bookingNumber, startTime: start.toISOString(), endTime: end.toISOString(), resourceId, confirmationMode }
         });
+        committedEvent = await publishOutboxEvent(
+          client,
+          organizationId,
+          storeId,
+          status === 'CONFIRMED' ? 'BOOKING_CONFIRMED' : 'BOOKING_PENDING',
+          'BOOKING',
+          bookingId,
+          {
+            bookingId,
+            bookingNumber,
+            offeringName: offering.name,
+            customerName: [firstName, lastName].filter(Boolean).join(' '),
+            email: email || undefined,
+            phone: phone || undefined,
+            startTime: start.toISOString(),
+            endTime: end.toISOString(),
+            timezone: timeZone,
+            status,
+            totalAmount: price
+          }
+        );
       });
 
+      if (committedEvent) broadcastCommittedOutboxEvent(committedEvent);
       res.status(201).json({ message: 'Appointment created successfully.', bookingId, bookingNumber });
     } catch (error: any) {
       if (error.statusCode) return res.status(error.statusCode).json({ error: error.code, message: error.message });
@@ -1226,6 +1250,7 @@ appointmentsRouter.patch(
     }
 
     let notFound = false;
+    let committedEvent: RealtimeEvent | null = null;
     try {
       await withTransaction(async (client) => {
         const bookingRes = await client.query(
@@ -1405,6 +1430,21 @@ appointmentsRouter.patch(
           targetId: bookingId,
           changes: { previousStatus: booking.status, status: nextStatus, startTime: nextStart.toISOString(), endTime: nextEnd.toISOString() }
         });
+        committedEvent = await publishOutboxEvent(
+          client,
+          organizationId,
+          storeId,
+          requestedStart ? 'BOOKING_RESCHEDULED' : 'BOOKING_STATUS_CHANGED',
+          'BOOKING',
+          bookingId,
+          {
+            bookingId,
+            previousStatus: booking.status,
+            status: nextStatus,
+            startTime: nextStart.toISOString(),
+            endTime: nextEnd.toISOString()
+          }
+        );
       });
     } catch (error: any) {
       if (error.statusCode) return res.status(error.statusCode).json({ error: error.code, message: error.message });
@@ -1414,6 +1454,7 @@ appointmentsRouter.patch(
     if (notFound) {
       return res.status(404).json({ error: 'NOT_FOUND', message: 'Booking was not found in this store.' });
     }
+    if (committedEvent) broadcastCommittedOutboxEvent(committedEvent);
     res.json({ message: 'Appointment updated successfully.' });
   }
 );
