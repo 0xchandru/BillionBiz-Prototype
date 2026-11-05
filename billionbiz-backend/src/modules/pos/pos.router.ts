@@ -120,7 +120,7 @@ posRouter.post('/register/open', requireAuth, resolveTenant, requirePermission('
         `SELECT id FROM register_sessions WHERE counter_id = $1 AND status = 'OPEN' LIMIT 1`,
         [counterId]
       );
-      if (existing.rowCount > 0) throw httpError(409, 'SESSION_ALREADY_OPEN', 'This counter already has an active register session.');
+      if ((existing.rowCount ?? 0) > 0) throw httpError(409, 'SESSION_ALREADY_OPEN', 'This counter already has an active register session.');
 
       await client.query(
         `INSERT INTO register_sessions (id, counter_id, opened_by, opening_float_minor, status)
