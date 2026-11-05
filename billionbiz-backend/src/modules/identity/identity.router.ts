@@ -697,7 +697,7 @@ identityRouter.post('/mfa/verify', requireAuth, async (req: Request, res: Respon
          SELECT COALESCE(jsonb_agg(code_hash ORDER BY ordinal), '[]'::jsonb)
          FROM jsonb_array_elements_text(mfa_recovery_codes)
            WITH ORDINALITY AS recovery(code_hash, ordinal)
-         WHERE code_hash <> $1
+         WHERE code_hash <> $1::text
        ),
        mfa_enabled = TRUE,
        mfa_failed_attempts = 0,
