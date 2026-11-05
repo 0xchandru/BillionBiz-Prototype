@@ -6,10 +6,61 @@ export interface RealtimeMessage {
   id?: string;
   type: string;
   channel?: string;
+  organizationId?: string;
+  storeId?: string;
   aggregateType?: string;
   aggregateId?: string;
   payload?: any;
   timestamp?: string;
+}
+
+type RealtimeFrame = {
+  type?: string;
+  channel?: string;
+  data?: RealtimeMessage;
+  events?: RealtimeMessage[];
+  hasMore?: boolean;
+  nextCursor?: string | null;
+  timestamp?: string;
+};
+
+const CONTROL_MESSAGES = new Set([
+  'connection_established',
+  'subscribed',
+  'pong',
+  'sse_connected',
+  'catchup_completed',
+  'error'
+]);
+
+export function normalizeRealtimeFrame(value: unknown): RealtimeMessage[] {
+  if (!value || typeof value !== 'object') return [];
+  const frame = value as RealtimeFrame & RealtimeMessage;
+
+  if (frame.type === 'event' && frame.data && typeof frame.data === 'object') {
+    return [{
+      ...frame.data,
+      channel: frame.data.channel || frame.channel
+    }];
+  }
+
+  if (frame.type === 'catchup_completed') {
+    return Array.isArray(frame.events)
+      ? frame.events.filter((event): event is RealtimeMessage =>
+          Boolean(event && typeof event === 'object' && typeof event.type === 'string')
+        )
+      : [];
+  }
+
+  if (typeof frame.type !== 'string' || CONTROL_MESSAGES.has(frame.type)) return [];
+  return [frame];
+}
+
+export function getRealtimeCursor(event: RealtimeMessage): string | null {
+  if (!event.timestamp || !event.id) return null;
+  const timestamp = new Date(event.timestamp);
+  if (!Number.isFinite(timestamp.getTime())) return null;
+  return `${timestamp.toISOString()}|${event.id}`;
 }
 
 export function getRealtimeWsUrl(): string {
@@ -24,20 +75,29 @@ export function useRealtime(onEvent?: (event: RealtimeMessage) => void) {
   const [isConnected, setIsConnected] = useState(false);
   const [lastEvent, setLastEvent] = useState<RealtimeMessage | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<any>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cursorRef = useRef<string | null>(null);
   const retryCountRef = useRef(0);
   const onEventRef = useRef(onEvent);
+  const manuallyClosedRef = useRef(false);
 
-  // Keep event handler reference fresh without triggering reconnects
   useEffect(() => {
     onEventRef.current = onEvent;
   }, [onEvent]);
 
-  const connect = useCallback(() => {
-    if (!isAuthenticated || !token) return;
+  const dispatchEvent = useCallback((event: RealtimeMessage) => {
+    const nextCursor = getRealtimeCursor(event);
+    if (nextCursor) cursorRef.current = nextCursor;
 
-    // Clear existing timer
+    setLastEvent(event);
+    onEventRef.current?.(event);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('billionbiz_realtime', { detail: event }));
+    }
+  }, []);
+
+  const connect = useCallback(() => {
+    if (!isAuthenticated || !token || manuallyClosedRef.current) return;
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
@@ -46,94 +106,85 @@ export function useRealtime(onEvent?: (event: RealtimeMessage) => void) {
     try {
       const wsUrl = new URL(getRealtimeWsUrl());
       wsUrl.searchParams.set('token', token);
-      if (cursorRef.current) {
-        wsUrl.searchParams.set('cursor', cursorRef.current);
-      }
-
       const ws = new WebSocket(wsUrl.toString());
       wsRef.current = ws;
 
       ws.onopen = () => {
         setIsConnected(true);
         retryCountRef.current = 0;
+        // The backend reads catch-up cursors from a message, not URL params.
+        const cursor = cursorRef.current || new Date(Date.now() - 60 * 60 * 1000).toISOString();
+        ws.send(JSON.stringify({ action: 'catchup', cursor }));
       };
 
       ws.onmessage = (messageEvent) => {
         try {
-          const data: RealtimeMessage = JSON.parse(messageEvent.data);
+          const frame = JSON.parse(messageEvent.data) as RealtimeFrame;
+          if (frame.type === 'catchup_completed') {
+            const events = normalizeRealtimeFrame(frame);
+            for (const event of events) dispatchEvent(event);
 
-          if (data.id) {
-            cursorRef.current = data.id;
+            // Large catch-up windows are paged; continue until the server says
+            // the backlog is drained. Each next cursor is timestamp + event id.
+            if (frame.hasMore && frame.nextCursor && ws.readyState === WebSocket.OPEN) {
+              cursorRef.current = frame.nextCursor;
+              ws.send(JSON.stringify({ action: 'catchup', cursor: frame.nextCursor }));
+            }
+            return;
           }
 
-          setLastEvent(data);
-          if (onEventRef.current) {
-            onEventRef.current(data);
-          }
-
-          // Dispatch window event for cross-component subscription
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('billionbiz_realtime', { detail: data }));
+          for (const event of normalizeRealtimeFrame(frame)) {
+            dispatchEvent(event);
           }
         } catch {
-          // Ignore non-json or heartbeat frames
+          // Ignore invalid frames; the next successful catch-up repairs gaps.
         }
       };
 
       ws.onclose = (event: CloseEvent) => {
         setIsConnected(false);
-        wsRef.current = null;
+        if (wsRef.current === ws) wsRef.current = null;
+        if (manuallyClosedRef.current || event.code === 4001 || event.code === 4003) return;
 
-        // Do NOT reconnect if auth failed (4001 Unauthorized, 4003 Forbidden)
-        if (event.code === 4001 || event.code === 4003) {
-          return;
-        }
-
-        // Limit retries with exponential backoff (max 5 retries: 2s, 4s, 8s, 16s, 20s)
-        if (retryCountRef.current < 5) {
-          retryCountRef.current += 1;
-          const delay = Math.min(1000 * Math.pow(2, retryCountRef.current), 20000);
-          reconnectTimeoutRef.current = setTimeout(() => {
-            connect();
-          }, delay);
-        }
+        retryCountRef.current += 1;
+        const baseDelay = Math.min(1000 * Math.pow(2, Math.min(retryCountRef.current, 6)), 30000);
+        const jitter = Math.floor(Math.random() * 500);
+        reconnectTimeoutRef.current = setTimeout(connect, baseDelay + jitter);
       };
 
       ws.onerror = () => {
-        try {
-          ws.close();
-        } catch {}
+        try { ws.close(); } catch { /* Browser owns socket cleanup. */ }
       };
     } catch {
-      // WebSocket initialization failure
+      setIsConnected(false);
     }
-  }, [isAuthenticated, token]);
+  }, [dispatchEvent, isAuthenticated, token]);
 
   useEffect(() => {
-    connect();
+    manuallyClosedRef.current = false;
+    if (!isAuthenticated || !token) {
+      setIsConnected(false);
+      return;
+    }
 
+    connect();
     return () => {
+      manuallyClosedRef.current = true;
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
       }
-      if (wsRef.current) {
-        const socket = wsRef.current;
-        wsRef.current = null;
-        if (socket.readyState === WebSocket.CONNECTING) {
-          socket.onopen = () => {
-            try { socket.close(); } catch {}
-          };
-          socket.onerror = () => {};
-        } else {
-          try { socket.close(); } catch {}
-        }
+      const socket = wsRef.current;
+      wsRef.current = null;
+      setIsConnected(false);
+      if (socket) {
+        try { socket.close(1000, 'Realtime hook unmounted'); } catch { /* Ignore close race. */ }
       }
     };
-  }, [connect]);
+  }, [connect, isAuthenticated, token]);
 
   const sendPing = useCallback(() => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ action: 'ping' }));
     }
   }, []);
@@ -144,3 +195,5 @@ export function useRealtime(onEvent?: (event: RealtimeMessage) => void) {
     sendPing
   };
 }
+
+export default useRealtime;
