@@ -544,22 +544,22 @@ export const Dashboard = () => {
                 <tbody>
                   {data.recentOrders.map((order) => (
                     <tr key={order.id}>
-                      <td>
+                      <td data-label="Order ref">
                         <Link to="/orders" className={styles.orderLink}>
                           {order.order_number}
                         </Link>
                       </td>
-                      <td>
+                      <td data-label="Customer">
                         <div style={{ fontWeight: 600, color: '#0f172a' }}>{order.customer_name}</div>
                         {order.customer_email && (
                           <div style={{ fontSize: '11px', color: '#94a3b8' }}>{order.customer_email}</div>
                         )}
                       </td>
-                      <td style={{ color: '#64748b', fontSize: '12px' }}>
+                      <td data-label="Date" style={{ color: '#64748b', fontSize: '12px' }}>
                         {new Date(order.created_at).toLocaleDateString()}
                       </td>
-                      <td>{getStatusBadge(order.status)}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>
+                      <td data-label="Status">{getStatusBadge(order.status)}</td>
+                      <td data-label="Amount" style={{ textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>
                         {formatCurrency(order.total_minor)}
                       </td>
                     </tr>
@@ -646,12 +646,12 @@ export const Dashboard = () => {
                   <tbody>
                     {data.topProducts.map((prod, idx) => (
                       <tr key={idx}>
-                        <td>
+                        <td data-label="Product">
                           <div style={{ fontWeight: 600, color: '#0f172a' }}>{prod.name}</div>
                           <div style={{ fontSize: '11px', color: '#94a3b8' }}>Rank #{idx + 1}</div>
                         </td>
-                        <td>{prod.orders_count}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>
+                        <td data-label="Orders">{prod.orders_count}</td>
+                        <td data-label="Revenue" style={{ textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>
                           {formatCurrency(prod.revenue_minor)}
                         </td>
                       </tr>
@@ -680,12 +680,12 @@ export const Dashboard = () => {
                   <tbody>
                     {data.bestServices.map((srv, idx) => (
                       <tr key={idx}>
-                        <td>
+                        <td data-label="Service">
                           <div style={{ fontWeight: 600, color: '#0f172a' }}>{srv.name}</div>
                           <div style={{ fontSize: '11px', color: '#94a3b8' }}>Rank #{idx + 1}</div>
                         </td>
-                        <td>{srv.bookings_count}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>
+                        <td data-label="Bookings">{srv.bookings_count}</td>
+                        <td data-label="Revenue" style={{ textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>
                           {formatCurrency(srv.revenue_minor)}
                         </td>
                       </tr>
