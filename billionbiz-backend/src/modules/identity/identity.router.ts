@@ -738,6 +738,25 @@ identityRouter.post('/mfa/verify', requireAuth, async (req: Request, res: Respon
     Number(user.mfa_last_counter ?? -1)
   );
   if (matchedCounter === null) {
+    // Distinguish a valid TOTP counter that has already been consumed from
+    // an arbitrary incorrect code. This preserves replay protection while
+    // returning a stable conflict response to legitimate retry attempts.
+    const previouslyUsedCounter = findValidTotpCounter(
+      secret,
+      code,
+      Date.now(),
+      1,
+      -1
+    );
+    if (
+      previouslyUsedCounter !== null &&
+      previouslyUsedCounter <= Number(user.mfa_last_counter ?? -1)
+    ) {
+      return res.status(409).json({
+        error: 'MFA_CODE_ALREADY_USED',
+        message: 'This authenticator code has already been used. Wait for the next code and try again.'
+      });
+    }
     return registerFailedAttempt();
   }
 
