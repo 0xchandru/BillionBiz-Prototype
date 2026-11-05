@@ -331,7 +331,8 @@ describe('V2 Realtime, Concurrency & Release Gate Suite', () => {
     const failedRes = res1.status === 201 ? res2 : res1;
 
     expect(successfulRes.body.bookingId).toBeDefined();
-    expect(failedRes.body.message).toContain('SLOT_UNAVAILABLE');
+    expect(failedRes.body.error).toBe('SLOT_UNAVAILABLE');
+    expect(failedRes.body.message).toContain('no longer available');
   });
 
   // ============================================================
