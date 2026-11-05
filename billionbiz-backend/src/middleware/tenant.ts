@@ -96,8 +96,14 @@ export async function resolveTenant(req: Request, res: Response, next: NextFunct
       }
 
       const domain = domainRes.rows[0];
-      if (domain.status === 'SUSPENDED') {
-        return res.status(404).json({ error: 'STORE_NOT_FOUND', message: 'This store is not available' });
+      // Public storefront hosts must resolve only to fully active stores.
+      // Fail closed for provisioning, pending, archived, or unknown states;
+      // a verified hostname alone must never expose an unpublished tenant.
+      if (String(domain.status).toUpperCase() !== 'ACTIVE') {
+        return res.status(404).json({
+          error: 'STORE_NOT_FOUND',
+          message: 'This store is not available'
+        });
       }
       if (!domain.is_verified || String(domain.ssl_status).toUpperCase() !== 'ACTIVE') {
         return res.status(404).json({
@@ -200,8 +206,11 @@ export async function resolveTenant(req: Request, res: Response, next: NextFunct
       });
     }
 
-    if (storeCheck.rows[0].status === 'SUSPENDED') {
-      return res.status(403).json({ error: 'STORE_SUSPENDED', message: 'This store is suspended' });
+    if (String(storeCheck.rows[0].status).toUpperCase() !== 'ACTIVE') {
+      return res.status(403).json({
+        error: 'STORE_NOT_ACTIVE',
+        message: 'This store is not active'
+      });
     }
 
     if (auth && !isPlatformAdmin) {
