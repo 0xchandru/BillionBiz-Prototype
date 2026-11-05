@@ -169,8 +169,7 @@ export const OrdersPage: React.FC = () => {
     }
   };
 
-  const handleCatalogSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCatalogSearch = async () => {
     setCatalogLoading(true);
     setCatalogError(null);
     try {
@@ -255,7 +254,7 @@ export const OrdersPage: React.FC = () => {
       return;
     }
 
-    const nameParts = customerName.split(/\\s+/);
+    const nameParts = customerName.split(/\s+/);
     const firstName = nameParts.shift() || 'Guest';
     const lastName = nameParts.join(' ');
     setIsCreatingOrder(true);
@@ -892,10 +891,10 @@ export const OrdersPage: React.FC = () => {
                   <span style={{ color: '#64748b', fontSize: '11px' }}>Prices are verified by the server</span>
                 </div>
 
-                <form onSubmit={handleCatalogSearch} style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                  <input type="search" value={catalogSearch} onChange={(event) => setCatalogSearch(event.target.value)} placeholder="Search products or SKU..." aria-label="Search products or SKU" style={{ flex: 1, minWidth: 0, minHeight: '42px', padding: '9px 12px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px' }} />
-                  <button type="submit" disabled={catalogLoading} style={{ padding: '0 14px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', color: '#334155', fontSize: '12px', fontWeight: 650, cursor: catalogLoading ? 'wait' : 'pointer' }}>Search</button>
-                </form>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                  <input type="search" value={catalogSearch} onChange={(event) => setCatalogSearch(event.target.value)} placeholder="Search products or SKU..." aria-label="Search products or SKU" onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void handleCatalogSearch(); } }} style={{ flex: 1, minWidth: 0, minHeight: '42px', padding: '9px 12px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px' }} />
+                  <button type="button" onClick={() => void handleCatalogSearch()} disabled={catalogLoading} style={{ padding: '0 14px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', color: '#334155', fontSize: '12px', fontWeight: 650, cursor: catalogLoading ? 'wait' : 'pointer' }}>Search</button>
+                </div>
 
                 {catalogLoading ? (
                   <div role="status" style={{ padding: '18px', textAlign: 'center', border: '1px dashed #cbd5e1', borderRadius: '10px', color: '#64748b', fontSize: '13px' }}>Loading active products…</div>
