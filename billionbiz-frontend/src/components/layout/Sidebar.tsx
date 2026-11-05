@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { FC } from 'react';
 import { useLocation, Link, useNavigate } from 'react-router-dom';
 import { 
@@ -151,15 +151,44 @@ export const Sidebar: FC<SidebarProps> = ({ mobileOpen, onClose }) => {
   const { user, storeName, role } = useAuthStore();
 
   const [activeDropdown, setActiveDropdown] = useState<string | null>('orders');
+  const sidebarRef = useRef<HTMLElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!mobileOpen) return;
 
     const previousOverflow = document.body.style.overflow;
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const focusFrame = window.requestAnimationFrame(() => closeButtonRef.current?.focus());
     document.body.style.overflow = 'hidden';
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (event.key !== 'Tab') return;
+      const focusable = sidebarRef.current?.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      if (!focusable?.length) {
+        event.preventDefault();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     const desktopMedia = window.matchMedia('(min-width: 769px)');
     const handleDesktopChange = (event: MediaQueryListEvent) => {
@@ -169,9 +198,13 @@ export const Sidebar: FC<SidebarProps> = ({ mobileOpen, onClose }) => {
     window.addEventListener('keydown', handleKeyDown);
     desktopMedia.addEventListener('change', handleDesktopChange);
     return () => {
+      window.cancelAnimationFrame(focusFrame);
       document.body.style.overflow = previousOverflow;
       window.removeEventListener('keydown', handleKeyDown);
       desktopMedia.removeEventListener('change', handleDesktopChange);
+      if (previouslyFocused?.isConnected && previouslyFocused.getClientRects().length > 0) {
+        previouslyFocused.focus();
+      }
     };
   }, [mobileOpen, onClose]);
 
@@ -252,13 +285,16 @@ export const Sidebar: FC<SidebarProps> = ({ mobileOpen, onClose }) => {
         />
       )}
       <aside
+        ref={sidebarRef}
         id="merchant-navigation"
+        role={mobileOpen ? 'dialog' : undefined}
+        aria-modal={mobileOpen || undefined}
         aria-label="Main navigation"
         className={`${styles.sidebar} ${mobileOpen ? styles.sidebarOpen : ''}`}
       >
         <div className={styles.mobileDrawerHeader}>
           <span>Navigation</span>
-          <button type="button" className={styles.mobileCloseBtn} onClick={onClose} aria-label="Close navigation menu">
+          <button ref={closeButtonRef} type="button" className={styles.mobileCloseBtn} onClick={onClose} aria-label="Close navigation menu">
             <X size={19} aria-hidden="true" />
           </button>
         </div>
