@@ -119,6 +119,7 @@ appointmentsRouter.get(
   }
 );
 
+
 appointmentsRouter.post(
   '/offerings',
   requireAuth,
@@ -127,69 +128,83 @@ appointmentsRouter.post(
   requirePermission('services.manage'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
-    const {
-      name,
-      handle: rawHandle,
-      description,
-      category = 'General',
-      serviceType = 'IN_PERSON',
-      pricingType = 'FIXED',
-      depositType = 'FIXED',
-      durationMinutes = 30,
-      bufferBeforeMinutes = 0,
-      bufferAfterMinutes = 0,
-      priceMinor = 0,
-      depositRequiredMinor = 0,
-      imageUrl,
-      assignedStaff = [],
-      resourceIds = []
-    } = req.body;
+    const body = req.body || {};
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    const durationMinutes = body.durationMinutes ?? 30;
+    const bufferBeforeMinutes = body.bufferBeforeMinutes ?? 0;
+    const bufferAfterMinutes = body.bufferAfterMinutes ?? 0;
+    const priceMinor = body.priceMinor ?? 0;
+    const depositRequiredMinor = body.depositRequiredMinor ?? 0;
+    const resourceIds = body.resourceIds;
 
-    if (!name) {
-      return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'Service offering name is required' });
+    if (!name || name.length > 160) {
+      return res.status(400).json({ error: 'INVALID_OFFERING_NAME', message: 'Service name must contain 1 to 160 characters.' });
+    }
+    if (!Number.isSafeInteger(durationMinutes) || durationMinutes < 5 || durationMinutes > 1440 ||
+        !Number.isSafeInteger(bufferBeforeMinutes) || bufferBeforeMinutes < 0 || bufferBeforeMinutes > 240 ||
+        !Number.isSafeInteger(bufferAfterMinutes) || bufferAfterMinutes < 0 || bufferAfterMinutes > 240 ||
+        !Number.isSafeInteger(priceMinor) || priceMinor < 0 ||
+        !Number.isSafeInteger(depositRequiredMinor) || depositRequiredMinor < 0 || depositRequiredMinor > priceMinor) {
+      return res.status(400).json({ error: 'INVALID_OFFERING_CONFIGURATION', message: 'Duration, buffers, price or deposit amount is outside supported limits.' });
+    }
+    if (!Array.isArray(resourceIds) || resourceIds.length < 1 || resourceIds.length > 100 ||
+        resourceIds.some((id: unknown) => typeof id !== 'string' || !id)) {
+      return res.status(400).json({ error: 'RESOURCE_ASSIGNMENT_REQUIRED', message: 'Assign at least one active appointment staff member to this service.' });
     }
 
-    const handle = (rawHandle || name)
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '');
-    const offeringId = `off-${uuidv4()}`;
+    const uniqueResourceIds = [...new Set(resourceIds)];
+    const resourceRes = await query(
+      `SELECT r.id, sp.id AS staff_profile_id
+       FROM resources r
+       JOIN staff_profiles sp ON sp.id = r.staff_profile_id
+       WHERE r.id = ANY($1::varchar[])
+         AND r.store_id = $2 AND r.is_active = TRUE
+         AND sp.store_id = $2 AND sp.is_active = TRUE
+         AND sp.responsibilities @> '["APPOINTMENT_STAFF"]'::jsonb`,
+      [uniqueResourceIds, storeId]
+    );
+    if (resourceRes.rowCount !== uniqueResourceIds.length) {
+      return res.status(400).json({ error: 'INVALID_RESOURCE_ASSIGNMENT', message: 'Every assigned staff resource must be active, appointment-enabled and owned by this store.' });
+    }
+
+    const handleBase = (typeof body.handle === 'string' && body.handle.trim() ? body.handle : name)
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 120);
+    const offeringId = 'off-' + uuidv4();
 
     await withTransaction(async (client) => {
       await client.query(
-        `INSERT INTO offerings (id, store_id, name, handle, description, category, service_type, pricing_type, deposit_type, duration_minutes, buffer_before_minutes, buffer_after_minutes, price_minor, deposit_required_minor, image_url, assigned_staff, is_active)
+        `INSERT INTO offerings (
+           id, store_id, name, handle, description, category, service_type,
+           pricing_type, deposit_type, duration_minutes, buffer_before_minutes,
+           buffer_after_minutes, price_minor, deposit_required_minor,
+           image_url, assigned_staff, is_active
+         )
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, TRUE)`,
         [
-          offeringId,
-          storeId,
-          name,
-          `${handle}-${uuidv4().substring(0, 4)}`,
-          description || '',
-          category,
-          serviceType,
-          pricingType,
-          depositType,
-          durationMinutes,
-          bufferBeforeMinutes,
-          bufferAfterMinutes,
-          priceMinor,
-          depositRequiredMinor,
-          imageUrl || null,
-          JSON.stringify(assignedStaff)
+          offeringId, storeId, name,
+          handleBase + '-' + uuidv4().slice(0, 4),
+          typeof body.description === 'string' ? body.description.slice(0, 4000) : '',
+          typeof body.category === 'string' ? body.category.slice(0, 100) : 'General',
+          body.serviceType || 'IN_PERSON',
+          body.pricingType || 'FIXED',
+          body.depositType || 'FIXED',
+          durationMinutes, bufferBeforeMinutes, bufferAfterMinutes,
+          priceMinor, depositRequiredMinor,
+          typeof body.imageUrl === 'string' ? body.imageUrl : null,
+          JSON.stringify(resourceRes.rows.map((row) => row.staff_profile_id))
         ]
       );
-
-      for (const resId of resourceIds) {
+      for (let index = 0; index < uniqueResourceIds.length; index += 1) {
         await client.query(
           `INSERT INTO offering_resources (offering_id, resource_id, is_primary)
-           VALUES ($1, $2, TRUE)
+           VALUES ($1, $2, $3)
            ON CONFLICT DO NOTHING`,
-          [offeringId, resId]
+          [offeringId, uniqueResourceIds[index], index === 0]
         );
       }
     });
 
-    res.status(201).json({ message: 'Service offering created', offeringId });
+    res.status(201).json({ message: 'Service offering created.', offeringId });
   }
 );
 
@@ -202,62 +217,112 @@ appointmentsRouter.put(
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const offeringId = req.params.id as string;
-    const {
-      name,
-      description,
-      category,
-      serviceType,
-      pricingType,
-      depositType,
-      durationMinutes,
-      bufferBeforeMinutes,
-      bufferAfterMinutes,
-      priceMinor,
-      depositRequiredMinor,
-      imageUrl,
-      assignedStaff,
-      isActive
-    } = req.body;
+    const body = req.body || {};
+    const numericFields: Array<[string, number, number]> = [
+      ['durationMinutes', 5, 1440],
+      ['bufferBeforeMinutes', 0, 240],
+      ['bufferAfterMinutes', 0, 240],
+      ['priceMinor', 0, Number.MAX_SAFE_INTEGER],
+      ['depositRequiredMinor', 0, Number.MAX_SAFE_INTEGER]
+    ];
+    for (const [key, min, max] of numericFields) {
+      if (body[key] !== undefined && (!Number.isSafeInteger(body[key]) || body[key] < min || body[key] > max)) {
+        return res.status(400).json({ error: 'INVALID_OFFERING_CONFIGURATION', message: key + ' is outside supported limits.' });
+      }
+    }
+    if (body.name !== undefined && (typeof body.name !== 'string' || !body.name.trim() || body.name.trim().length > 160)) {
+      return res.status(400).json({ error: 'INVALID_OFFERING_NAME', message: 'Service name must contain 1 to 160 characters.' });
+    }
+    if (body.resourceIds !== undefined &&
+        (!Array.isArray(body.resourceIds) || body.resourceIds.length < 1 || body.resourceIds.length > 100 ||
+         body.resourceIds.some((id: unknown) => typeof id !== 'string' || !id))) {
+      return res.status(400).json({ error: 'RESOURCE_ASSIGNMENT_REQUIRED', message: 'Assign at least one active appointment staff member to this service.' });
+    }
 
-    await query(
-      `UPDATE offerings
-       SET name = COALESCE($1, name),
-           description = COALESCE($2, description),
-           category = COALESCE($3, category),
-           service_type = COALESCE($4, service_type),
-           pricing_type = COALESCE($5, pricing_type),
-           deposit_type = COALESCE($6, deposit_type),
-           duration_minutes = COALESCE($7, duration_minutes),
-           buffer_before_minutes = COALESCE($8, buffer_before_minutes),
-           buffer_after_minutes = COALESCE($9, buffer_after_minutes),
-           price_minor = COALESCE($10, price_minor),
-           deposit_required_minor = COALESCE($11, deposit_required_minor),
-           image_url = COALESCE($12, image_url),
-           assigned_staff = COALESCE($13, assigned_staff),
-           is_active = COALESCE($14, is_active),
-           updated_at = NOW()
-       WHERE id = $15 AND store_id = $16`,
-      [
-        name,
-        description,
-        category,
-        serviceType,
-        pricingType,
-        depositType,
-        durationMinutes,
-        bufferBeforeMinutes,
-        bufferAfterMinutes,
-        priceMinor,
-        depositRequiredMinor,
-        imageUrl,
-        assignedStaff ? JSON.stringify(assignedStaff) : null,
-        isActive,
-        offeringId,
-        storeId
-      ]
-    );
+    const uniqueResourceIds = body.resourceIds === undefined ? undefined : [...new Set(body.resourceIds)];
+    try {
+      await withTransaction(async (client) => {
+        const existing = await client.query(
+          `SELECT id FROM offerings WHERE id = $1 AND store_id = $2 FOR UPDATE`,
+          [offeringId, storeId]
+        );
+        if (existing.rowCount === 0) {
+          throw Object.assign(new Error('Service offering was not found in this store.'), { statusCode: 404, code: 'OFFERING_NOT_FOUND' });
+        }
 
-    res.json({ message: 'Service offering updated successfully' });
+        let assignedStaffJson: string | null = null;
+        if (uniqueResourceIds) {
+          const resourceRes = await client.query(
+            `SELECT r.id, sp.id AS staff_profile_id
+             FROM resources r
+             JOIN staff_profiles sp ON sp.id = r.staff_profile_id
+             WHERE r.id = ANY($1::varchar[])
+               AND r.store_id = $2 AND r.is_active = TRUE
+               AND sp.store_id = $2 AND sp.is_active = TRUE
+               AND sp.responsibilities @> '["APPOINTMENT_STAFF"]'::jsonb`,
+            [uniqueResourceIds, storeId]
+          );
+          if (resourceRes.rowCount !== uniqueResourceIds.length) {
+            throw Object.assign(new Error('Every assigned staff resource must be active, appointment-enabled and owned by this store.'), { statusCode: 400, code: 'INVALID_RESOURCE_ASSIGNMENT' });
+          }
+          assignedStaffJson = JSON.stringify(resourceRes.rows.map((row) => row.staff_profile_id));
+        }
+
+        await client.query(
+          `UPDATE offerings
+           SET name = COALESCE($1, name),
+               description = COALESCE($2, description),
+               category = COALESCE($3, category),
+               service_type = COALESCE($4, service_type),
+               pricing_type = COALESCE($5, pricing_type),
+               deposit_type = COALESCE($6, deposit_type),
+               duration_minutes = COALESCE($7, duration_minutes),
+               buffer_before_minutes = COALESCE($8, buffer_before_minutes),
+               buffer_after_minutes = COALESCE($9, buffer_after_minutes),
+               price_minor = COALESCE($10, price_minor),
+               deposit_required_minor = COALESCE($11, deposit_required_minor),
+               image_url = COALESCE($12, image_url),
+               assigned_staff = COALESCE($13, assigned_staff),
+               is_active = COALESCE($14, is_active),
+               updated_at = NOW()
+           WHERE id = $15 AND store_id = $16`,
+          [
+            body.name?.trim() ?? null,
+            body.description ?? null,
+            body.category ?? null,
+            body.serviceType ?? null,
+            body.pricingType ?? null,
+            body.depositType ?? null,
+            body.durationMinutes ?? null,
+            body.bufferBeforeMinutes ?? null,
+            body.bufferAfterMinutes ?? null,
+            body.priceMinor ?? null,
+            body.depositRequiredMinor ?? null,
+            body.imageUrl ?? null,
+            assignedStaffJson,
+            body.isActive ?? null,
+            offeringId,
+            storeId
+          ]
+        );
+
+        if (uniqueResourceIds) {
+          await client.query(`DELETE FROM offering_resources WHERE offering_id = $1`, [offeringId]);
+          for (let index = 0; index < uniqueResourceIds.length; index += 1) {
+            await client.query(
+              `INSERT INTO offering_resources (offering_id, resource_id, is_primary)
+               VALUES ($1, $2, $3)`,
+              [offeringId, uniqueResourceIds[index], index === 0]
+            );
+          }
+        }
+      });
+    } catch (error: any) {
+      if (error.statusCode) return res.status(error.statusCode).json({ error: error.code, message: error.message });
+      throw error;
+    }
+
+    res.json({ message: 'Service offering updated successfully.' });
   }
 );
 
