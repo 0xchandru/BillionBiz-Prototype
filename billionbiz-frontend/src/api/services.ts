@@ -92,6 +92,20 @@ export interface UserProfile {
   mfaEnabled?: boolean;
 }
 
+export interface CreateOrderPayload {
+  customerId?: string;
+  customerDetails?: {
+    email?: string;
+    phone?: string;
+    firstName?: string;
+    lastName?: string;
+  };
+  items: Array<{ variantId: string; quantity: number }>;
+  channel?: 'STOREFRONT' | 'POS' | 'MANUAL';
+  shippingAddress?: Record<string, unknown>;
+  billingAddress?: Record<string, unknown>;
+}
+
 export interface AuthResponse {
   token: string;
   user: UserProfile;
@@ -251,7 +265,7 @@ export const api = {
     apiClient<DashboardMetricsResponse>('/dashboard/metrics', { params: { period } }),
 
   // Catalog
-  getProducts: (params?: { search?: string; status?: string; categoryId?: string }) =>
+  getProducts: (params?: { search?: string; status?: string; categoryId?: string; limit?: number; offset?: number }) =>
     apiClient<{ products: any[]; total: number }>('/catalog/products', { params }),
   createProduct: (product: any) =>
     apiClient<{ message: string; productId: string; variants?: any[] }>('/catalog/products', {
@@ -272,9 +286,10 @@ export const api = {
   getOrders: (params?: { status?: string; search?: string }) =>
     apiClient<{ orders: any[]; total: number }>('/orders', { params }),
   getOrderById: (id: string) => apiClient<any>(`/orders/${id}`),
-  createOrder: (order: any) =>
+  createOrder: (order: CreateOrderPayload, idempotencyKey?: string) =>
     apiClient<{ message: string; orderId: string; orderNumber: string }>('/orders', {
       method: 'POST',
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
       body: JSON.stringify(order)
     }),
   updateOrderStatus: (id: string, status: string, notes?: string) =>
