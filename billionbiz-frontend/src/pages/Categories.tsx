@@ -220,7 +220,7 @@ export const CategoriesPage: FC = () => {
               : 'Create categories like Apparel, Electronics, or Home Goods to group your catalog products.'
           }
           actionLabel="Add First Category"
-          onAction={() => setShowAddModal(true)}
+          onAction={openCreateModal}
         />
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 320px), 1fr))', gap: '20px' }}>
@@ -296,8 +296,9 @@ export const CategoriesPage: FC = () => {
 
             <form onSubmit={handleSaveCategory} style={{ padding: '24px' }}>
               <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Category Name *</label>
+                <label htmlFor="category-name" style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Category Name *</label>
                 <input
+                  id="category-name"
                   type="text"
                   required
                   placeholder="e.g. Footwear & Shoes"
@@ -309,8 +310,9 @@ export const CategoriesPage: FC = () => {
               </div>
 
               <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>URL Slug</label>
+                <label htmlFor="category-slug" style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>URL Slug</label>
                 <input
+                  id="category-slug"
                   type="text"
                   placeholder="footwear-shoes"
                   maxLength={255}
@@ -321,8 +323,9 @@ export const CategoriesPage: FC = () => {
               </div>
 
               <div style={{ marginBottom: '24px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Description</label>
+                <label htmlFor="category-description" style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Description</label>
                 <textarea
+                  id="category-description"
                   rows={3}
                   maxLength={2000}
                   placeholder="Summary for storefront SEO..."
@@ -331,6 +334,10 @@ export const CategoriesPage: FC = () => {
                   style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
                 />
               </div>
+
+              {actionError && (
+                <div role="alert" style={{ padding: '10px 12px', marginBottom: '14px', borderRadius: '8px', background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: '12px' }}>{actionError}</div>
+              )}
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
                 <button
