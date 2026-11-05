@@ -685,6 +685,7 @@ identityRouter.post('/mfa/verify', requireAuth, async (req: Request, res: Respon
            WITH ORDINALITY AS recovery(code_hash, ordinal)
          WHERE code_hash <> $1
        ),
+       mfa_enabled = TRUE,
        mfa_failed_attempts = 0,
        mfa_locked_until = NULL
        WHERE id = $2
@@ -698,7 +699,7 @@ identityRouter.post('/mfa/verify', requireAuth, async (req: Request, res: Respon
     }
     return res.json({
       message: 'Recovery code accepted. This recovery code has been consumed and cannot be used again.',
-      mfaEnabled: Boolean(user.mfa_enabled),
+      mfaEnabled: true,
       recoveryCodeConsumed: true
     });
   }
