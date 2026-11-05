@@ -13,7 +13,8 @@ import {
   Zap,
   Settings as SettingsIcon,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  X
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import styles from './Sidebar.module.css';
@@ -139,12 +140,44 @@ export const navSections: NavSection[] = [
   }
 ];
 
-export const Sidebar: FC = () => {
+interface SidebarProps {
+  mobileOpen: boolean;
+  onClose: () => void;
+}
+
+export const Sidebar: FC<SidebarProps> = ({ mobileOpen, onClose }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, storeName, role } = useAuthStore();
 
   const [activeDropdown, setActiveDropdown] = useState<string | null>('orders');
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    const desktopMedia = window.matchMedia('(min-width: 769px)');
+    const handleDesktopChange = (event: MediaQueryListEvent) => {
+      if (event.matches) onClose();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    desktopMedia.addEventListener('change', handleDesktopChange);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+      desktopMedia.removeEventListener('change', handleDesktopChange);
+    };
+  }, [mobileOpen, onClose]);
+
+  useEffect(() => {
+    onClose();
+  }, [location.pathname, onClose]);
 
   // Sync active accordion dropdown with current URL path on load, refresh, or back/forward
   useEffect(() => {
@@ -210,7 +243,25 @@ export const Sidebar: FC = () => {
 
   return (
     <>
-      <aside className={styles.sidebar}>
+      {mobileOpen && (
+        <button
+          type="button"
+          className={styles.backdrop}
+          aria-label="Close navigation menu"
+          onClick={onClose}
+        />
+      )}
+      <aside
+        id="merchant-navigation"
+        aria-label="Main navigation"
+        className={`${styles.sidebar} ${mobileOpen ? styles.sidebarOpen : ''}`}
+      >
+        <div className={styles.mobileDrawerHeader}>
+          <span>Navigation</span>
+          <button type="button" className={styles.mobileCloseBtn} onClick={onClose} aria-label="Close navigation menu">
+            <X size={19} aria-hidden="true" />
+          </button>
+        </div>
         {/* Scrollable Navigation Rail */}
         <nav className={styles.navContainer}>
           {/* 1. Dashboard Direct Link */}
@@ -218,6 +269,7 @@ export const Sidebar: FC = () => {
             <Link 
               to="/dashboard" 
               className={`${styles.itemBtn} ${isHomeActive ? styles.itemActiveDirect : ''}`}
+              aria-current={isHomeActive ? 'page' : undefined}
             >
               <div className={styles.itemLeft}>
                 <LayoutDashboard size={18} className={styles.itemIcon} />
@@ -279,6 +331,7 @@ export const Sidebar: FC = () => {
                           key={sub.id}
                           to={sub.path}
                           className={`${styles.subItem} ${active ? styles.subItemActive : ''}`}
+                          aria-current={active ? 'page' : undefined}
                         >
                           {sub.label}
                         </Link>
