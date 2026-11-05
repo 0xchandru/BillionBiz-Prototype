@@ -527,12 +527,37 @@ appointmentsRouter.put(
       maxAdvanceDays = 60,
       slotIntervalMinutes = 30,
       bufferMinutes = 10,
-      depositRequired = false
-    } = req.body;
+      depositRequired = false,
+      timezone: requestedTimezone
+    } = req.body || {};
+
+    const numericSettings = [minNoticeHours, maxAdvanceDays, slotIntervalMinutes, bufferMinutes];
+    if (numericSettings.some((value) => typeof value !== 'number' || !Number.isInteger(value)) ||
+        minNoticeHours < 0 || minNoticeHours > 8760 ||
+        maxAdvanceDays < 1 || maxAdvanceDays > 365 ||
+        slotIntervalMinutes < 5 || slotIntervalMinutes > 180 ||
+        bufferMinutes < 0 || bufferMinutes > 240) {
+      return res.status(400).json({ error: 'INVALID_BOOKING_SETTINGS', message: 'Notice, advance-booking, slot interval or buffer values are outside supported limits.' });
+    }
+    if (!['AUTOMATIC', 'MANUAL'].includes(confirmationMode)) {
+      return res.status(400).json({ error: 'INVALID_CONFIRMATION_MODE', message: 'Confirmation mode must be AUTOMATIC or MANUAL.' });
+    }
+    if (cancellationPolicy !== undefined && (typeof cancellationPolicy !== 'string' || cancellationPolicy.length > 4000)) {
+      return res.status(400).json({ error: 'INVALID_CANCELLATION_POLICY', message: 'Cancellation policy must be text with a maximum length of 4,000 characters.' });
+    }
+    if (reschedulingPolicy !== undefined && (typeof reschedulingPolicy !== 'string' || reschedulingPolicy.length > 4000)) {
+      return res.status(400).json({ error: 'INVALID_RESCHEDULING_POLICY', message: 'Rescheduling policy must be text with a maximum length of 4,000 characters.' });
+    }
+
+    const storeTimezoneRes = await query(`SELECT timezone FROM stores WHERE id = $1`, [storeId]);
+    const timezone = requestedTimezone || storeTimezoneRes.rows[0]?.timezone || 'Asia/Kolkata';
+    if (!isValidTimeZone(timezone)) {
+      return res.status(400).json({ error: 'INVALID_TIMEZONE', message: 'Choose a valid IANA timezone.' });
+    }
 
     await query(
       `INSERT INTO store_booking_settings (store_id, confirmation_mode, cancellation_policy, rescheduling_policy, min_notice_hours, max_advance_days, slot_interval_minutes, buffer_minutes, timezone, deposit_required, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Asia/Kolkata', $9, NOW())
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
        ON CONFLICT (store_id) DO UPDATE SET
          confirmation_mode = EXCLUDED.confirmation_mode,
          cancellation_policy = EXCLUDED.cancellation_policy,
@@ -541,9 +566,10 @@ appointmentsRouter.put(
          max_advance_days = EXCLUDED.max_advance_days,
          slot_interval_minutes = EXCLUDED.slot_interval_minutes,
          buffer_minutes = EXCLUDED.buffer_minutes,
+         timezone = EXCLUDED.timezone,
          deposit_required = EXCLUDED.deposit_required,
          updated_at = NOW()`,
-      [storeId, confirmationMode, cancellationPolicy, reschedulingPolicy, minNoticeHours, maxAdvanceDays, slotIntervalMinutes, bufferMinutes, depositRequired]
+      [storeId, confirmationMode, cancellationPolicy ?? null, reschedulingPolicy ?? null, minNoticeHours, maxAdvanceDays, slotIntervalMinutes, bufferMinutes, timezone, Boolean(depositRequired)]
     );
 
     res.json({ message: 'Booking settings saved successfully' });
