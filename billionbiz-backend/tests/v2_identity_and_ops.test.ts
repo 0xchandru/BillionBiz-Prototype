@@ -205,16 +205,28 @@ describe('V2 Identity, First-Store Provisioning & Outbox Services', () => {
     expect(cashierRes.body.portalDestination.url).toBe('https://pos.chandraprakash.codes');
   });
 
-  it('T-054: Outbox Worker processes pending events, dispatches notifications, and updates inbox', async () => {
-    // Trigger outbox processing
-    const processRes = await makeRequest('POST', '/api/v1/notifications/process-outbox');
+  it('T-054: only platform administrators can trigger the global outbox worker', async () => {
+    const merchantToken = authToken;
 
+    // A store owner cannot trigger a worker that processes every tenant's events.
+    const merchantProcessRes = await makeRequest('POST', '/api/v1/notifications/process-outbox');
+    expect(merchantProcessRes.status).toBe(403);
+
+    const adminLogin = await makeRequest('POST', '/api/v1/auth/login', {
+      body: { email: 'admin@billionbiz.com', password: 'Admin@123' }
+    });
+    expect(adminLogin.status).toBe(200);
+    expect(adminLogin.body.token).toBeDefined();
+
+    const processRes = await makeRequest('POST', '/api/v1/notifications/process-outbox', {
+      headers: { authorization: `Bearer ${adminLogin.body.token}` }
+    });
     expect(processRes.status).toBe(200);
     expect(processRes.body.processed).toBeGreaterThanOrEqual(1);
 
-    // Verify notifications inbox
+    // Restore the merchant context and verify its own inbox.
+    authToken = merchantToken;
     const inboxRes = await makeRequest('GET', '/api/v1/notifications/inbox');
-
     expect(inboxRes.status).toBe(200);
     expect(inboxRes.body).toHaveProperty('notifications');
     expect(inboxRes.body.notifications.length).toBeGreaterThanOrEqual(1);
