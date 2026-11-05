@@ -176,6 +176,23 @@ describe('V2 Streamlined Registration & Phone/Email OTP Authentication', () => {
     expect(correctAfterLock.body.error).toBe('INVALID_OTP');
   });
 
+  it('rate-limits repeated OTP sends for the same recipient', async () => {
+    const identifier = `otp-send-limit-${Date.now()}@test.codes`;
+
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      const sent = await makeRequest('POST', '/api/v1/auth/otp/send', {
+        body: { identifier, type: 'REGISTER' }
+      });
+      expect(sent.status).toBe(200);
+    }
+
+    const blocked = await makeRequest('POST', '/api/v1/auth/otp/send', {
+      body: { identifier, type: 'REGISTER' }
+    });
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.error).toBe('OTP_SEND_RATE_LIMITED');
+  });
+
   it('registers store via streamlined flow with storefront type', async () => {
     const regRes = await makeRequest('POST', '/api/v1/auth/register-streamlined', {
       body: {
