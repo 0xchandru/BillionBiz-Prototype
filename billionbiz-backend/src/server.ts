@@ -88,7 +88,15 @@ export function isAllowedOrigin(origin: string | undefined): boolean {
 app.use((req, res, next) => {
   const origin = req.headers.origin;
 
-  if (origin) res.vary('Origin');
+  if (origin) {
+    const existingVary = String(res.getHeader('Vary') || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (!existingVary.some((value) => value.toLowerCase() === 'origin')) {
+      res.setHeader('Vary', [...existingVary, 'Origin'].join(', '));
+    }
+  }
 
   if (origin && isAllowedOrigin(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
