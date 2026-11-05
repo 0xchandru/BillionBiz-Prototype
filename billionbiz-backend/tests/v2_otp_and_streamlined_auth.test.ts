@@ -83,6 +83,8 @@ describe('V2 Streamlined Registration & Phone/Email OTP Authentication', () => {
     expect(res.body.success).toBe(true);
     expect(res.body.channel).toBe('EMAIL');
     expect(res.body.identifier).toBe(testEmail);
+    expect(res.body.testCode).toMatch(/^\d{6}$/);
+    expect(res.body).not.toHaveProperty('previewCode');
   });
 
   it('sends OTP code to international phone number for registration', async () => {
@@ -90,10 +92,9 @@ describe('V2 Streamlined Registration & Phone/Email OTP Authentication', () => {
       body: { identifier: testPhone, type: 'REGISTER' }
     });
 
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-    expect(res.body.channel).toBe('SMS');
-    expect(res.body.identifier).toBe(testPhone);
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe('SMS_PROVIDER_NOT_CONFIGURED');
+    expect(res.body.success).not.toBe(true);
   });
 
   it('strictly blocks registration OTP when email is already registered and returns 409 USER_ALREADY_EXISTS', async () => {
@@ -134,15 +135,11 @@ describe('V2 Streamlined Registration & Phone/Email OTP Authentication', () => {
     });
     expect(sendRes.status).toBe(200);
 
-    const otpDb = await query(
-      `SELECT code FROM verification_otps WHERE identifier = $1 ORDER BY created_at DESC LIMIT 1`,
-      [testEmail]
-    );
-    const code = otpDb.rows[0].code;
+    const code = String(sendRes.body.testCode);
 
     // Bad code
     const badRes = await makeRequest('POST', '/api/v1/auth/otp/verify', {
-      body: { identifier: testEmail, code: '000000', type: 'REGISTER' }
+      body: { identifier: testEmail, code: code === '000000' ? '000001' : '000000', type: 'REGISTER' }
     });
     expect(badRes.status).toBe(400);
 
@@ -152,6 +149,31 @@ describe('V2 Streamlined Registration & Phone/Email OTP Authentication', () => {
     });
     expect(goodRes.status).toBe(200);
     expect(goodRes.body.verified).toBe(true);
+  });
+
+  it('locks an OTP after five incorrect verification attempts', async () => {
+    const identifier = `otp-lock-${Date.now()}@test.codes`;
+    const sent = await makeRequest('POST', '/api/v1/auth/otp/send', {
+      body: { identifier, type: 'REGISTER' }
+    });
+    expect(sent.status).toBe(200);
+
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      const invalid = await makeRequest('POST', '/api/v1/auth/otp/verify', {
+        body: {
+          identifier,
+          code: sent.body.testCode === '000000' ? '000001' : '000000',
+          type: 'REGISTER'
+        }
+      });
+      expect(invalid.status).toBe(attempt === 5 ? 429 : 400);
+    }
+
+    const correctAfterLock = await makeRequest('POST', '/api/v1/auth/otp/verify', {
+      body: { identifier, code: sent.body.testCode, type: 'REGISTER' }
+    });
+    expect(correctAfterLock.status).toBe(400);
+    expect(correctAfterLock.body.error).toBe('INVALID_OTP');
   });
 
   it('registers store via streamlined flow with storefront type', async () => {
@@ -195,11 +217,7 @@ describe('V2 Streamlined Registration & Phone/Email OTP Authentication', () => {
 
     expect(sendRes.status).toBe(200);
 
-    const otpDb = await query(
-      `SELECT code FROM verification_otps WHERE identifier = $1 ORDER BY created_at DESC LIMIT 1`,
-      [testEmail]
-    );
-    const otpCode = otpDb.rows[0].code;
+    const otpCode = String(sendRes.body.testCode);
 
     // 2. Submit login with OTP
     const loginRes = await makeRequest('POST', '/api/v1/auth/login-unified', {
