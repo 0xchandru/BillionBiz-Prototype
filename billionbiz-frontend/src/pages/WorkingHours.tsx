@@ -1,15 +1,10 @@
 import { useState, useEffect } from 'react';
 import type { FC } from 'react';
-import {
-  Clock,
-  CheckCircle2,
-  Calendar,
-  Coffee
-} from 'lucide-react';
+import { Clock, Plus, CheckCircle2, Trash2, RefreshCw } from 'lucide-react';
 import { api } from '../api/services';
 import { TableSkeleton } from '../components/common/SkeletonLoader';
 
-const DAYS_OF_WEEK = [
+const DAYS = [
   { day: 1, name: 'Monday' },
   { day: 2, name: 'Tuesday' },
   { day: 3, name: 'Wednesday' },
@@ -19,241 +14,211 @@ const DAYS_OF_WEEK = [
   { day: 0, name: 'Sunday' }
 ];
 
+type Shift = {
+  id?: string;
+  clientId: string;
+  staff_profile_id: string;
+  staff_name: string;
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  is_active: boolean;
+};
+
+const inputStyle: React.CSSProperties = {
+  padding: '8px 10px',
+  border: '1px solid #cbd5e1',
+  borderRadius: 7,
+  background: '#fff',
+  color: '#0f172a',
+  fontSize: 12
+};
+
 export const WorkingHoursPage: FC = () => {
-  const [shifts, setShifts] = useState<any[]>([]);
+  const [staff, setStaff] = useState<any[]>([]);
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [timezone, setTimezone] = useState('Asia/Kolkata');
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const fetchHours = () => {
+  const fetchHours = async () => {
     setLoading(true);
-    api.getWorkingHours()
-      .then((res: any) => {
-        const loadedShifts = res.workingHours || res.shifts || [];
-        const mapped = DAYS_OF_WEEK.map((d) => {
-          const found = loadedShifts.find((s: any) => s.day_of_week === d.day);
-          return {
-            day_of_week: d.day,
-            name: d.name,
-            is_active: found ? found.is_active : d.day !== 0,
-            start_time: found ? found.start_time : '09:00',
-            end_time: found ? found.end_time : '19:00'
-          };
-        });
-        setShifts(mapped);
-      })
-      .catch((err) => {
-        console.error('Failed to load working hours', err);
-      })
-      .finally(() => {
-        setLoading(false);
-      });
+    setError(null);
+    try {
+      const [teamRes, hoursRes] = await Promise.all([
+        api.getTeamMembers(),
+        api.getWorkingHours()
+      ]);
+      const appointmentStaff = (teamRes.members || []).filter((member: any) =>
+        member.is_active === true &&
+        (Array.isArray(member.responsibilities) ? member.responsibilities : []).includes('APPOINTMENT_STAFF')
+      );
+      setStaff(appointmentStaff);
+      setTimezone(hoursRes.timezone || 'Asia/Kolkata');
+      const staffById = new Map(appointmentStaff.map((member: any) => [member.id, member]));
+      setShifts((hoursRes.shifts || [])
+        .filter((shift: any) => staffById.has(shift.staff_profile_id))
+        .map((shift: any) => ({
+          id: shift.id,
+          clientId: shift.id,
+          staff_profile_id: shift.staff_profile_id,
+          staff_name: staffById.get(shift.staff_profile_id)?.display_name || shift.staff_name || 'Appointment staff',
+          day_of_week: Number(shift.day_of_week),
+          start_time: String(shift.start_time).slice(0, 5),
+          end_time: String(shift.end_time).slice(0, 5),
+          is_active: shift.is_active === true
+        })));
+    } catch (err: any) {
+      setError(err.message || 'Could not load staff schedules.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  useEffect(() => {
-    fetchHours();
-  }, []);
+  useEffect(() => { void fetchHours(); }, []);
 
-  const handleToggleDay = (day: number) => {
-    setShifts((prev) =>
-      prev.map((s) => (s.day_of_week === day ? { ...s, is_active: !s.is_active } : s))
-    );
+  const addShift = (member: any) => {
+    setShifts((previous) => [
+      ...previous,
+      {
+        clientId: 'new-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+        staff_profile_id: member.id,
+        staff_name: member.display_name,
+        day_of_week: 1,
+        start_time: '09:00',
+        end_time: '17:00',
+        is_active: true
+      }
+    ]);
   };
 
-  const handleTimeChange = (day: number, field: 'start_time' | 'end_time', value: string) => {
-    setShifts((prev) =>
-      prev.map((s) => (s.day_of_week === day ? { ...s, [field]: value } : s))
-    );
+  const updateShift = (clientId: string, patch: Partial<Shift>) => {
+    setShifts((previous) => previous.map((shift) =>
+      shift.clientId === clientId ? { ...shift, ...patch } : shift
+    ));
+  };
+
+  const removeShift = (shift: Shift) => {
+    if (shift.id) {
+      updateShift(shift.clientId, { is_active: false });
+    } else {
+      setShifts((previous) => previous.filter((item) => item.clientId !== shift.clientId));
+    }
   };
 
   const handleSave = async () => {
+    const invalid = shifts.find((shift) =>
+      shift.is_active &&
+      (!/^([01]\d|2[0-3]):[0-5]\d$/.test(shift.start_time) ||
+       !/^([01]\d|2[0-3]):[0-5]\d$/.test(shift.end_time) ||
+       shift.end_time <= shift.start_time)
+    );
+    if (invalid) {
+      setError('Every active shift must have valid times and its end must be later than its start.');
+      return;
+    }
+
     setIsSaving(true);
+    setError(null);
+    setSaveSuccess(false);
     try {
-      await api.updateWorkingHours(shifts);
+      await api.updateWorkingHours(shifts.map((shift) => ({
+        ...(shift.id ? { id: shift.id } : { staffProfileId: shift.staff_profile_id }),
+        dayOfWeek: shift.day_of_week,
+        startTime: shift.start_time,
+        endTime: shift.end_time,
+        isActive: shift.is_active
+      })));
       setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 2500);
+      await fetchHours();
+      window.setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err: any) {
-      alert(err.message || 'Failed to save working hours');
+      setError(err.message || 'Failed to save working hours.');
     } finally {
       setIsSaving(false);
     }
   };
 
   return (
-    <div style={{ padding: '24px 32px', maxWidth: '1100px', margin: '0 auto', fontFamily: 'Inter, -apple-system, sans-serif' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+    <div style={{ padding: 24, maxWidth: 1180, margin: '0 auto', fontFamily: 'Inter, -apple-system, sans-serif' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 22 }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#64748b', marginBottom: '6px' }}>
-            <span>Appointments</span>
-            <span>/</span>
-            <span style={{ color: '#083e47', fontWeight: 600 }}>Working Hours</span>
-          </div>
-          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#0f172a', margin: 0 }}>
-            Working Hours & Shifts (IST)
-          </h1>
-          <p style={{ fontSize: '14px', color: '#64748b', marginTop: '4px' }}>
-            Configure regular operating windows in Indian Standard Time (Asia/Kolkata, UTC+5:30).
+          <div style={{ fontSize: 12, color: '#64748b', marginBottom: 5 }}>Appointments / Schedules</div>
+          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 750, color: '#0f172a' }}>Staff working hours</h1>
+          <p style={{ margin: '6px 0 0', fontSize: 13, color: '#64748b' }}>
+            Define one or more weekly shifts for each team member assigned to Appointment Staff. Times are stored in {timezone}.
           </p>
         </div>
-
-        <button
-          onClick={handleSave}
-          disabled={isSaving}
-          style={{
-            backgroundColor: '#083e47',
-            color: '#ffffff',
-            border: 'none',
-            borderRadius: '8px',
-            padding: '10px 20px',
-            fontSize: '14px',
-            fontWeight: 600,
-            cursor: isSaving ? 'not-allowed' : 'pointer',
-            boxShadow: '0 1px 3px rgba(8, 62, 71, 0.25)'
-          }}
-        >
-          {isSaving ? 'Saving Changes...' : 'Save Working Hours'}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" onClick={() => void fetchHours()} disabled={loading} style={{ ...inputStyle, display: 'inline-flex', alignItems: 'center', gap: 7, cursor: 'pointer' }}>
+            <RefreshCw size={14} /> Refresh
+          </button>
+          <button type="button" onClick={() => void handleSave()} disabled={isSaving || loading} style={{ padding: '9px 15px', border: 0, borderRadius: 8, background: '#083e47', color: '#fff', fontSize: 12, fontWeight: 700, cursor: isSaving ? 'wait' : 'pointer' }}>
+            {isSaving ? 'Saving…' : 'Save schedules'}
+          </button>
+        </div>
       </div>
 
-      {saveSuccess && (
-        <div style={{ padding: '12px 18px', background: '#dcfce7', border: '1px solid #bbf7d0', borderRadius: '8px', color: '#15803d', fontSize: '14px', fontWeight: 600, marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <CheckCircle2 size={18} />
-          <span>Working hours updated and live on client appointment booking widget!</span>
-        </div>
-      )}
+      {error && <div role="alert" style={{ marginBottom: 16, padding: 12, background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: 8, fontSize: 12 }}>{error}</div>}
+      {saveSuccess && <div role="status" style={{ marginBottom: 16, padding: 12, background: '#ecfdf5', border: '1px solid #a7f3d0', color: '#047857', borderRadius: 8, fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}><CheckCircle2 size={15} /> Staff schedules saved.</div>}
 
       {loading ? (
-        <div style={{ background: '#ffffff', padding: '24px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-          <TableSkeleton rows={7} columns={3} />
+        <div style={{ padding: 20, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12 }}>
+          <TableSkeleton rows={5} columns={4} />
+        </div>
+      ) : staff.length === 0 ? (
+        <div style={{ padding: 28, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, textAlign: 'center' }}>
+          <Clock size={28} color="#94a3b8" style={{ margin: '0 auto 10px' }} />
+          <h2 style={{ margin: '0 0 6px', fontSize: 15, color: '#0f172a' }}>No appointment staff assigned</h2>
+          <p style={{ maxWidth: 520, margin: '0 auto', fontSize: 12, color: '#64748b', lineHeight: 1.6 }}>
+            Add a person in Team, assign the Appointment Staff responsibility, and they will appear here. Staff identities and appointment resources are shared; this page does not create duplicate specialist profiles.
+          </p>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          {/* Section 1: Weekly Operating Schedule */}
-          <div style={{ background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#f0fdfa', color: '#083e47', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Clock size={18} />
-              </div>
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>
-                Weekly Operating Schedule (IST)
-              </h3>
-            </div>
-            <p style={{ color: '#64748b', fontSize: '13.5px', marginBottom: '20px' }}>
-              Set opening and closing times for each day of the week.
-            </p>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {shifts.map((s) => (
-                <div
-                  key={s.day_of_week}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    flexWrap: 'wrap',
-                    gap: '12px',
-                    padding: '14px 18px',
-                    borderRadius: '10px',
-                    background: s.is_active ? '#f8fafc' : '#f1f5f9',
-                    border: '1px solid #e2e8f0',
-                    opacity: s.is_active ? 1 : 0.65
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px', width: '180px' }}>
-                    <input
-                      type="checkbox"
-                      checked={s.is_active}
-                      onChange={() => handleToggleDay(s.day_of_week)}
-                      style={{ accentColor: '#083e47', width: '18px', height: '18px', cursor: 'pointer' }}
-                    />
-                    <span style={{ fontWeight: 700, fontSize: '14px', color: '#0f172a' }}>
-                      {s.name}
-                    </span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {staff.map((member) => {
+            const memberShifts = shifts
+              .filter((shift) => shift.staff_profile_id === member.id)
+              .sort((a, b) => a.day_of_week - b.day_of_week || a.start_time.localeCompare(b.start_time));
+            return (
+              <section key={member.id} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden' }}>
+                <div style={{ padding: '14px 18px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{member.display_name}</div>
+                    <div style={{ fontSize: 11, color: '#64748b', marginTop: 3 }}>{member.email || member.phone || 'No contact details'} · {memberShifts.filter((shift) => shift.is_active).length} active shift(s)</div>
                   </div>
-
-                  {s.is_active ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '13px' }}>
-                      <input
-                        type="time"
-                        value={s.start_time.slice(0, 5)}
-                        onChange={(e) => handleTimeChange(s.day_of_week, 'start_time', e.target.value)}
-                        style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', background: '#fff' }}
-                      />
-                      <span style={{ color: '#64748b' }}>to</span>
-                      <input
-                        type="time"
-                        value={s.end_time.slice(0, 5)}
-                        onChange={(e) => handleTimeChange(s.day_of_week, 'end_time', e.target.value)}
-                        style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', background: '#fff' }}
-                      />
-                      <span style={{ color: '#083e47', fontSize: '12px', fontWeight: 600 }}>IST</span>
-                    </div>
-                  ) : (
-                    <div style={{ fontSize: '13px', color: '#64748b', fontWeight: 600 }}>
-                      Closed / Not Operating
-                    </div>
-                  )}
+                  <button type="button" onClick={() => addShift(member)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 8, background: '#fff', color: '#334155', fontSize: 11, fontWeight: 650, cursor: 'pointer' }}>
+                    <Plus size={13} /> Add shift
+                  </button>
                 </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Section 2: Mid-Day Lunch & Break Windows */}
-          <div style={{ background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#f0fdfa', color: '#083e47', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Coffee size={18} />
-              </div>
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>
-                Mid-Day Lunch & Break Windows
-              </h3>
-            </div>
-            <p style={{ color: '#64748b', fontSize: '13.5px', marginBottom: '16px' }}>
-              Prevent automated client bookings during lunch hours (e.g. 13:00 - 14:00 IST) across all practitioner schedules.
-            </p>
-
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', padding: '12px 18px', borderRadius: '8px', background: '#f0fdfa', border: '1px solid #ccfbf1', color: '#0f766e', fontSize: '13.5px', fontWeight: 600 }}>
-              <Clock size={16} />
-              <span>Default Staff Break: 13:00 - 14:00 IST (Active across all schedules)</span>
-            </div>
-          </div>
-
-          {/* Section 3: National & Festive Holidays */}
-          <div style={{ background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#f0fdfa', color: '#083e47', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Calendar size={18} />
-              </div>
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>
-                National & Festive Holidays
-              </h3>
-            </div>
-            <p style={{ color: '#64748b', fontSize: '13.5px', margin: 0 }}>
-              Store closures on Republic Day, Diwali, and custom merchant blackout dates automatically block slot holds.
-            </p>
-          </div>
-
-          {/* Bottom Save Bar */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '8px' }}>
-            <button
-              onClick={handleSave}
-              disabled={isSaving}
-              style={{
-                backgroundColor: '#083e47',
-                color: '#ffffff',
-                border: 'none',
-                borderRadius: '8px',
-                padding: '10px 24px',
-                fontSize: '14px',
-                fontWeight: 600,
-                cursor: isSaving ? 'not-allowed' : 'pointer',
-                boxShadow: '0 1px 3px rgba(8, 62, 71, 0.25)'
-              }}
-            >
-              {isSaving ? 'Saving Changes...' : 'Save Working Hours'}
-            </button>
-          </div>
+                {memberShifts.length === 0 ? (
+                  <div style={{ padding: 16, fontSize: 12, color: '#94a3b8' }}>No shifts configured for this staff member.</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    {memberShifts.map((shift) => (
+                      <div key={shift.clientId} style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 1fr) auto auto auto', alignItems: 'center', gap: 10, padding: '11px 16px', borderTop: '1px solid #f8fafc', opacity: shift.is_active ? 1 : 0.55 }}>
+                        <select value={shift.day_of_week} onChange={(event) => updateShift(shift.clientId, { day_of_week: Number(event.target.value) })} style={inputStyle}>
+                          {DAYS.map((day) => <option key={day.day} value={day.day}>{day.name}</option>)}
+                        </select>
+                        <input type="time" value={shift.start_time} onChange={(event) => updateShift(shift.clientId, { start_time: event.target.value })} disabled={!shift.is_active} style={inputStyle} />
+                        <input type="time" value={shift.end_time} onChange={(event) => updateShift(shift.clientId, { end_time: event.target.value })} disabled={!shift.is_active} style={inputStyle} />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, color: '#64748b' }}>
+                            <input type="checkbox" checked={shift.is_active} onChange={(event) => updateShift(shift.clientId, { is_active: event.target.checked })} /> Active
+                          </label>
+                          <button type="button" onClick={() => removeShift(shift)} title={shift.id ? 'Deactivate shift' : 'Remove unsaved shift'} style={{ border: '1px solid #fecaca', background: '#fff', color: '#b91c1c', borderRadius: 7, padding: 7, cursor: 'pointer' }}>
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            );
+          })}
         </div>
       )}
     </div>
