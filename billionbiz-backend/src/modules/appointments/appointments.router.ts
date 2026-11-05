@@ -17,6 +17,7 @@ appointmentsRouter.get(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('appointments.view'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const offeringsRes = await query(
@@ -185,6 +186,7 @@ appointmentsRouter.delete(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('services.manage'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const offeringId = req.params.id as string;
@@ -201,6 +203,7 @@ appointmentsRouter.get(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('appointments.view'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
 
@@ -261,6 +264,7 @@ appointmentsRouter.put(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('team.manage'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const staffId = req.params.id as string;
@@ -303,6 +307,7 @@ appointmentsRouter.get(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('appointments.view'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
 
@@ -329,6 +334,7 @@ appointmentsRouter.put(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('schedule.manage'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const { shifts = [] } = req.body;
@@ -364,6 +370,7 @@ appointmentsRouter.get(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('appointments.view'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
 
@@ -399,6 +406,7 @@ appointmentsRouter.put(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('schedule.manage'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const {
@@ -440,6 +448,7 @@ appointmentsRouter.get(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('appointments.view'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const { offeringId, date } = req.query; // date: YYYY-MM-DD
@@ -539,6 +548,7 @@ appointmentsRouter.get(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('appointments.view'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const { status, date, from, to } = req.query;
@@ -586,6 +596,8 @@ appointmentsRouter.post(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('appointments.manage'),
+  handleIdempotency,
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const {
@@ -698,6 +710,7 @@ appointmentsRouter.patch(
   '/bookings/:id/status',
   requireAuth,
   resolveTenant,
+  requirePermission('appointments.manage'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const bookingId = req.params.id as string;
