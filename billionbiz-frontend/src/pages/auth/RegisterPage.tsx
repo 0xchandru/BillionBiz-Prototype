@@ -226,14 +226,10 @@ export default function RegisterPage() {
         type: 'REGISTER'
       });
 
-      if ((res as any)?.previewCode) {
+      if ((res as any)?.devOtpPreview) {
         const preview = String((res as any).previewCode);
         setOtpCode(preview);
-        if ((res as any)?.quotaReached || (res as any)?.message?.toLowerCase().includes('quota')) {
-          setQuotaNotice(`Notice: Outbound email service (Resend) daily sending quota was reached. Your verification code is ${preview} (automatically filled below).`);
-        } else {
-          setQuotaNotice(`Verification code: ${preview} (auto-filled for preview).`);
-        }
+        setQuotaNotice(`Development preview only: verification code auto-filled. No external email was sent.`);
       } else {
         setQuotaNotice(null);
       }
