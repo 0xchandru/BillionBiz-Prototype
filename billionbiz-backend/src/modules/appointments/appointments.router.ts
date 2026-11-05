@@ -7,6 +7,65 @@ import { requireCapability } from '../../middleware/capabilities.js';
 import { handleIdempotency } from '../../middleware/idempotency.js';
 import { recordAudit } from '../../core/auditAndOutbox.js';
 
+
+const parseDateOnly = (value: unknown): { year: number; month: number; day: number; dayOfWeek: number } | null => {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day, 12));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  return { year, month, day, dayOfWeek: date.getUTCDay() };
+};
+
+const timeZoneOffsetMs = (instant: Date, timeZone: string): number => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    timeZoneName: 'longOffset',
+    hour: '2-digit'
+  }).formatToParts(instant);
+  const zoneName = parts.find((part) => part.type === 'timeZoneName')?.value || 'GMT';
+  if (zoneName === 'GMT' || zoneName === 'UTC') return 0;
+  const match = zoneName.match(/^GMT([+-])(\d{2}):(\d{2})$/);
+  if (!match) throw new Error(`Unsupported timezone offset: ${zoneName}`);
+  const magnitude = (Number(match[2]) * 60 + Number(match[3])) * 60 * 1000;
+  return match[1] === '+' ? magnitude : -magnitude;
+};
+
+const localDateTimeToUtc = (
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  timeZone: string
+): Date => {
+  const localAsUtc = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+  let instant = localAsUtc;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    instant = localAsUtc - timeZoneOffsetMs(new Date(instant), timeZone);
+  }
+  return new Date(instant);
+};
+
+const minutesFromTime = (value: unknown): number | null => {
+  if (typeof value !== 'string') return null;
+  const match = value.match(/^(\d{2}):(\d{2})(?::\d{2})?$/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return hour * 60 + minute;
+};
+
+const isValidTimeZone = (value: unknown): value is string => {
+  if (typeof value !== 'string' || value.length > 64) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export const appointmentsRouter = Router();
 
 // ============================================================================
