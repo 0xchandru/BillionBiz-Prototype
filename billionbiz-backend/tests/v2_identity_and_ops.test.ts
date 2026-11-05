@@ -3,6 +3,7 @@ import { app } from '../src/server.js';
 import { runMigrations } from '../src/db/migrate.js';
 import { seedDatabase } from '../src/db/seed.js';
 import { query } from '../src/db/pool.js';
+import { generateTotp } from '../src/core/totp.js';
 
 let authToken = '';
 
@@ -154,20 +155,56 @@ describe('V2 Identity, First-Store Provisioning & Outbox Services', () => {
     authToken = loginRes.body.token;
   });
 
-  it('T-046: enrolls and verifies multi-factor authentication (MFA / TOTP)', async () => {
+  it('T-046: verifies standards-compliant TOTP and consumes recovery codes once', async () => {
     const enrollRes = await makeRequest('POST', '/api/v1/auth/mfa/enroll');
 
     expect(enrollRes.status).toBe(200);
-    expect(enrollRes.body).toHaveProperty('secret');
-    expect(enrollRes.body).toHaveProperty('otpauthUrl');
-    expect(enrollRes.body.recoveryCodes).toBeInstanceOf(Array);
+    expect(enrollRes.body.secret).toMatch(/^[A-Z2-7]+$/);
+    expect(enrollRes.body.otpauthUrl).toContain('algorithm=SHA1');
+    expect(enrollRes.body.otpauthUrl).toContain('period=30');
+    expect(enrollRes.body.recoveryCodes).toHaveLength(8);
 
-    const verifyRes = await makeRequest('POST', '/api/v1/auth/mfa/verify', {
+    const invalidCode = await makeRequest('POST', '/api/v1/auth/mfa/verify', {
       body: { code: '123456' }
+    });
+    expect(invalidCode.status).toBe(401);
+    expect(invalidCode.body.error).toBe('INVALID_MFA_CODE');
+
+    const code = generateTotp(enrollRes.body.secret);
+    const verifyRes = await makeRequest('POST', '/api/v1/auth/mfa/verify', {
+      body: { code }
     });
 
     expect(verifyRes.status).toBe(200);
     expect(verifyRes.body.mfaEnabled).toBe(true);
+
+    const replayRes = await makeRequest('POST', '/api/v1/auth/mfa/verify', {
+      body: { code }
+    });
+    expect(replayRes.status).toBe(409);
+    expect(replayRes.body.error).toBe('MFA_CODE_ALREADY_USED');
+
+    const stored = await query(
+      `SELECT mfa_secret, mfa_enabled, mfa_recovery_codes, mfa_last_counter
+       FROM users WHERE id = $1`,
+      [authToken ? (await query(`SELECT id FROM users WHERE email = $1`, [testEmail])).rows[0].id : '']
+    );
+    expect(stored.rows[0].mfa_secret).toMatch(/^v1\./);
+    expect(stored.rows[0].mfa_enabled).toBe(true);
+    expect(stored.rows[0].mfa_recovery_codes).toHaveLength(8);
+    expect(stored.rows[0].mfa_recovery_codes).not.toContain(enrollRes.body.recoveryCodes[0]);
+
+    const recoveryRes = await makeRequest('POST', '/api/v1/auth/mfa/verify', {
+      body: { recoveryCode: enrollRes.body.recoveryCodes[0] }
+    });
+    expect(recoveryRes.status).toBe(200);
+    expect(recoveryRes.body.recoveryCodeConsumed).toBe(true);
+
+    const recoveryReplay = await makeRequest('POST', '/api/v1/auth/mfa/verify', {
+      body: { recoveryCode: enrollRes.body.recoveryCodes[0] }
+    });
+    expect(recoveryReplay.status).toBe(401);
+    expect(recoveryReplay.body.error).toBe('INVALID_MFA_CODE');
   });
 
   it('T-046: logs in via Google OIDC with PKCE metadata', async () => {
