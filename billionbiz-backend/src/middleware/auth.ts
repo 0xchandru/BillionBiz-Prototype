@@ -98,10 +98,21 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
         `SELECT DISTINCT p.code
          FROM role_assignments ra
          JOIN staff_profiles sp ON sp.id = ra.staff_profile_id
+         JOIN roles r ON r.id = ra.role_id
          JOIN role_permissions rp ON rp.role_id = ra.role_id
          JOIN permissions p ON p.id = rp.permission_id
-         WHERE sp.user_id = $1 AND sp.organization_id = $2`,
-        [decoded.userId, decoded.organizationId]
+         WHERE sp.user_id = $1
+           AND sp.organization_id = $2
+           AND sp.is_active = TRUE
+           AND (r.organization_id IS NULL OR r.organization_id = $2)
+           AND (
+             $3::varchar IS NULL
+             OR (
+               sp.store_id = $3
+               AND (ra.store_id = $3 OR ra.store_id IS NULL)
+             )
+           )`,
+        [decoded.userId, decoded.organizationId, decoded.storeId || null]
       );
       req.auth.permissions = permsRes.rows.map((row) => row.code);
     }
