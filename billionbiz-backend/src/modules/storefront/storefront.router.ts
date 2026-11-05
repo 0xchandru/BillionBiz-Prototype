@@ -587,7 +587,10 @@ storefrontRouter.get('/by-slug/:slug/updates', async (req: Request, res: Respons
     res,
     storeRes.rows[0].organization_id,
     storeRes.rows[0].id,
-    ['STOREFRONT_RELEASE_PUBLISHED']
+    ['STOREFRONT_RELEASE_PUBLISHED'],
+    [],
+    false,
+    true
   );
 });
 
