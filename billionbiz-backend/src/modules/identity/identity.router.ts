@@ -1430,8 +1430,8 @@ identityRouter.post('/otp/send', async (req: Request, res: Response) => {
   const recentOtpRequests = await query(
     `SELECT COUNT(*)::int AS total
      FROM verification_otps
-     WHERE identifier = $1
-       AND type = $2
+     WHERE identifier = $1::varchar
+       AND type = $2::varchar
        AND created_at > NOW() - INTERVAL '15 minutes'`,
     [value, otpType]
   );
