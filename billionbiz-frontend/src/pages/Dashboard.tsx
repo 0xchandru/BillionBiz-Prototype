@@ -253,7 +253,7 @@ export const Dashboard = () => {
 
           <Link to="/appointments" className={styles.queueItem}>
             <span>Service Bookings</span>
-            <span className={`${styles.queueBadge} styles.queueBadgeBlue`}>
+            <span className={`${styles.queueBadge} ${styles.queueBadgeBlue}`}>
               {totalBookings}
             </span>
           </Link>
@@ -262,7 +262,7 @@ export const Dashboard = () => {
 
           <Link to="/products" className={styles.queueItem}>
             <span>Catalog Items</span>
-            <span className={`${styles.queueBadge} styles.queueBadgeTeal`}>
+            <span className={`${styles.queueBadge} ${styles.queueBadgeTeal}`}>
               {totalProducts}
             </span>
           </Link>
@@ -271,7 +271,7 @@ export const Dashboard = () => {
 
           <Link to="/people" className={styles.queueItem}>
             <span>Active Customers</span>
-            <span className={`${styles.queueBadge} styles.queueBadgeTeal`}>
+            <span className={`${styles.queueBadge} ${styles.queueBadgeTeal}`}>
               {totalCustomers}
             </span>
           </Link>
