@@ -1099,13 +1099,6 @@ identityRouter.post('/otp/send', async (req: Request, res: Response) => {
   if (!['REGISTER', 'LOGIN', 'RECOVERY'].includes(otpType)) {
     return res.status(400).json({ error: 'INVALID_OTP_TYPE', message: 'Unsupported verification flow' });
   }
-  if (!isEmail) {
-    return res.status(503).json({
-      error: 'SMS_PROVIDER_NOT_CONFIGURED',
-      message: 'Mobile OTP delivery is not configured for this platform yet. Use email verification or configure a supported SMS provider.'
-    });
-  }
-
   // Validate format strictly
   if (isEmail) {
     if (!/^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/.test(value)) {
@@ -1146,6 +1139,13 @@ identityRouter.post('/otp/send', async (req: Request, res: Response) => {
     return res.status(409).json({
       error: 'USER_ALREADY_EXISTS',
       message: `This ${isEmail ? 'email address' : 'mobile number'} is already registered. Please log in.`
+    });
+  }
+
+  if (!isEmail) {
+    return res.status(503).json({
+      error: 'SMS_PROVIDER_NOT_CONFIGURED',
+      message: 'Mobile OTP delivery is not configured for this platform yet. Use email verification or configure a supported SMS provider.'
     });
   }
 
