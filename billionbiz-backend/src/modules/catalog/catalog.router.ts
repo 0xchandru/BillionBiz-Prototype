@@ -210,10 +210,13 @@ catalogRouter.post(
 catalogRouter.get('/categories', requireAuth, resolveTenant, async (req: Request, res: Response) => {
   const storeId = req.tenant!.storeId;
   const categoriesRes = await query(
-    `SELECT id, name, slug, description, parent_id, is_active
-     FROM categories
-     WHERE store_id = $1 AND is_active = TRUE
-     ORDER BY name ASC`,
+    `SELECT c.id, c.name, c.slug, c.description, c.parent_id, c.is_active,
+            c.created_at, COUNT(p.id)::int AS products_count
+     FROM categories c
+     LEFT JOIN products p ON p.category_id = c.id AND p.store_id = c.store_id
+     WHERE c.store_id = $1 AND c.is_active = TRUE
+     GROUP BY c.id, c.name, c.slug, c.description, c.parent_id, c.is_active, c.created_at
+     ORDER BY c.name ASC`,
     [storeId]
   );
   res.json({ categories: categoriesRes.rows });
@@ -227,21 +230,165 @@ catalogRouter.post(
   requirePermission('catalog.manage'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
-    const { name, slug: rawSlug, description, parentId } = req.body;
-    if (!name) {
-      return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'Category name is required' });
+    const { name: rawName, slug: rawSlug, description: rawDescription, parentId } = req.body || {};
+    const name = typeof rawName === 'string' ? rawName.trim() : '';
+    const description = typeof rawDescription === 'string' ? rawDescription.trim() : '';
+    const slug = (typeof rawSlug === 'string' && rawSlug.trim() ? rawSlug : name)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '');
+
+    if (!name || name.length > 255) {
+      return res.status(400).json({ error: 'INVALID_CATEGORY_NAME', message: 'Category name is required and must be 255 characters or fewer' });
+    }
+    if (!slug || slug.length > 255) {
+      return res.status(400).json({ error: 'INVALID_CATEGORY_SLUG', message: 'Enter a valid category URL slug' });
+    }
+    if (description.length > 2000) {
+      return res.status(400).json({ error: 'INVALID_CATEGORY_DESCRIPTION', message: 'Category description must be 2,000 characters or fewer' });
     }
 
-    const slug = (rawSlug || name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const normalizedParentId = typeof parentId === 'string' && parentId.trim() ? parentId.trim() : null;
+    if (normalizedParentId) {
+      const parent = await query(
+        `SELECT id FROM categories WHERE id = $1 AND store_id = $2 AND is_active = TRUE`,
+        [normalizedParentId, storeId]
+      );
+      if (parent.rowCount === 0) {
+        return res.status(404).json({ error: 'CATEGORY_PARENT_NOT_FOUND', message: 'The selected parent category was not found in this store' });
+      }
+    }
+
+    const duplicate = await query(
+      `SELECT id FROM categories WHERE store_id = $1 AND slug = $2 LIMIT 1`,
+      [storeId, slug]
+    );
+    if (duplicate.rowCount) {
+      return res.status(409).json({ error: 'CATEGORY_SLUG_EXISTS', message: 'A category with this URL slug already exists' });
+    }
+
     const id = `cat-${uuidv4()}`;
+    try {
+      await query(
+        `INSERT INTO categories (id, store_id, name, slug, description, parent_id, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, TRUE)`,
+        [id, storeId, name, slug, description, normalizedParentId]
+      );
+    } catch (error: any) {
+      if (error?.code === '23505') {
+        return res.status(409).json({ error: 'CATEGORY_SLUG_EXISTS', message: 'A category with this URL slug already exists' });
+      }
+      throw error;
+    }
+
+    res.status(201).json({ message: 'Category created', category: { id, name, slug, description, parent_id: normalizedParentId, is_active: true, products_count: 0 } });
+  }
+);
+
+catalogRouter.patch(
+  '/categories/:id',
+  requireAuth,
+  resolveTenant,
+  requirePermission('catalog.manage'),
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+    const categoryId = req.params.id;
+    const { name: rawName, slug: rawSlug, description: rawDescription } = req.body || {};
+
+    const current = await query(
+      `SELECT id, name, slug, description
+       FROM categories WHERE id = $1 AND store_id = $2 AND is_active = TRUE`,
+      [categoryId, storeId]
+    );
+    if (current.rowCount === 0) {
+      return res.status(404).json({ error: 'CATEGORY_NOT_FOUND', message: 'Category was not found in this store' });
+    }
+
+    const name = rawName === undefined
+      ? current.rows[0].name
+      : typeof rawName === 'string' ? rawName.trim() : '';
+    const description = rawDescription === undefined
+      ? current.rows[0].description || ''
+      : typeof rawDescription === 'string' ? rawDescription.trim() : '';
+    const slugInput = rawSlug === undefined ? current.rows[0].slug : rawSlug;
+    const slug = typeof slugInput === 'string'
+      ? slugInput.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+      : '';
+
+    if (!name || name.length > 255) {
+      return res.status(400).json({ error: 'INVALID_CATEGORY_NAME', message: 'Category name is required and must be 255 characters or fewer' });
+    }
+    if (!slug || slug.length > 255) {
+      return res.status(400).json({ error: 'INVALID_CATEGORY_SLUG', message: 'Enter a valid category URL slug' });
+    }
+    if (description.length > 2000) {
+      return res.status(400).json({ error: 'INVALID_CATEGORY_DESCRIPTION', message: 'Category description must be 2,000 characters or fewer' });
+    }
+
+    const duplicate = await query(
+      `SELECT id FROM categories WHERE store_id = $1 AND slug = $2 AND id <> $3 LIMIT 1`,
+      [storeId, slug, categoryId]
+    );
+    if (duplicate.rowCount) {
+      return res.status(409).json({ error: 'CATEGORY_SLUG_EXISTS', message: 'A category with this URL slug already exists' });
+    }
+
+    try {
+      const updated = await query(
+        `UPDATE categories
+         SET name = $1, slug = $2, description = $3
+         WHERE id = $4 AND store_id = $5 AND is_active = TRUE
+         RETURNING id, name, slug, description, parent_id, is_active`,
+        [name, slug, description, categoryId, storeId]
+      );
+      return res.json({ message: 'Category updated', category: updated.rows[0] });
+    } catch (error: any) {
+      if (error?.code === '23505') {
+        return res.status(409).json({ error: 'CATEGORY_SLUG_EXISTS', message: 'A category with this URL slug already exists' });
+      }
+      throw error;
+    }
+  }
+);
+
+catalogRouter.delete(
+  '/categories/:id',
+  requireAuth,
+  resolveTenant,
+  requirePermission('catalog.manage'),
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+    const categoryId = req.params.id;
+    const category = await query(
+      `SELECT id FROM categories WHERE id = $1 AND store_id = $2 AND is_active = TRUE`,
+      [categoryId, storeId]
+    );
+    if (category.rowCount === 0) {
+      return res.status(404).json({ error: 'CATEGORY_NOT_FOUND', message: 'Category was not found in this store' });
+    }
+
+    const [products, children] = await Promise.all([
+      query(`SELECT COUNT(*)::int AS total FROM products WHERE store_id = $1 AND category_id = $2`, [storeId, categoryId]),
+      query(`SELECT COUNT(*)::int AS total FROM categories WHERE store_id = $1 AND parent_id = $2 AND is_active = TRUE`, [storeId, categoryId])
+    ]);
+    const productCount = Number(products.rows[0]?.total || 0);
+    const childCount = Number(children.rows[0]?.total || 0);
+
+    if (productCount > 0 || childCount > 0) {
+      return res.status(409).json({
+        error: 'CATEGORY_IN_USE',
+        message: 'Reassign linked products and child categories before archiving this category.',
+        productsCount: productCount,
+        childCategoriesCount: childCount
+      });
+    }
 
     await query(
-      `INSERT INTO categories (id, store_id, name, slug, description, parent_id, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, TRUE)`,
-      [id, storeId, name, slug, description || '', parentId || null]
+      `UPDATE categories SET is_active = FALSE WHERE id = $1 AND store_id = $2`,
+      [categoryId, storeId]
     );
-
-    res.status(201).json({ message: 'Category created', id, name, slug });
+    return res.json({ message: 'Category archived', id: categoryId });
   }
 );
 
