@@ -281,11 +281,11 @@ const Header: FC<HeaderProps> = ({ onMenuClick }) => {
 
         {/* User Profile Pill matching attached image */}
         <div ref={profileRef} style={{ position: 'relative' }}>
-          <div 
-            className={styles.profileBtn} 
-            tabIndex={0} 
-            role="button" 
+          <button
+            type="button"
+            className={styles.profileBtn}
             aria-label="User profile"
+            aria-expanded={isProfileOpen}
             onClick={() => setIsProfileOpen(!isProfileOpen)}
           >
             <div className={styles.avatarCircle}>
@@ -298,7 +298,7 @@ const Header: FC<HeaderProps> = ({ onMenuClick }) => {
               </div>
               <span className={styles.userRole}>{roleDisplay}</span>
             </div>
-          </div>
+          </button>
 
           {isProfileOpen && (
             <div className={styles.profileMenu}>
