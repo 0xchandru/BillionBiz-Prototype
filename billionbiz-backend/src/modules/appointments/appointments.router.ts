@@ -1138,7 +1138,7 @@ appointmentsRouter.post(
            ORDER BY created_at ASC LIMIT 1 FOR UPDATE`,
           [storeId, email, phone]
         );
-        if (customerRes.rowCount > 0) {
+        if ((customerRes.rowCount ?? 0) > 0) {
           customerId = customerRes.rows[0].id;
           await client.query(
             `UPDATE customers
