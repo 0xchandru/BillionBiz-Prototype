@@ -1246,7 +1246,8 @@ identityRouter.post('/otp/send', async (req: Request, res: Response) => {
     expiresInSeconds: 600,
     ...(process.env.NODE_ENV === 'test' ? { testCode: code } : {}),
     ...(env.NODE_ENV === 'development' && env.EMAIL_PROVIDER === 'console' ? { devOtpPreview: code } : {})
-  });;
+  });
+});
 
 // POST /api/v1/auth/otp/verify (Verify OTP Code)
 identityRouter.post('/otp/verify', async (req: Request, res: Response) => {
