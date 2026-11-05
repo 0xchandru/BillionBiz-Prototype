@@ -8,6 +8,7 @@ import { recordAudit, enqueueOutbox } from '../../core/auditAndOutbox.js';
 import { sendEmail } from '../../core/notificationWorker.js';
 import { provisionDefaultStorefront } from '../storefront/storefrontProvisioner.js';
 import { env } from '../../core/env.js';
+import { encodeBase32, encryptMfaSecret, decryptMfaSecret, findValidTotpCounter, hashRecoveryCode } from '../../core/totp.js';
 import {
   validateSubdomainSlug,
   generateCandidateSlug,
@@ -556,47 +557,194 @@ identityRouter.post('/reset-password', async (req: Request, res: Response) => {
 // POST /api/v1/auth/mfa/enroll (T-046)
 identityRouter.post('/mfa/enroll', requireAuth, async (req: Request, res: Response) => {
   const userId = req.auth?.userId;
-  const rawSecret = crypto.randomBytes(20).toString('hex');
-  const recoveryCodes = Array.from({ length: 6 }, () => crypto.randomBytes(4).toString('hex').toUpperCase());
+  if (!userId) {
+    return res.status(401).json({ error: 'UNAUTHORIZED', message: 'An authenticated account is required' });
+  }
 
-  await query(
-    `UPDATE users
-     SET mfa_secret = $1
-     WHERE id = $2`,
-    [rawSecret, userId]
+  const user = await query(
+    `SELECT mfa_enabled FROM users WHERE id = $1`,
+    [userId]
   );
+  if (user.rowCount === 0) {
+    return res.status(404).json({ error: 'USER_NOT_FOUND', message: 'Account was not found' });
+  }
+  if (user.rows[0].mfa_enabled) {
+    return res.status(409).json({ error: 'MFA_ALREADY_ENABLED', message: 'MFA is already enabled. Use the account security recovery flow before replacing an active authenticator.' });
+  }
 
-  const otpauthUrl = `otpauth://totp/BillionBiz:${req.auth?.email}?secret=${rawSecret}&issuer=BillionBiz`;
+  const secret = encodeBase32(crypto.randomBytes(20));
+  const encryptedSecret = encryptMfaSecret(secret, env.JWT_SECRET);
+  const recoveryCodes = Array.from(
+    { length: 8 },
+    () => crypto.randomBytes(12).toString('hex').toUpperCase()
+  );
+  const recoveryCodeHashes = recoveryCodes.map((code) => hashRecoveryCode(code, env.JWT_SECRET));
 
-  res.json({
-    secret: rawSecret,
+  const saved = await query(
+    `UPDATE users
+     SET mfa_secret = $1,
+         mfa_enabled = FALSE,
+         mfa_last_counter = -1,
+         mfa_recovery_codes = $2::jsonb,
+         mfa_failed_attempts = 0,
+         mfa_locked_until = NULL
+     WHERE id = $3 AND mfa_enabled = FALSE
+     RETURNING id`,
+    [encryptedSecret, JSON.stringify(recoveryCodeHashes), userId]
+  );
+  if (saved.rowCount === 0) {
+    return res.status(409).json({ error: 'MFA_ENROLLMENT_CONFLICT', message: 'The MFA enrollment state changed. Refresh and try again.' });
+  }
+
+  const label = encodeURIComponent(`BillionBiz:${req.auth?.email || userId}`);
+  const otpauthUrl = `otpauth://totp/${label}?secret=${secret}&issuer=BillionBiz&algorithm=SHA1&digits=6&period=30`;
+
+  return res.json({
+    secret,
     otpauthUrl,
     recoveryCodes,
-    message: 'MFA enrolled. Please submit code to verify and activate MFA.'
+    message: 'Scan the QR code or enter the secret in your authenticator app, then verify a current code to enable MFA. Save the recovery codes securely; they are shown only once.'
   });
 });
 
-// POST /api/v1/auth/mfa/verify (T-046)
+// POST /api/v1/auth/mfa/verify (RFC 6238 TOTP / single-use recovery code)
 identityRouter.post('/mfa/verify', requireAuth, async (req: Request, res: Response) => {
-  const { code } = req.body;
   const userId = req.auth?.userId;
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  const recoveryCode = typeof req.body?.recoveryCode === 'string' ? req.body.recoveryCode.trim() : '';
 
-  if (!code) {
-    return res.status(400).json({ error: 'MISSING_CODE', message: 'TOTP code is required' });
+  if (!code && !recoveryCode) {
+    return res.status(400).json({ error: 'MISSING_CODE', message: 'Enter a 6-digit authenticator code or a recovery code' });
+  }
+  if (code && recoveryCode) {
+    return res.status(400).json({ error: 'AMBIGUOUS_MFA_CREDENTIAL', message: 'Submit either an authenticator code or a recovery code, not both' });
   }
 
-  const userRes = await query(`SELECT mfa_secret FROM users WHERE id = $1`, [userId]);
-  if (!userRes.rows[0]?.mfa_secret) {
-    return res.status(400).json({ error: 'MFA_NOT_ENROLLED', message: 'MFA has not been enrolled' });
+  const userResult = await query(
+    `SELECT mfa_secret, mfa_enabled, mfa_last_counter, mfa_recovery_codes,
+            mfa_failed_attempts, mfa_locked_until
+     FROM users
+     WHERE id = $1`,
+    [userId]
+  );
+  if (userResult.rowCount === 0) {
+    return res.status(404).json({ error: 'USER_NOT_FOUND', message: 'Account was not found' });
   }
 
-  // In test / standard environment, code length check and validation
-  if (code.length === 6 && /^\d+$/.test(code)) {
-    await query(`UPDATE users SET mfa_enabled = TRUE WHERE id = $1`, [userId]);
-    return res.json({ message: 'MFA successfully enabled', mfaEnabled: true });
+  const user = userResult.rows[0];
+  if (!user.mfa_secret) {
+    return res.status(400).json({ error: 'MFA_NOT_ENROLLED', message: 'Start MFA enrollment before verifying a code' });
   }
 
-  res.status(400).json({ error: 'INVALID_CODE', message: 'Invalid MFA verification code' });
+  if (user.mfa_locked_until && new Date(user.mfa_locked_until).getTime() > Date.now()) {
+    const retryAfterSeconds = Math.max(1, Math.ceil((new Date(user.mfa_locked_until).getTime() - Date.now()) / 1000));
+    res.setHeader('Retry-After', String(retryAfterSeconds));
+    return res.status(429).json({ error: 'MFA_ATTEMPTS_EXCEEDED', message: 'Too many incorrect MFA attempts. Try again after the temporary lock expires.', retryAfterSeconds });
+  }
+
+  if (user.mfa_locked_until && new Date(user.mfa_locked_until).getTime() <= Date.now()) {
+    await query(
+      `UPDATE users SET mfa_failed_attempts = 0, mfa_locked_until = NULL WHERE id = $1`,
+      [userId]
+    );
+  }
+
+  const registerFailedAttempt = async () => {
+    const failed = await query(
+      `UPDATE users
+       SET mfa_failed_attempts = mfa_failed_attempts + 1,
+           mfa_locked_until = CASE
+             WHEN mfa_failed_attempts + 1 >= 5 THEN NOW() + INTERVAL '15 minutes'
+             ELSE mfa_locked_until
+           END
+       WHERE id = $1
+       RETURNING mfa_failed_attempts, mfa_locked_until`,
+      [userId]
+    );
+    const attempts = Number(failed.rows[0]?.mfa_failed_attempts || 0);
+    const locked = attempts >= 5;
+    if (locked) res.setHeader('Retry-After', '900');
+    return res.status(locked ? 429 : 401).json({
+      error: locked ? 'MFA_ATTEMPTS_EXCEEDED' : 'INVALID_MFA_CODE',
+      message: locked
+        ? 'Too many incorrect MFA attempts. Try again in 15 minutes.'
+        : 'The authenticator code or recovery code is invalid.'
+    });
+  };
+
+  if (recoveryCode) {
+    if (recoveryCode.length > 128) {
+      return res.status(400).json({ error: 'INVALID_RECOVERY_CODE', message: 'Recovery code format is invalid' });
+    }
+    const recoveryHash = hashRecoveryCode(recoveryCode, env.JWT_SECRET);
+    const consumed = await query(
+      `UPDATE users
+       SET mfa_recovery_codes = (
+         SELECT COALESCE(jsonb_agg(code_hash ORDER BY ordinal), '[]'::jsonb)
+         FROM jsonb_array_elements_text(mfa_recovery_codes)
+           WITH ORDINALITY AS recovery(code_hash, ordinal)
+         WHERE code_hash <> $1
+       ),
+       mfa_failed_attempts = 0,
+       mfa_locked_until = NULL
+       WHERE id = $2
+         AND mfa_recovery_codes @> jsonb_build_array($1)
+         AND (mfa_locked_until IS NULL OR mfa_locked_until <= NOW())
+       RETURNING id`,
+      [recoveryHash, userId]
+    );
+    if (consumed.rowCount === 0) {
+      return registerFailedAttempt();
+    }
+    return res.json({
+      message: 'Recovery code accepted. This recovery code has been consumed and cannot be used again.',
+      mfaEnabled: Boolean(user.mfa_enabled),
+      recoveryCodeConsumed: true
+    });
+  }
+
+  let secret: string;
+  try {
+    secret = decryptMfaSecret(String(user.mfa_secret), env.JWT_SECRET);
+  } catch {
+    return res.status(409).json({
+      error: 'MFA_REENROLL_REQUIRED',
+      message: 'The stored authenticator secret is not in the supported encrypted format. Enroll a new authenticator.'
+    });
+  }
+
+  const matchedCounter = findValidTotpCounter(
+    secret,
+    code,
+    Date.now(),
+    1,
+    Number(user.mfa_last_counter ?? -1)
+  );
+  if (matchedCounter === null) {
+    return registerFailedAttempt();
+  }
+
+  const activated = await query(
+    `UPDATE users
+     SET mfa_enabled = TRUE,
+         mfa_last_counter = $1,
+         mfa_failed_attempts = 0,
+         mfa_locked_until = NULL
+     WHERE id = $2
+       AND mfa_secret = $3
+       AND mfa_last_counter < $1
+       AND (mfa_locked_until IS NULL OR mfa_locked_until <= NOW())
+     RETURNING id`,
+    [matchedCounter, userId, user.mfa_secret]
+  );
+  if (activated.rowCount === 0) {
+    return res.status(409).json({
+      error: 'MFA_CODE_ALREADY_USED',
+      message: 'This authenticator code has already been used. Wait for the next code and try again.'
+    });
+  }
+
+  return res.json({ message: 'MFA successfully enabled', mfaEnabled: true });
 });
 
 // POST /api/v1/auth/google (Google OIDC - T-046)
