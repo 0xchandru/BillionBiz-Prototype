@@ -1,13 +1,6 @@
 import { useState, useEffect } from 'react';
-import type { FC, FormEvent } from 'react';
-import {
-  Users,
-  Plus,
-  Search,
-  Phone,
-  Mail,
-  Calendar
-} from 'lucide-react';
+import type { FC } from 'react';
+import { Users, Search, CalendarClock, UserCog } from 'lucide-react';
 import { api } from '../api/services';
 import { TableSkeleton } from '../components/common/SkeletonLoader';
 import EmptyState from '../components/common/EmptyState';
@@ -16,313 +9,103 @@ export const StaffPage: FC = () => {
   const [staffList, setStaffList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Form State
-  const [displayName, setDisplayName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [capacity, setCapacity] = useState(1);
-  const [pin, setPin] = useState('1234');
-
-  const fetchStaff = () => {
+  const fetchStaff = async () => {
     setLoading(true);
-    api.getStaff()
-      .then((res) => {
-        setStaffList(res.staff || []);
-      })
-      .catch((err) => {
-        console.error('Failed to load staff', err);
-      })
-      .finally(() => {
-        setLoading(false);
-      });
-  };
-
-  useEffect(() => {
-    fetchStaff();
-  }, []);
-
-  const handleCreateStaff = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!displayName.trim()) {
-      alert('Specialist name is required.');
-      return;
-    }
-
-    setIsSubmitting(true);
+    setError(null);
     try {
-      await api.createStaff({
-        displayName: displayName.trim(),
-        email: email.trim() || undefined,
-        phone: phone.trim() || undefined,
-        capacity,
-        pin
-      });
-
-      setShowAddModal(false);
-      setDisplayName('');
-      setEmail('');
-      setPhone('');
-      fetchStaff();
+      const response = await api.getTeamMembers();
+      const appointmentStaff = (response.members || []).filter((member: any) =>
+        member.is_active === true &&
+        (Array.isArray(member.responsibilities) ? member.responsibilities : []).includes('APPOINTMENT_STAFF')
+      );
+      setStaffList(appointmentStaff);
     } catch (err: any) {
-      alert(err.message || 'Failed to create staff member');
+      setError(err.message || 'Failed to load appointment staff.');
     } finally {
-      setIsSubmitting(false);
+      setLoading(false);
     }
   };
 
-  const filteredStaff = staffList.filter((s) => {
-    const matchesSearch =
-      s.display_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      s.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      s.phone?.includes(searchQuery);
-    return matchesSearch;
+  useEffect(() => { void fetchStaff(); }, []);
+
+  const filteredStaff = staffList.filter((member) => {
+    const search = searchQuery.toLowerCase();
+    return String(member.display_name || '').toLowerCase().includes(search) ||
+      String(member.member_email || member.email || '').toLowerCase().includes(search) ||
+      String(member.phone || '').includes(search);
   });
 
   return (
-    <div style={{ padding: '28px 32px', maxWidth: '1440px', margin: '0 auto', fontFamily: 'Inter, -apple-system, sans-serif' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+    <div style={{ padding: '28px 32px', maxWidth: 1440, margin: '0 auto', fontFamily: 'Inter, -apple-system, sans-serif' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', marginBottom: 22 }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#64748b', fontSize: '13px', marginBottom: '4px' }}>
-            <span>Appointments</span>
-            <span>/</span>
-            <span style={{ color: '#083e47', fontWeight: 600 }}>Staff & Specialists</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#64748b', fontSize: 12, marginBottom: 5 }}>
+            <span>Appointments</span><span>/</span><span style={{ color: '#0f766e', fontWeight: 650 }}>Appointment staff</span>
           </div>
-          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#0f172a', margin: '0 0 6px 0', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Users size={26} color="#0d9488" />
-            Staff Profiles & Service Specialists
+          <h1 style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 24, fontWeight: 750, color: '#0f172a', margin: 0 }}>
+            <Users size={25} color="#0d9488" /> Appointment staff roster
           </h1>
-          <p style={{ fontSize: '14px', color: '#64748b', margin: 0 }}>
-            Manage service providers, stylists, therapist rosters, and POS terminal credentials.
+          <p style={{ margin: '6px 0 0', fontSize: 13, color: '#64748b', maxWidth: 680, lineHeight: 1.6 }}>
+            This roster is sourced from Team. A person appears here when the Appointment Staff responsibility is assigned; identities, access roles and deactivation are managed in one place.
           </p>
         </div>
-
-        <button
-          onClick={() => setShowAddModal(true)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            backgroundColor: '#0d9488',
-            color: '#ffffff',
-            border: 'none',
-            borderRadius: '8px',
-            padding: '10px 18px',
-            fontSize: '14px',
-            fontWeight: 600,
-            cursor: 'pointer',
-            boxShadow: '0 1px 3px rgba(13, 148, 136, 0.25)'
-          }}
-        >
-          <Plus size={16} />
-          Add Staff Member
-        </button>
-      </div>
-
-      {/* Toolbar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
-        <div style={{ position: 'relative', flex: 1, maxWidth: '360px' }}>
-          <Search size={16} color="#94a3b8" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
-          <input
-            type="text"
-            placeholder="Search specialist by name or contact..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '9px 12px 9px 36px',
-              borderRadius: '8px',
-              border: '1px solid #e2e8f0',
-              fontSize: '13px',
-              outline: 'none',
-              backgroundColor: '#ffffff'
-            }}
-          />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <a href="/team" style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '9px 12px', borderRadius: 8, border: '1px solid #cbd5e1', background: '#fff', color: '#334155', fontSize: 12, fontWeight: 650, textDecoration: 'none' }}>
+            <UserCog size={14} /> Manage team
+          </a>
+          <a href="/appointments/working-hours" style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '9px 12px', borderRadius: 8, border: 0, background: '#0f766e', color: '#fff', fontSize: 12, fontWeight: 650, textDecoration: 'none' }}>
+            <CalendarClock size={14} /> Staff schedules
+          </a>
         </div>
       </div>
 
-      {/* Grid */}
+      <div style={{ position: 'relative', maxWidth: 420, marginBottom: 18 }}>
+        <Search size={15} color="#94a3b8" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }} />
+        <input
+          type="search"
+          placeholder="Search appointment staff…"
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px 10px 36px', border: '1px solid #e2e8f0', borderRadius: 9, fontSize: 12, background: '#fff' }}
+        />
+      </div>
+
       {loading ? (
-        <div style={{ background: '#ffffff', padding: '24px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-          <TableSkeleton rows={4} columns={5} />
-        </div>
+        <div style={{ padding: 20, background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0' }}><TableSkeleton rows={4} columns={4} /></div>
+      ) : error ? (
+        <div role="alert" style={{ padding: 14, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, color: '#b91c1c', fontSize: 12 }}>{error}</div>
       ) : filteredStaff.length === 0 ? (
         <EmptyState
           icon={Users}
-          title={searchQuery ? 'No matching specialists' : 'No staff profiles configured'}
-          description={
-            searchQuery
-              ? 'No staff member matched your search query.'
-              : 'Add your specialists and practitioners to enable client appointments and assigned bookings.'
-          }
-          actionLabel="Add First Staff Member"
-          onAction={() => setShowAddModal(true)}
+          title={searchQuery ? 'No appointment staff match your search' : 'No appointment staff assigned'}
+          description={searchQuery ? 'Try another name, email address or phone number.' : 'Open Team, add or edit a person, and assign the Appointment Staff responsibility. The same team profile will then be available for services and schedules.'}
+          actionLabel="Open Team"
+          onAction={() => { window.location.href = '/team'; }}
         />
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '20px' }}>
-          {filteredStaff.map((stf) => (
-            <div
-              key={stf.id}
-              style={{
-                background: '#ffffff',
-                border: '1px solid #e2e8f0',
-                borderRadius: '12px',
-                padding: '22px',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between'
-              }}
-            >
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
-                  <div
-                    style={{
-                      width: '44px',
-                      height: '44px',
-                      borderRadius: '50%',
-                      background: '#f0fdfa',
-                      color: '#0d9488',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontWeight: 700,
-                      fontSize: '16px'
-                    }}
-                  >
-                    {(stf.display_name || 'S').charAt(0).toUpperCase()}
-                  </div>
-                  <div>
-                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>
-                      {stf.display_name}
-                    </h3>
-                    <span style={{ fontSize: '12px', color: '#64748b' }}>
-                      Specialist & Service Provider
-                    </span>
-                  </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14 }}>
+          {filteredStaff.map((member) => (
+            <article key={member.id} style={{ padding: 18, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, boxShadow: '0 1px 2px rgba(15,23,42,0.03)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                <div>
+                  <h2 style={{ fontSize: 14, fontWeight: 750, color: '#0f172a', margin: 0 }}>{member.display_name}</h2>
+                  <p style={{ margin: '5px 0 0', fontSize: 11, color: '#64748b' }}>{member.role_name || 'Team member'}</p>
                 </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13px', color: '#475569', marginBottom: '16px' }}>
-                  {stf.email && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Mail size={14} color="#64748b" />
-                      <span>{stf.email}</span>
-                    </div>
-                  )}
-                  {stf.phone && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Phone size={14} color="#64748b" />
-                      <span>{stf.phone}</span>
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Calendar size={14} color="#64748b" />
-                    <span>Concurrent Capacity: {stf.capacity || 1} client(s)</span>
-                  </div>
-                </div>
+                <span style={{ padding: '4px 7px', borderRadius: 20, background: '#ecfdf5', color: '#047857', fontSize: 10, fontWeight: 700 }}>ACTIVE</span>
               </div>
-
-              <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
-                <span style={{ color: stf.is_active ? '#16a34a' : '#64748b', fontWeight: 600 }}>
-                  {stf.is_active ? 'Active on Roster' : 'Inactive'}
-                </span>
-                <span style={{ color: '#0d9488', fontWeight: 600, cursor: 'pointer' }}>Edit Schedule</span>
+              <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 5, color: '#475569', fontSize: 11 }}>
+                <span>{member.member_email || member.email || 'No email configured'}</span>
+                <span>{member.phone || 'No phone configured'}</span>
+                <span>{member.store_name || 'Current store'}</span>
               </div>
-            </div>
+              <div style={{ display: 'flex', gap: 8, borderTop: '1px solid #f1f5f9', paddingTop: 12, marginTop: 14 }}>
+                <a href="/team" style={{ flex: 1, textAlign: 'center', padding: '8px 10px', border: '1px solid #cbd5e1', borderRadius: 7, color: '#334155', fontSize: 11, fontWeight: 650, textDecoration: 'none' }}>Edit in Team</a>
+                <a href="/appointments/working-hours" style={{ flex: 1, textAlign: 'center', padding: '8px 10px', border: 0, borderRadius: 7, background: '#0f766e', color: '#fff', fontSize: 11, fontWeight: 650, textDecoration: 'none' }}>Manage shifts</a>
+              </div>
+            </article>
           ))}
-        </div>
-      )}
-
-      {/* Add Modal */}
-      {showAddModal && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(15, 23, 42, 0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div style={{ background: '#ffffff', borderRadius: '16px', maxWidth: '480px', width: '100%', overflow: 'hidden' }}>
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>Add Specialist Profile</h2>
-              <button onClick={() => setShowAddModal(false)} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#94a3b8', cursor: 'pointer' }}>✕</button>
-            </div>
-
-            <form onSubmit={handleCreateStaff} style={{ padding: '24px' }}>
-              <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Specialist Full Name *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Ananya Sen"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Email</label>
-                  <input
-                    type="email"
-                    placeholder="ananya@example.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Phone</label>
-                  <input
-                    type="text"
-                    placeholder="+91 98765 12345"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '24px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Capacity</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="10"
-                    value={capacity}
-                    onChange={(e) => setCapacity(parseInt(e.target.value, 10) || 1)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Terminal PIN (4-digit)</label>
-                  <input
-                    type="password"
-                    maxLength={4}
-                    value={pin}
-                    onChange={(e) => setPin(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  style={{ padding: '9px 16px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px', cursor: 'pointer' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  style={{ padding: '9px 20px', borderRadius: '8px', border: 'none', background: '#0d9488', fontSize: '13px', fontWeight: 600, color: '#fff', cursor: 'pointer' }}
-                >
-                  {isSubmitting ? 'Saving...' : 'Save Specialist'}
-                </button>
-              </div>
-            </form>
-          </div>
         </div>
       )}
     </div>
