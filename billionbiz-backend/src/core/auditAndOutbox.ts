@@ -76,7 +76,12 @@ export async function publishOutboxEvent(
 }
 
 export function broadcastCommittedOutboxEvent(event: RealtimeEvent): void {
-  realtimeGateway.broadcast(event);
+  try {
+    realtimeGateway.broadcast(event);
+  } catch (error) {
+    // The committed outbox row remains available for cursor-based recovery.
+    console.error('[Realtime] Post-commit broadcast failed:', error);
+  }
 }
 
 export async function enqueueOutbox(params: {
