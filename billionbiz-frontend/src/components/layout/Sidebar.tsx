@@ -150,7 +150,7 @@ export const Sidebar: FC<SidebarProps> = ({ mobileOpen, onClose }) => {
   const navigate = useNavigate();
   const { user, storeName, role } = useAuthStore();
 
-  const [activeDropdown, setActiveDropdown] = useState<string | null>('orders');
+  const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -212,37 +212,43 @@ export const Sidebar: FC<SidebarProps> = ({ mobileOpen, onClose }) => {
     onClose();
   }, [location.pathname, onClose]);
 
-  // Sync active accordion dropdown with current URL path on load, refresh, or back/forward
+  // Keep the accordion in sync with the current route. Editor, POS, dashboard
+  // and other standalone routes intentionally have no admin accordion open.
   useEffect(() => {
     const path = location.pathname;
-
-    for (const section of navSections) {
-      if (!section.items || section.items.length === 0) continue;
-      const match = section.items.some(
-        (item) => path === item.path || (item.path !== '/' && path.startsWith(item.path))
-      );
-      if (match) {
-        setActiveDropdown(section.id);
-        return;
-      }
-    }
-
-    // Default to close if on dashboard or direct links
-    if (path === '/dashboard' || path === '/' || path.startsWith('/plugins')) {
-      setActiveDropdown(null);
-    }
+    const match = navSections.find((section) =>
+      section.items?.some((item) =>
+        path === item.path ||
+        (item.path !== '/' && item.path !== '/editor' && path.startsWith(`${item.path}/`)) ||
+        (item.path === '/editor' && path.startsWith('/editor'))
+      )
+    );
+    setActiveDropdown(match?.id || null);
   }, [location.pathname]);
 
-  // Expanding a group only reveals its destinations. Navigation happens
-  // when a destination link is selected, so an accordion click never
-  // changes the current page unexpectedly.
+  // Opening a section always takes the merchant to its first destination.
+  // Clicking an already-open section collapses it without changing the route.
   const handleDropdownClick = (section: NavSection) => {
     if (!section.items || section.items.length === 0) {
       if (section.path) navigate(section.path);
       return;
     }
 
-    setActiveDropdown((current) => current === section.id ? null : section.id);
+    if (activeDropdown === section.id) {
+      setActiveDropdown(null);
+      return;
+    }
+
+    setActiveDropdown(section.id);
+    const currentPath = location.pathname;
+    const alreadyInside = section.items.some((item) =>
+      currentPath === item.path ||
+      (item.path !== '/' && currentPath.startsWith(`${item.path}/`)) ||
+      (item.path === '/editor' && currentPath.startsWith('/editor'))
+    );
+    if (!alreadyInside) {
+      navigate(section.items[0].path);
+    }
   };
 
   const isHomeActive = location.pathname === '/dashboard';
