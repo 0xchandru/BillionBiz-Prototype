@@ -499,4 +499,88 @@ describe('V2 Realtime, Concurrency & Release Gate Suite', () => {
     );
     expect(legacyCheck.rows.length).toBe(0);
   });
+  // SECTION 17: Returns & fulfillment object-level authorization
+  it('TC-BOLA-RET-001: Return and fulfillment mutations cannot cross store boundaries', async () => {
+    const suffix = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+    const orderId = `ord-bola-${suffix}`;
+    const returnId = `ret-bola-${suffix}`;
+
+    await query(
+      `INSERT INTO orders (
+         id, store_id, order_number, channel, status, payment_status,
+         fulfillment_status, subtotal_minor, total_minor
+       )
+       VALUES ($1, $2, $3, 'MANUAL', 'CONFIRMED', 'CAPTURED', 'UNFULFILLED', 10000, 10000)`,
+      [orderId, tenantAStoreId, `BBZ-BOLA-${suffix}`]
+    );
+    await query(
+      `INSERT INTO returns (
+         id, order_id, store_id, return_number, status, refund_status,
+         reason, refund_amount_minor, restock_disposition, items
+       )
+       VALUES ($1, $2, $3, $4, 'REQUESTED', 'PENDING', 'DAMAGED_ITEM', 2500, 'RESTOCK', '[]'::jsonb)`,
+      [returnId, orderId, tenantAStoreId, `RET-BOLA-${suffix}`]
+    );
+
+    const foreignOperations = [
+      api('POST', '/api/v1/orders/returns', {
+        token: tenantBToken, orgId: tenantBOrgId, storeId: tenantBStoreId,
+        headers: { 'Idempotency-Key': `bola-create-${suffix}` },
+        body: { orderId, reason: 'DAMAGED_ITEM', refundAmountMinor: 2500 }
+      }),
+      api('POST', `/api/v1/orders/returns/${returnId}/approve`, {
+        token: tenantBToken, orgId: tenantBOrgId, storeId: tenantBStoreId,
+        headers: { 'Idempotency-Key': `bola-approve-${suffix}` }, body: {}
+      }),
+      api('POST', `/api/v1/orders/returns/${returnId}/reject`, {
+        token: tenantBToken, orgId: tenantBOrgId, storeId: tenantBStoreId,
+        headers: { 'Idempotency-Key': `bola-reject-${suffix}` }, body: { reason: 'Not eligible' }
+      }),
+      api('POST', `/api/v1/orders/returns/${returnId}/process-refund`, {
+        token: tenantBToken, orgId: tenantBOrgId, storeId: tenantBStoreId, body: {}
+      }),
+      api('POST', `/api/v1/orders/${orderId}/fulfill`, {
+        token: tenantBToken, orgId: tenantBOrgId, storeId: tenantBStoreId,
+        headers: { 'Idempotency-Key': `bola-fulfill-${suffix}` },
+        body: { carrier: 'Test Carrier', trackingNumber: `TEST-${suffix}` }
+      })
+    ];
+
+    const [foreignCreate, foreignApprove, foreignReject, foreignRefund, foreignFulfillment] = await Promise.all(foreignOperations);
+    expect(foreignCreate.status).toBe(404);
+    expect(foreignApprove.status).toBe(404);
+    expect(foreignReject.status).toBe(404);
+    expect(foreignRefund.status).toBe(404);
+    expect(foreignFulfillment.status).toBe(404);
+
+    const tenantAApprove = await api('POST', `/api/v1/orders/returns/${returnId}/approve`, {
+      token: tenantAToken, orgId: tenantAOrgId, storeId: tenantAStoreId,
+      headers: { 'Idempotency-Key': `owner-approve-${suffix}` }, body: {}
+    });
+    expect(tenantAApprove.status).toBe(200);
+
+    const providerUnavailable = await api('POST', `/api/v1/orders/returns/${returnId}/process-refund`, {
+      token: tenantAToken, orgId: tenantAOrgId, storeId: tenantAStoreId, body: {}
+    });
+    expect(providerUnavailable.status).toBe(501);
+    expect(providerUnavailable.body.error).toBe('REFUND_PROVIDER_NOT_CONFIGURED');
+
+    const state = await query(
+      `SELECT r.status, r.refund_status, o.payment_status
+       FROM returns r
+       JOIN orders o ON o.id = r.order_id AND o.store_id = r.store_id
+       WHERE r.id = $1 AND r.store_id = $2`,
+      [returnId, tenantAStoreId]
+    );
+    expect(state.rows[0].status).toBe('APPROVED');
+    expect(state.rows[0].refund_status).toBe('PENDING');
+    expect(state.rows[0].payment_status).toBe('CAPTURED');
+
+    const fulfillmentCount = await query(
+      `SELECT COUNT(*)::int AS total FROM fulfillments WHERE order_id = $1`,
+      [orderId]
+    );
+    expect(Number(fulfillmentCount.rows[0].total)).toBe(0);
+  });
+
 });
