@@ -778,20 +778,99 @@ appointmentsRouter.post(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('appointments.manage'),
   async (req: Request, res: Response) => {
-    const { offeringId, resourceId, startTime, endTime } = req.body;
+    const storeId = req.tenant!.storeId;
+    const { offeringId, resourceId, startTime, endTime } = req.body || {};
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    if (typeof offeringId !== 'string' || typeof resourceId !== 'string' ||
+        !Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) ||
+        end.getTime() <= start.getTime() || end.getTime() - start.getTime() > 24 * 60 * 60 * 1000 ||
+        start.getTime() <= Date.now()) {
+      return res.status(400).json({ error: 'INVALID_HOLD_REQUEST', message: 'Offering, assigned resource and a valid future time range are required.' });
+    }
+
     const holdToken = `hld-${uuidv4()}`;
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes TTL
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    try {
+      await withTransaction(async (client) => {
+        const resource = await client.query(
+          `SELECT r.id
+           FROM resources r
+           JOIN offering_resources o_r ON o_r.resource_id = r.id
+           JOIN offerings o ON o.id = o_r.offering_id
+           LEFT JOIN staff_profiles sp ON sp.id = r.staff_profile_id
+           WHERE r.id = $1 AND r.store_id = $2 AND r.is_active = TRUE
+             AND o.id = $3 AND o.store_id = $2 AND o.is_active = TRUE
+             AND (sp.id IS NULL OR (sp.store_id = $2 AND sp.is_active = TRUE))
+           FOR UPDATE OF r`,
+          [resourceId, storeId, offeringId]
+        );
+        if (resource.rowCount === 0) {
+          throw Object.assign(new Error('The selected resource is not assigned to this active service in the current store.'), {
+            statusCode: 404,
+            code: 'RESOURCE_NOT_AVAILABLE'
+          });
+        }
+
+        const conflict = await client.query(
+          `SELECT 1 FROM bookings
+           WHERE store_id = $1 AND resource_id = $2
+             AND status NOT IN ('CANCELLED', 'NO_SHOW')
+             AND start_time < $4 AND end_time > $3
+           UNION ALL
+           SELECT 1 FROM booking_holds
+           WHERE store_id = $1 AND resource_id = $2 AND expires_at > NOW()
+             AND start_time < $4 AND end_time > $3
+           LIMIT 1`,
+          [storeId, resourceId, start.toISOString(), end.toISOString()]
+        );
+        if (conflict.rowCount > 0) {
+          throw Object.assign(new Error('This resource and time slot are no longer available.'), {
+            statusCode: 409,
+            code: 'SLOT_UNAVAILABLE'
+          });
+        }
+
+        await client.query(
+          `INSERT INTO booking_holds (id, store_id, offering_id, resource_id, start_time, end_time, hold_token, expires_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [`hold-${uuidv4()}`, storeId, offeringId, resourceId, start.toISOString(), end.toISOString(), holdToken, expiresAt.toISOString()]
+        );
+      });
+    } catch (error: any) {
+      if (error.statusCode) return res.status(error.statusCode).json({ error: error.code, message: error.message });
+      throw error;
+    }
 
     res.status(201).json({
-      message: 'Slot held temporarily',
+      message: 'Appointment slot held for 10 minutes.',
       holdToken,
-      expiresAt,
+      expiresAt: expiresAt.toISOString(),
       offeringId,
       resourceId,
-      startTime,
-      endTime
+      startTime: start.toISOString(),
+      endTime: end.toISOString()
     });
+  }
+);
+
+appointmentsRouter.delete(
+  '/holds/:token',
+  requireAuth,
+  resolveTenant,
+  requireCapability('appointments'),
+  requirePermission('appointments.manage'),
+  async (req: Request, res: Response) => {
+    const result = await query(
+      `DELETE FROM booking_holds WHERE hold_token = $1 AND store_id = $2`,
+      [req.params.token, req.tenant!.storeId]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'HOLD_NOT_FOUND', message: 'The appointment hold was not found or has expired.' });
+    }
+    res.json({ message: 'Appointment hold released.' });
   }
 );
 
