@@ -826,7 +826,7 @@ appointmentsRouter.post(
            LIMIT 1`,
           [storeId, resourceId, start.toISOString(), end.toISOString()]
         );
-        if (conflict.rowCount > 0) {
+        if ((conflict.rowCount ?? 0) > 0) {
           throw Object.assign(new Error('This resource and time slot are no longer available.'), {
             statusCode: 409,
             code: 'SLOT_UNAVAILABLE'
