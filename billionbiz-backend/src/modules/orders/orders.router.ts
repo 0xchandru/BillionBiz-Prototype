@@ -824,39 +824,83 @@ ordersRouter.post(
   requireAuth,
   resolveTenant,
   requirePermission('fulfillment.manage'),
+  handleIdempotency,
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const orderId = req.params.id as string;
-    const { carrier = 'Shiprocket Standard', trackingNumber = `TRK-${Date.now().toString().slice(-8)}` } = req.body;
+    const carrier = typeof req.body?.carrier === 'string' ? req.body.carrier.trim() : '';
+    const trackingNumber = typeof req.body?.trackingNumber === 'string'
+      ? req.body.trackingNumber.trim().toUpperCase()
+      : '';
+
+    if (!carrier || carrier.length > 128) {
+      return res.status(400).json({ error: 'INVALID_CARRIER', message: 'Enter a carrier name of 1–128 characters' });
+    }
+    if (!trackingNumber || trackingNumber.length > 128 || !/^[A-Z0-9][A-Z0-9 ._/-]{2,127}$/.test(trackingNumber)) {
+      return res.status(400).json({ error: 'INVALID_TRACKING_NUMBER', message: 'Enter a valid tracking number of 3–128 characters' });
+    }
 
     const fulfillmentId = `ful-${uuidv4()}`;
+    try {
+      await withTransaction(async (client) => {
+        const orderRes = await client.query(
+          `SELECT id, status, fulfillment_status
+           FROM orders
+           WHERE id = $1 AND store_id = $2
+           FOR UPDATE`,
+          [orderId, storeId]
+        );
+        if (orderRes.rowCount === 0) {
+          throw new Error('ORDER_NOT_FOUND_FOR_STORE');
+        }
 
-    await withTransaction(async (client) => {
-      await client.query(
-        `INSERT INTO fulfillments (id, order_id, tracking_number, carrier, status)
-         VALUES ($1, $2, $3, $4, 'SHIPPED')`,
-        [fulfillmentId, orderId, trackingNumber, carrier]
-      );
+        const order = orderRes.rows[0];
+        if (['CANCELLED', 'VOIDED'].includes(String(order.status).toUpperCase())) {
+          throw new Error('ORDER_NOT_ELIGIBLE_FOR_FULFILLMENT');
+        }
+        if (String(order.fulfillment_status).toUpperCase() === 'FULFILLED') {
+          throw new Error('ORDER_ALREADY_FULFILLED');
+        }
 
-      await client.query(
-        `UPDATE orders
-         SET fulfillment_status = 'FULFILLED', updated_at = NOW()
-         WHERE id = $1 AND store_id = $2`,
-        [orderId, storeId]
-      );
+        await client.query(
+          `INSERT INTO fulfillments (id, order_id, tracking_number, carrier, status)
+           VALUES ($1, $2, $3, $4, 'SHIPPED')`,
+          [fulfillmentId, orderId, trackingNumber, carrier]
+        );
 
-      await client.query(
-        `INSERT INTO order_status_history (id, order_id, from_status, to_status, reason, actor_id)
-         VALUES ($1, $2, 'UNFULFILLED', 'FULFILLED', 'Order shipped with carrier', $3)`,
-        [`osh-${uuidv4()}`, orderId, req.auth?.userId]
-      );
-    });
+        await client.query(
+          `UPDATE orders
+           SET fulfillment_status = 'FULFILLED', updated_at = NOW()
+           WHERE id = $1 AND store_id = $2`,
+          [orderId, storeId]
+        );
 
-    res.json({
-      message: 'Order fulfilled successfully',
+        await client.query(
+          `INSERT INTO order_status_history (id, order_id, from_status, to_status, reason, actor_id)
+           VALUES ($1, $2, 'UNFULFILLED', 'FULFILLED', 'Order handed to carrier', $3)`,
+          [`osh-${uuidv4()}`, orderId, req.auth?.userId]
+        );
+      });
+    } catch (error: any) {
+      if (error?.message === 'ORDER_NOT_FOUND_FOR_STORE') {
+        return res.status(404).json({ error: 'ORDER_NOT_FOUND', message: 'The order was not found in this store' });
+      }
+      if (error?.message === 'ORDER_ALREADY_FULFILLED') {
+        return res.status(409).json({ error: 'ORDER_ALREADY_FULFILLED', message: 'This order has already been fulfilled. Create a separate fulfillment only when split shipments are supported.' });
+      }
+      if (error?.message === 'ORDER_NOT_ELIGIBLE_FOR_FULFILLMENT') {
+        return res.status(409).json({ error: 'ORDER_NOT_ELIGIBLE_FOR_FULFILLMENT', message: 'Cancelled or voided orders cannot be fulfilled' });
+      }
+      throw error;
+    }
+
+    return res.status(201).json({
+      message: 'Order handed to carrier successfully',
       fulfillmentId,
+      orderId,
       trackingNumber,
-      carrier
+      carrier,
+      status: 'SHIPPED'
     });
   }
 );
