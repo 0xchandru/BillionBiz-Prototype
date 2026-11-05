@@ -978,6 +978,29 @@ export async function runMigrations() {
       );
   `);
 
+  // Tenant-scoped operational lookup indexes. These are additive and safe
+  // for existing production records.
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_roles_organization_code
+      ON roles (organization_id, code);
+
+    CREATE INDEX IF NOT EXISTS idx_role_assignments_store_staff
+      ON role_assignments (store_id, staff_profile_id);
+
+    CREATE INDEX IF NOT EXISTS idx_staff_profiles_user_store_active
+      ON staff_profiles (user_id, store_id, is_active);
+
+    CREATE INDEX IF NOT EXISTS idx_resources_store_active_staff
+      ON resources (store_id, staff_profile_id, is_active);
+
+    CREATE INDEX IF NOT EXISTS idx_bookings_store_resource_time
+      ON bookings (store_id, resource_id, start_time, end_time)
+      WHERE status <> 'CANCELLED';
+
+    CREATE INDEX IF NOT EXISTS idx_booking_holds_store_resource_expiry
+      ON booking_holds (store_id, resource_id, expires_at);
+  `);
+
   console.log('[Migration] All migrations completed successfully.');
 }
 
