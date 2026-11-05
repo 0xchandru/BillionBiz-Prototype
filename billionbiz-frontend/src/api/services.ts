@@ -546,12 +546,6 @@ export const api = {
       method: 'DELETE'
     }),
 
-  // Roles & Responsibilities
-  createCustomRole: (payload: { name: string; code?: string; description?: string; permissionCodes?: string[] }) =>
-    apiClient<any>('/team/roles', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    }),
   processRefund: (payload: { orderId: string; amountMinor: number; reason?: string }) =>
     apiClient<any>('/orders/refunds', {
       method: 'POST',
