@@ -455,6 +455,18 @@ export const api = {
       method: 'DELETE'
     }),
   getRoles: () => apiClient<{ roles: any[] }>('/team/roles'),
+  createCustomRole: (payload: { name: string; code?: string; description?: string; permissionCodes: string[] }) =>
+    apiClient<{ message: string; id: string; name: string; code: string }>('/team/roles', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  updateCustomRole: (id: string, payload: { name?: string; description?: string; permissionCodes?: string[] }) =>
+    apiClient<any>(`/team/roles/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
+  deleteCustomRole: (id: string) =>
+    apiClient<any>(`/team/roles/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   getResponsibilities: () => apiClient<{ responsibilities: any[] }>('/team/responsibilities'),
   getPermissions: () => apiClient<{ permissions: any[] }>('/team/permissions'),
 
