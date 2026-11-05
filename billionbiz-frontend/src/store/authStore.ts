@@ -82,6 +82,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const res: AuthResponse = await api.login({ email, password });
       const { token, user, organizations, portalDestination } = res;
+      if (typeof token !== 'string' || !token.trim()) throw new Error('Authentication did not return a valid session token. Complete any required verification step and try again.');
 
       // Extract first org & store
       const primaryOrg = organizations && organizations.length > 0 ? organizations[0] : null;
@@ -138,6 +139,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         otp: authFactor.otp
       });
       const { token, user, organizations, portalDestination } = res;
+      if (typeof token !== 'string' || !token.trim()) throw new Error('Authentication did not return a valid session token. Complete any required verification step and try again.');
 
       const primaryOrg = organizations && organizations.length > 0 ? organizations[0] : null;
       const orgId = primaryOrg?.organization_id || 'org-billionbiz-default';
@@ -189,6 +191,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const res: AuthResponse = await api.loginGoogle(payload);
       const { token, user, organizations, portalDestination } = res;
+      if (typeof token !== 'string' || !token.trim()) throw new Error('Authentication did not return a valid session token. Complete any required verification step and try again.');
 
       const primaryOrg = organizations && organizations.length > 0 ? organizations[0] : null;
       const orgId = primaryOrg?.organization_id || 'org-billionbiz-default';
@@ -240,6 +243,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const res: AuthResponse = await api.registerStreamlined(payload);
       const { token, user, organization, store, portalDestination } = res;
+      if (typeof token !== 'string' || !token.trim()) throw new Error('Registration did not return a valid session token. Please try again.');
 
       const orgId = organization?.id || 'org-billionbiz-default';
       const storeId = store?.id || 'store-shoum-default';
@@ -289,6 +293,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const res: AuthResponse = await api.register(payload);
       const { token, user, organization, store, onboardingChecklist, portalDestination } = res;
+      if (typeof token !== 'string' || !token.trim()) throw new Error('Registration did not return a valid session token. Please try again.');
 
       const orgId = organization?.id || 'org-billionbiz-default';
       const storeId = store?.id || 'store-shoum-default';
