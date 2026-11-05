@@ -15,7 +15,7 @@ const AppLayout = () => {
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       const heading = mainRef.current?.querySelector('h1');
-      const headingText = heading?.textContent?.replace(/\\s+/g, ' ').trim();
+      const headingText = heading?.textContent?.replace(/\s+/g, ' ').trim();
       setRouteAnnouncement(headingText ? `${headingText} page` : 'Page content updated');
       mainRef.current?.focus({ preventScroll: true });
     });
