@@ -818,7 +818,7 @@ ordersRouter.post(
     const firstName = typeof customerDetails?.firstName === 'string' ? customerDetails.firstName.trim() : '';
     const lastName = typeof customerDetails?.lastName === 'string' ? customerDetails.lastName.trim() : '';
 
-    if (normalizedEmail && (normalizedEmail.length > 255 || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(normalizedEmail))) {
+    if (normalizedEmail && (normalizedEmail.length > 255 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail))) {
       return res.status(400).json({ error: 'INVALID_CUSTOMER_EMAIL', message: 'Enter a valid customer email address' });
     }
     if (normalizedPhone.length > 32 || firstName.length > 128 || lastName.length > 128) {
