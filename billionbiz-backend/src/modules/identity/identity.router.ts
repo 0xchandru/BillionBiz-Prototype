@@ -39,11 +39,11 @@ async function consumeOtp(identifier: string, otpType: string, suppliedCode: str
   }
 
   const result = await query(
-    \`SELECT id, code, expires_at, attempts
+    `SELECT id, code, expires_at, attempts
      FROM verification_otps
      WHERE identifier = $1 AND type = $2 AND is_used = FALSE
      ORDER BY created_at DESC
-     LIMIT 1\`,
+     LIMIT 1`,
     [identifier, otpType]
   );
 
@@ -54,7 +54,7 @@ async function consumeOtp(identifier: string, otpType: string, suppliedCode: str
   const record = result.rows[0];
   if (new Date() > new Date(record.expires_at)) {
     await query(
-      \`UPDATE verification_otps SET is_used = TRUE WHERE id = $1 AND is_used = FALSE\`,
+      `UPDATE verification_otps SET is_used = TRUE WHERE id = $1 AND is_used = FALSE`,
       [record.id]
     );
     return { ok: false, status: 400, error: 'EXPIRED_OTP', message: 'Verification code has expired. Please request a new code.' };
@@ -63,7 +63,7 @@ async function consumeOtp(identifier: string, otpType: string, suppliedCode: str
   const attempts = Number(record.attempts || 0);
   if (attempts >= OTP_MAX_ATTEMPTS) {
     await query(
-      \`UPDATE verification_otps SET is_used = TRUE WHERE id = $1 AND is_used = FALSE\`,
+      `UPDATE verification_otps SET is_used = TRUE WHERE id = $1 AND is_used = FALSE`,
       [record.id]
     );
     return { ok: false, status: 429, error: 'OTP_ATTEMPTS_EXCEEDED', message: 'Too many incorrect attempts. Request a new verification code.' };
@@ -76,11 +76,11 @@ async function consumeOtp(identifier: string, otpType: string, suppliedCode: str
 
   if (!valid) {
     const updated = await query(
-      \`UPDATE verification_otps
+      `UPDATE verification_otps
        SET attempts = attempts + 1,
            is_used = CASE WHEN attempts + 1 >= $2 THEN TRUE ELSE is_used END
        WHERE id = $1 AND is_used = FALSE AND attempts < $2
-       RETURNING attempts\`,
+       RETURNING attempts`,
       [record.id, OTP_MAX_ATTEMPTS]
     );
     const nextAttempts = Number(updated.rows[0]?.attempts || attempts + 1);
@@ -91,9 +91,9 @@ async function consumeOtp(identifier: string, otpType: string, suppliedCode: str
   }
 
   const consumed = await query(
-    \`UPDATE verification_otps SET is_used = TRUE
+    `UPDATE verification_otps SET is_used = TRUE
      WHERE id = $1 AND is_used = FALSE AND attempts < $2
-     RETURNING id\`,
+     RETURNING id`,
     [record.id, OTP_MAX_ATTEMPTS]
   );
   if (consumed.rowCount === 0) {
