@@ -273,6 +273,20 @@ export const api = {
       body: JSON.stringify(product)
     }),
   getCategories: () => apiClient<{ categories: any[] }>('/catalog/categories'),
+  createCategory: (payload: { name: string; slug?: string; description?: string; parentId?: string }) =>
+    apiClient<{ message: string; category: any }>('/catalog/categories', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  updateCategory: (id: string, payload: { name: string; slug: string; description?: string }) =>
+    apiClient<{ message: string; category: any }>(`/catalog/categories/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    }),
+  deleteCategory: (id: string) =>
+    apiClient<{ message: string; id: string }>(`/catalog/categories/${id}`, {
+      method: 'DELETE'
+    }),
   adjustInventory: (payload: { variantId: string; locationId: string; adjustmentQty: number; movementType?: string; note?: string }) =>
     apiClient('/catalog/inventory/adjust', {
       method: 'POST',
