@@ -718,7 +718,23 @@ export async function runMigrations() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_secret VARCHAR(255);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_last_counter BIGINT NOT NULL DEFAULT -1;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_recovery_codes JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_failed_attempts INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_locked_until TIMESTAMPTZ;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255);
+
+    -- Previous MFA accepted any six digits and did not use a valid Base32
+    -- authenticator secret. Disable those legacy enrollments and require a
+    -- fresh, standards-compliant setup.
+    UPDATE users
+    SET mfa_enabled = FALSE,
+        mfa_secret = NULL,
+        mfa_last_counter = -1,
+        mfa_recovery_codes = '[]'::jsonb,
+        mfa_failed_attempts = 0,
+        mfa_locked_until = NULL
+    WHERE mfa_secret IS NOT NULL AND mfa_secret NOT LIKE 'v1.%';
 
     CREATE TABLE IF NOT EXISTS email_verification_tokens (
       id VARCHAR(64) PRIMARY KEY,
