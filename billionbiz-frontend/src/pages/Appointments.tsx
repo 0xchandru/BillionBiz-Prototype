@@ -13,6 +13,61 @@ import { api } from '../api/services';
 import { CalendarSkeleton } from '../components/common/SkeletonLoader';
 import EmptyState from '../components/common/EmptyState';
 
+
+const localDateInZone = (value: Date, timeZone: string): string => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(value);
+  const values: Record<string, string> = {};
+  for (const part of parts) if (part.type !== 'literal') values[part.type] = part.value;
+  return values.year + '-' + values.month + '-' + values.day;
+};
+
+const localTimeInZone = (value: string | Date, timeZone: string): { date: string; hour: number; minute: number } => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).formatToParts(new Date(value));
+  const values: Record<string, string> = {};
+  for (const part of parts) if (part.type !== 'literal') values[part.type] = part.value;
+  return {
+    date: values.year + '-' + values.month + '-' + values.day,
+    hour: Number(values.hour),
+    minute: Number(values.minute)
+  };
+};
+
+const offsetForZone = (instant: Date, timeZone: string): number => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone, timeZoneName: 'longOffset', hour: '2-digit'
+  }).formatToParts(instant);
+  const zoneName = parts.find((part) => part.type === 'timeZoneName')?.value || 'GMT';
+  const match = zoneName.match(/^GMT([+-])(\d{2}):(\d{2})$/);
+  if (!match) return 0;
+  const offset = (Number(match[2]) * 60 + Number(match[3])) * 60000;
+  return match[1] === '+' ? offset : -offset;
+};
+
+const utcFromLocal = (date: string, hour: number, minute: number, timeZone: string): Date => {
+  const [year, month, day] = date.split('-').map(Number);
+  const localAsUtc = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+  let instant = localAsUtc;
+  for (let index = 0; index < 3; index += 1) {
+    instant = localAsUtc - offsetForZone(new Date(instant), timeZone);
+  }
+  return new Date(instant);
+};
+
+const addDateOnly = (date: string, days: number): string => {
+  const [year, month, day] = date.split('-').map(Number);
+  const value = new Date(Date.UTC(year, month - 1, day + days, 12));
+  return value.getUTCFullYear() + '-' +
+    String(value.getUTCMonth() + 1).padStart(2, '0') + '-' +
+    String(value.getUTCDate()).padStart(2, '0');
+};
+
+const dateOnlyAsUtcDate = (date: string): Date => new Date(date + 'T12:00:00.000Z');
+
 const formatCurrency = (minor: number) => {
   return '₹' + (minor / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
@@ -29,15 +84,15 @@ export const AppointmentsPage: React.FC = () => {
   const [isBookModalOpen, setIsBookModalOpen] = useState(false);
 
   // Selected Date state (YYYY-MM-DD)
-  const [selectedDate, setSelectedDate] = useState(() => {
-    const today = new Date();
-    return today.toISOString().split('T')[0];
-  });
+  const [storeTimezone, setStoreTimezone] = useState('Asia/Kolkata');
+  const [selectedDate, setSelectedDate] = useState(() => localDateInZone(new Date(), 'Asia/Kolkata'));
 
   // Booking form state
   const [selectedOffering, setSelectedOffering] = useState('');
   const [availableSlots, setAvailableSlots] = useState<any[]>([]);
   const [selectedSlot, setSelectedSlot] = useState<any | null>(null);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [slotLoadError, setSlotLoadError] = useState<string | null>(null);
   const [clientName, setClientName] = useState('');
   const [clientEmail, setClientEmail] = useState('');
   const [clientPhone, setClientPhone] = useState('');
@@ -46,20 +101,28 @@ export const AppointmentsPage: React.FC = () => {
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [bookingSuccess, setBookingSuccess] = useState<string | null>(null);
 
-  // Load Main Data
+  // Load bookings using the store's timezone, never the browser's timezone.
   const loadAppointmentsData = async () => {
     try {
       setLoading(true);
-      const [bookingsRes, offeringsRes, staffRes] = await Promise.all([
-        api.getBookings({ from: `${selectedDate}T00:00:00.000Z`, to: `${selectedDate}T23:59:59.999Z` }),
+      const [bookingSettingsRes, offeringsRes, staffRes] = await Promise.all([
+        api.getBookingSettings(),
         api.getOfferings(),
         api.getStaff()
       ]);
+      const timezone = bookingSettingsRes.settings?.timezone || 'Asia/Kolkata';
+      setStoreTimezone(timezone);
+      const start = utcFromLocal(selectedDate, 0, 0, timezone);
+      const nextDay = utcFromLocal(addDateOnly(selectedDate, 1), 0, 0, timezone);
+      const bookingsRes = await api.getBookings({
+        from: start.toISOString(),
+        to: new Date(nextDay.getTime() - 1).toISOString()
+      });
       setBookings(bookingsRes.bookings || []);
       setOfferings(offeringsRes.offerings || []);
       setStaffList(staffRes.staff || []);
     } catch (err) {
-      console.error('Failed to load appointments telemetry', err);
+      console.error('Failed to load appointments', err);
     } finally {
       setLoading(false);
     }
@@ -69,62 +132,89 @@ export const AppointmentsPage: React.FC = () => {
     loadAppointmentsData();
   }, [selectedDate]);
 
-  // Load availability slots when offering or date changes in booking modal
+  // Load staff-specific availability for the selected offering and store-local date.
   useEffect(() => {
-    if (!selectedOffering || !selectedDate) return;
-    const off = offerings.find((o) => o.id === selectedOffering);
-    const duration = off ? off.duration_minutes : 45;
-
-    api.getAvailability(selectedDate, duration)
+    if (!isBookModalOpen || !selectedOffering || !selectedDate) {
+      setAvailableSlots([]);
+      setSelectedSlot(null);
+      return;
+    }
+    let cancelled = false;
+    setLoadingSlots(true);
+    setSlotLoadError(null);
+    setSelectedSlot(null);
+    api.getAvailability(selectedOffering, selectedDate)
       .then((res) => {
-        setAvailableSlots(res.slots || []);
-        setSelectedSlot(null);
+        if (cancelled) return;
+        setAvailableSlots((res.slots || []).filter((slot: any) => slot.isAvailable));
       })
       .catch((err) => {
-        console.error('Failed to load slots', err);
+        if (!cancelled) {
+          setAvailableSlots([]);
+          setSlotLoadError(err.message || 'Could not load appointment availability.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingSlots(false);
       });
-  }, [selectedOffering, selectedDate, offerings]);
+    return () => { cancelled = true; };
+  }, [isBookModalOpen, selectedOffering, selectedDate, storeTimezone]);
 
-  // Handle new appointment submission
+  // Create a persisted 10-minute slot hold, then consume it in the booking transaction.
   const handleCreateBooking = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedOffering || !selectedSlot || !clientName) {
-      setBookingError('Please complete all required fields and select an available slot.');
+    if (!selectedOffering || !selectedSlot || !clientName.trim()) {
+      setBookingError('Choose a service and available staff slot, then enter the client name.');
+      return;
+    }
+    if (!clientEmail.trim() && !clientPhone.trim()) {
+      setBookingError('Enter either a client email address or phone number.');
       return;
     }
 
+    let holdToken: string | undefined;
     try {
       setSubmitting(true);
       setBookingError(null);
-
-      const off = offerings.find((o) => o.id === selectedOffering);
-      const res = await api.createBooking({
+      const hold = await api.holdSlot({
         offeringId: selectedOffering,
-        resourceId: selectedSlot.resourceId || 'res-default',
+        resourceId: selectedSlot.resourceId,
+        startTime: selectedSlot.startTime,
+        endTime: selectedSlot.endTime
+      });
+      holdToken = hold.holdToken;
+
+      const result = await api.createBooking({
+        offeringId: selectedOffering,
+        resourceId: selectedSlot.resourceId,
         startTime: selectedSlot.startTime,
         endTime: selectedSlot.endTime,
-        clientName,
-        clientEmail,
-        clientPhone,
-        notes: intakeNotes,
-        priceMinor: off ? off.price_minor : 150000
+        holdToken,
+        customerDetails: {
+          firstName: clientName.trim(),
+          lastName: '',
+          email: clientEmail.trim(),
+          phone: clientPhone.trim()
+        },
+        intakeNotes: intakeNotes.trim()
       });
 
-      setBookingSuccess(`Booking ${res.bookingNumber || res.bookingId || 'confirmed'} created successfully!`);
+      holdToken = undefined; // consumed atomically by the booking endpoint
+      setBookingSuccess(`Booking ${result.bookingNumber || result.bookingId || 'confirmed'} created successfully.`);
       setIsBookModalOpen(false);
-      // Reset form
       setSelectedOffering('');
       setSelectedSlot(null);
       setClientName('');
       setClientEmail('');
       setClientPhone('');
       setIntakeNotes('');
-
-      // Reload appointments
       await loadAppointmentsData();
-      setTimeout(() => setBookingSuccess(null), 3500);
+      window.setTimeout(() => setBookingSuccess(null), 3500);
     } catch (err: any) {
-      setBookingError(err.message || 'Slot is no longer available. Please select another time.');
+      if (holdToken) {
+        try { await api.releaseBookingHold(holdToken); } catch { /* hold expires automatically */ }
+      }
+      setBookingError(err.message || 'The slot could not be booked. Select another time and retry.');
     } finally {
       setSubmitting(false);
     }
@@ -141,32 +231,17 @@ export const AppointmentsPage: React.FC = () => {
     }
   };
 
-  // Date Navigation Helpers
-  const changeDateByDays = (days: number) => {
-    const current = new Date(selectedDate);
-    current.setDate(current.getDate() + days);
-    setSelectedDate(current.toISOString().split('T')[0]);
-  };
-
-  const getWeekDates = () => {
-    const dates = [];
-    const base = new Date(selectedDate);
-    for (let i = -3; i <= 3; i++) {
-      const d = new Date(base);
-      d.setDate(base.getDate() + i);
-      dates.push(d);
-    }
-    return dates;
-  };
+  // Date navigation uses a date-only value anchored at UTC noon to avoid DST/browser shifts.
+  const changeDateByDays = (days: number) => setSelectedDate(addDateOnly(selectedDate, days));
+  const getWeekDates = () => Array.from({ length: 7 }, (_, index) =>
+    dateOnlyAsUtcDate(addDateOnly(selectedDate, index - 3))
+  );
 
   // Generate 09:00 to 19:00 IST timeline slots
   const timelineHours = Array.from({ length: 11 }, (_, i) => 9 + i);
 
   // Filter bookings for active day
-  const selectedDateBookings = bookings.filter((b) => {
-    const bDate = new Date(b.start_time).toISOString().split('T')[0];
-    return bDate === selectedDate;
-  });
+  const selectedDateBookings = bookings.filter((b) => localDateInZone(new Date(b.start_time), storeTimezone) === selectedDate);
 
   const filteredBookings = bookings;
 
@@ -306,7 +381,7 @@ export const AppointmentsPage: React.FC = () => {
             </button>
 
             <button
-              onClick={() => setSelectedDate(new Date().toISOString().split('T')[0])}
+              onClick={() => setSelectedDate(localDateInZone(new Date(), storeTimezone))}
               style={{ padding: '8px 14px', borderRadius: '8px', border: '1px solid #0d9488', background: '#f0fdfa', color: '#0d9488', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}
             >
               Today
@@ -315,9 +390,9 @@ export const AppointmentsPage: React.FC = () => {
             {/* Week cards */}
             <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', flex: 1, padding: '4px 0' }}>
               {getWeekDates().map((d) => {
-                const dateStr = d.toISOString().split('T')[0];
+                const dateStr = d.toISOString().slice(0, 10);
                 const isSelected = dateStr === selectedDate;
-                const isToday = dateStr === new Date().toISOString().split('T')[0];
+                const isToday = dateStr === localDateInZone(new Date(), storeTimezone);
                 return (
                   <button
                     key={dateStr}
@@ -370,10 +445,10 @@ export const AppointmentsPage: React.FC = () => {
             <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc' }}>
               <div>
                 <span style={{ fontWeight: 700, fontSize: '15px', color: '#0f172a' }}>
-                  {new Date(selectedDate).toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                  {dateOnlyAsUtcDate(selectedDate).toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' })}
                 </span>
                 <span style={{ marginLeft: '10px', fontSize: '12px', color: '#64748b' }}>
-                  Timezone: Asia/Kolkata (IST)
+                  Timezone: {storeTimezone}
                 </span>
               </div>
               <span style={{ fontSize: '13px', fontWeight: 600, color: '#0d9488' }}>
@@ -391,7 +466,7 @@ export const AppointmentsPage: React.FC = () => {
                   {timelineHours.map((hour) => {
                     const hourStr = `${hour.toString().padStart(2, '0')}:00`;
                     const hourBookings = selectedDateBookings.filter((b) => {
-                      const bHour = new Date(b.start_time).getHours();
+                      const bHour = localTimeInZone(b.start_time, storeTimezone).hour;
                       return bHour === hour;
                     });
 
@@ -446,7 +521,7 @@ export const AppointmentsPage: React.FC = () => {
                                     {b.first_name ? `${b.first_name} ${b.last_name || ''}` : 'Client'} • {b.offering_name || 'Service'}
                                   </div>
                                   <div style={{ fontSize: '11px', color: '#64748b' }}>
-                                    {new Date(b.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(b.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    {new Date(b.start_time).toLocaleTimeString('en-IN', { timeZone: storeTimezone, hour: '2-digit', minute: '2-digit' })} - {new Date(b.end_time).toLocaleTimeString('en-IN', { timeZone: storeTimezone, hour: '2-digit', minute: '2-digit' })}
                                   </div>
                                 </div>
                               </div>
@@ -503,7 +578,7 @@ export const AppointmentsPage: React.FC = () => {
                       {b.offering_name || 'Service Consultation'}
                     </td>
                     <td style={{ padding: '14px 18px', color: '#334155' }}>
-                      {new Date(b.start_time).toLocaleDateString()} at {new Date(b.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {new Date(b.start_time).toLocaleDateString('en-IN', { timeZone: storeTimezone })} at {new Date(b.start_time).toLocaleTimeString('en-IN', { timeZone: storeTimezone, hour: '2-digit', minute: '2-digit' })}
                     </td>
                     <td style={{ padding: '14px 18px', color: '#64748b' }}>
                       {b.resource_name || 'Assigned Room'}
@@ -563,7 +638,7 @@ export const AppointmentsPage: React.FC = () => {
               </div>
               <div>
                 <span style={{ color: '#64748b' }}>Schedule:</span>{' '}
-                <span>{new Date(selectedBooking.start_time).toLocaleString()} IST</span>
+                <span>{new Date(selectedBooking.start_time).toLocaleString('en-IN', { timeZone: storeTimezone })} ({storeTimezone})</span>
               </div>
               <div>
                 <span style={{ color: '#64748b' }}>Status:</span>{' '}
