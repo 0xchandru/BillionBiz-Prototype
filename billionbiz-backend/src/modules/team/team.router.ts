@@ -188,7 +188,7 @@ teamRouter.post('/members', requireAuth, resolveTenant, requirePermission('team.
         `SELECT id FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1 FOR UPDATE`,
         [email]
       );
-      if (existingUser.rowCount > 0) {
+      if ((existingUser.rowCount ?? 0) > 0) {
         userId = existingUser.rows[0].id;
       } else {
         userId = `usr-${uuidv4()}`;
@@ -338,7 +338,7 @@ teamRouter.put('/members/:id', requireAuth, resolveTenant, requirePermission('te
          LIMIT 1`,
         [staffId, storeId]
       );
-      if (existingAssignment.rowCount > 0) {
+      if ((existingAssignment.rowCount ?? 0) > 0) {
         await client.query(
           `UPDATE role_assignments SET role_id = $1
            WHERE id = $2 AND store_id = $3`,
@@ -383,7 +383,7 @@ teamRouter.delete('/members/:id', requireAuth, resolveTenant, requirePermission(
        WHERE id = $1 AND organization_id = $2 AND store_id = $3`,
       [staffId, organizationId, storeId]
     );
-    if (update.rowCount > 0) {
+    if ((update.rowCount ?? 0) > 0) {
       await client.query(
         `UPDATE resources SET is_active = FALSE
          WHERE staff_profile_id = $1 AND store_id = $2`,
@@ -448,7 +448,7 @@ teamRouter.post('/roles', requireAuth, resolveTenant, requirePermission('roles.m
       `SELECT id FROM roles WHERE organization_id = $1 AND code = $2 LIMIT 1`,
       [organizationId, code]
     );
-    if (existing.rowCount > 0) {
+    if ((existing.rowCount ?? 0) > 0) {
       const error: any = new Error('A role with this code already exists in the organization.');
       error.statusCode = 409;
       error.code = 'ROLE_CODE_EXISTS';
@@ -590,7 +590,7 @@ teamRouter.delete('/roles/:id', requireAuth, resolveTenant, requirePermission('r
      LIMIT 1`,
     [roleId, organizationId]
   );
-  if (assignments.rowCount > 0) {
+  if ((assignments.rowCount ?? 0) > 0) {
     return res.status(409).json({ error: 'ROLE_IN_USE', message: 'This role is assigned to one or more team members. Reassign them before deleting it.' });
   }
 
