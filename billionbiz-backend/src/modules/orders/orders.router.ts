@@ -226,17 +226,21 @@ ordersRouter.get(
              r.refund_amount_minor, r.restock_disposition, r.rejection_reason,
              r.items, r.created_at, r.updated_at,
              o.order_number,
-             COALESCE(c.first_name || ' ' || COALESCE(c.last_name, ''), 'Customer') as customer_name,
+             TRIM(CONCAT_WS(' ', NULLIF(c.first_name, ''), NULLIF(c.last_name, ''))) AS customer_name,
              c.email as customer_email, c.phone as customer_phone
       FROM returns r
-      JOIN orders o ON o.id = r.order_id
-      LEFT JOIN customers c ON c.id = o.customer_id
-      WHERE o.store_id = $1
+      JOIN orders o ON o.id = r.order_id AND o.store_id = r.store_id
+      LEFT JOIN customers c ON c.id = o.customer_id AND c.store_id = o.store_id
+      WHERE r.store_id = $1
     `;
     const params: any[] = [storeId];
 
     if (status) {
-      params.push(status);
+      const requestedStatus = String(status).trim().toUpperCase();
+      if (!['REQUESTED', 'APPROVED', 'REJECTED', 'COMPLETED'].includes(requestedStatus)) {
+        return res.status(400).json({ error: 'INVALID_RETURN_STATUS', message: 'Unsupported return status filter' });
+      }
+      params.push(requestedStatus);
       sql += ` AND r.status = $${params.length}`;
     }
 
@@ -250,17 +254,54 @@ ordersRouter.post(
   '/returns',
   requireAuth,
   resolveTenant,
+  requirePermission('returns.manage'),
+  handleIdempotency,
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
-    const { orderId, reason, refundAmountMinor = 0, items = [], restockDisposition = 'RESTOCK' } = req.body;
+    const { orderId, reason, refundAmountMinor = 0, items = [], restockDisposition = 'RESTOCK' } = req.body || {};
+
+    if (typeof orderId !== 'string' || !orderId.trim()) {
+      return res.status(400).json({ error: 'INVALID_RETURN_ORDER', message: 'A valid order is required for a return request' });
+    }
+    if (typeof reason !== 'string' || !reason.trim() || reason.trim().length > 1000) {
+      return res.status(400).json({ error: 'INVALID_RETURN_REASON', message: 'Enter a return reason of 1,000 characters or fewer' });
+    }
+    const amountMinor = Number(refundAmountMinor);
+    if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) {
+      return res.status(400).json({ error: 'INVALID_RETURN_AMOUNT', message: 'Refund request amount must be a positive whole number in minor currency units' });
+    }
+    if (!Array.isArray(items) || items.length > 100) {
+      return res.status(400).json({ error: 'INVALID_RETURN_ITEMS', message: 'Return items must be an array containing no more than 100 entries' });
+    }
+    if (!['RESTOCK', 'NOT_RESTOCK'].includes(String(restockDisposition).toUpperCase())) {
+      return res.status(400).json({ error: 'INVALID_RESTOCK_DISPOSITION', message: 'Choose RESTOCK or NOT_RESTOCK' });
+    }
+
+    const orderResult = await query(
+      `SELECT id, total_minor, currency, status, payment_status
+       FROM orders
+       WHERE id = $1 AND store_id = $2`,
+      [orderId.trim(), storeId]
+    );
+    if (orderResult.rowCount === 0) {
+      return res.status(404).json({ error: 'ORDER_NOT_FOUND', message: 'The order was not found in this store' });
+    }
+
+    const order = orderResult.rows[0];
+    const orderTotalMinor = Number(order.total_minor);
+    if (!Number.isSafeInteger(orderTotalMinor) || amountMinor > orderTotalMinor) {
+      return res.status(400).json({ error: 'RETURN_AMOUNT_EXCEEDS_ORDER', message: 'The requested refund cannot exceed the order total' });
+    }
+    if (['CANCELLED', 'VOIDED'].includes(String(order.status).toUpperCase())) {
+      return res.status(409).json({ error: 'ORDER_NOT_RETURNABLE', message: 'Cancelled or voided orders cannot be returned' });
+    }
 
     const returnId = `ret-${uuidv4()}`;
-    const returnNumber = `RET-${Date.now().toString().slice(-6)}`;
-
+    const returnNumber = `RET-${Date.now().toString().slice(-8)}-${uuidv4().slice(0, 4).toUpperCase()}`;
     await query(
       `INSERT INTO returns (id, order_id, store_id, return_number, status, refund_status, reason, refund_amount_minor, restock_disposition, items)
        VALUES ($1, $2, $3, $4, 'REQUESTED', 'PENDING', $5, $6, $7, $8)`,
-      [returnId, orderId, storeId, returnNumber, reason, refundAmountMinor, restockDisposition, JSON.stringify(items)]
+      [returnId, orderId.trim(), storeId, returnNumber, reason.trim(), amountMinor, String(restockDisposition).toUpperCase(), JSON.stringify(items)]
     );
 
     res.status(201).json({ message: 'Return request created', returnId, returnNumber });
@@ -271,10 +312,33 @@ ordersRouter.post(
   '/returns/:id/approve',
   requireAuth,
   resolveTenant,
+  requirePermission('returns.manage'),
+  handleIdempotency,
   async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
     const returnId = req.params.id as string;
-    await query(`UPDATE returns SET status = 'APPROVED', updated_at = NOW() WHERE id = $1`, [returnId]);
-    res.json({ message: 'Return request approved' });
+    const current = await query(
+      `SELECT id, status FROM returns WHERE id = $1 AND store_id = $2`,
+      [returnId, storeId]
+    );
+    if (current.rowCount === 0) {
+      return res.status(404).json({ error: 'RETURN_NOT_FOUND', message: 'Return request was not found in this store' });
+    }
+    if (!['REQUESTED', 'PENDING'].includes(String(current.rows[0].status).toUpperCase())) {
+      return res.status(409).json({ error: 'RETURN_STATE_CONFLICT', message: 'Only a pending return request can be approved' });
+    }
+
+    const updated = await query(
+      `UPDATE returns
+       SET status = 'APPROVED', updated_at = NOW()
+       WHERE id = $1 AND store_id = $2 AND status IN ('REQUESTED', 'PENDING')
+       RETURNING id`,
+      [returnId, storeId]
+    );
+    if (updated.rowCount === 0) {
+      return res.status(409).json({ error: 'RETURN_STATE_CONFLICT', message: 'The return request changed before it could be approved' });
+    }
+    return res.json({ message: 'Return request approved' });
   }
 );
 
@@ -282,14 +346,42 @@ ordersRouter.post(
   '/returns/:id/reject',
   requireAuth,
   resolveTenant,
+  requirePermission('returns.manage'),
+  handleIdempotency,
   async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
     const returnId = req.params.id as string;
-    const { rejectionReason = 'Does not meet return criteria' } = req.body;
-    await query(
-      `UPDATE returns SET status = 'REJECTED', rejection_reason = $1, updated_at = NOW() WHERE id = $2`,
-      [rejectionReason, returnId]
+    const rejectionReason = typeof req.body?.reason === 'string'
+      ? req.body.reason.trim()
+      : typeof req.body?.rejectionReason === 'string'
+        ? req.body.rejectionReason.trim()
+        : '';
+    if (!rejectionReason || rejectionReason.length > 1000) {
+      return res.status(400).json({ error: 'INVALID_REJECTION_REASON', message: 'Enter a rejection reason of 1,000 characters or fewer' });
+    }
+
+    const current = await query(
+      `SELECT id, status FROM returns WHERE id = $1 AND store_id = $2`,
+      [returnId, storeId]
     );
-    res.json({ message: 'Return request rejected' });
+    if (current.rowCount === 0) {
+      return res.status(404).json({ error: 'RETURN_NOT_FOUND', message: 'Return request was not found in this store' });
+    }
+    if (!['REQUESTED', 'PENDING'].includes(String(current.rows[0].status).toUpperCase())) {
+      return res.status(409).json({ error: 'RETURN_STATE_CONFLICT', message: 'Only a pending return request can be rejected' });
+    }
+
+    const updated = await query(
+      `UPDATE returns
+       SET status = 'REJECTED', rejection_reason = $1, updated_at = NOW()
+       WHERE id = $2 AND store_id = $3 AND status IN ('REQUESTED', 'PENDING')
+       RETURNING id`,
+      [rejectionReason, returnId, storeId]
+    );
+    if (updated.rowCount === 0) {
+      return res.status(409).json({ error: 'RETURN_STATE_CONFLICT', message: 'The return request changed before it could be rejected' });
+    }
+    return res.json({ message: 'Return request rejected' });
   }
 );
 
@@ -297,26 +389,30 @@ ordersRouter.post(
   '/returns/:id/process-refund',
   requireAuth,
   resolveTenant,
+  requirePermission('returns.manage'),
   async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
     const returnId = req.params.id as string;
-    const returnRes = await query(`SELECT * FROM returns WHERE id = $1`, [returnId]);
+    const returnRes = await query(
+      `SELECT id, status, refund_status
+       FROM returns
+       WHERE id = $1 AND store_id = $2`,
+      [returnId, storeId]
+    );
     if (returnRes.rowCount === 0) {
-      return res.status(404).json({ error: 'NOT_FOUND', message: 'Return request not found' });
+      return res.status(404).json({ error: 'RETURN_NOT_FOUND', message: 'Return request was not found in this store' });
     }
-    const ret = returnRes.rows[0];
+    if (String(returnRes.rows[0].status).toUpperCase() !== 'APPROVED') {
+      return res.status(409).json({ error: 'RETURN_NOT_APPROVED', message: 'Approve the return before attempting its refund' });
+    }
 
-    await withTransaction(async (client) => {
-      await client.query(
-        `UPDATE returns SET status = 'COMPLETED', refund_status = 'PROCESSED', updated_at = NOW() WHERE id = $1`,
-        [returnId]
-      );
-      await client.query(
-        `UPDATE orders SET payment_status = 'REFUNDED', updated_at = NOW() WHERE id = $1`,
-        [ret.order_id]
-      );
+    // Do not update payment or return state until a payment provider confirms a
+    // refund. The current platform integrations create payment orders but do
+    // not expose a verified refund operation.
+    return res.status(501).json({
+      error: 'REFUND_PROVIDER_NOT_CONFIGURED',
+      message: 'This store has no verified refund-provider integration. Process the refund with the original payment provider, then record the confirmed settlement.'
     });
-
-    res.json({ message: 'Refund successfully processed and ledger balanced' });
   }
 );
 
