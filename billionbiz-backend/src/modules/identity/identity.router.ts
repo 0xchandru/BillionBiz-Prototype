@@ -1425,6 +1425,24 @@ identityRouter.post('/otp/send', async (req: Request, res: Response) => {
     });
   }
 
+  // Enforce a recipient-level resend limit on the server. A client-side timer
+  // is only a usability feature and can be bypassed by calling this endpoint.
+  const recentOtpRequests = await query(
+    `SELECT COUNT(*)::int AS total
+     FROM verification_otps
+     WHERE identifier = $1
+       AND type = $2
+       AND created_at > NOW() - INTERVAL '15 minutes'`,
+    [value, otpType]
+  );
+  if (Number(recentOtpRequests.rows[0]?.total || 0) >= 5) {
+    res.setHeader('Retry-After', '900');
+    return res.status(429).json({
+      error: 'OTP_SEND_RATE_LIMITED',
+      message: 'Too many verification codes have been requested for this address or number. Try again after 15 minutes.'
+    });
+  }
+
   // Generate 6-digit cryptographic code
   const code = crypto.randomInt(100000, 1000000).toString();
   const codeHash = hashOtp(code);
