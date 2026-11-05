@@ -509,7 +509,7 @@
 /* Secondary Panels Grid */
 .secondaryGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
   gap: 20px;
 }
 
@@ -543,6 +543,10 @@
 }
 
 @media (max-width: 768px) {
+  .secondaryGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .dashboard {
     padding: 20px 16px;
   }
@@ -555,5 +559,26 @@
   }
   .headerActions {
     justify-content: space-between;
+  }
+}
+
+
+@media (max-width: 480px) {
+  .headerTitle {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .headerActions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .operationsQueue {
+    gap: 10px;
+  }
+
+  .kpiCard {
+    padding: 16px;
   }
 }
