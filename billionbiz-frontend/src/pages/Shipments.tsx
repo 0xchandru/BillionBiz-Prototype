@@ -17,61 +17,76 @@ export const ShipmentsPage: FC = () => {
   const [selectedCarrier, setSelectedCarrier] = useState('ALL');
   const [showAddModal, setShowAddModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   // Form State
   const [formOrderNumber, setFormOrderNumber] = useState('');
   const [formCarrier, setFormCarrier] = useState('Shiprocket');
   const [formTrackingNumber, setFormTrackingNumber] = useState('');
-  const [formDestination, setFormDestination] = useState('');
-  const [formStatus, setFormStatus] = useState('IN_TRANSIT');
 
-  const fetchShipments = () => {
+  const fetchShipments = async () => {
     setLoading(true);
-    api.getShipments()
-      .then((res) => {
-        setShipments(res.shipments || []);
-      })
-      .catch((err) => {
-        console.error('Failed to load shipments', err);
-      })
-      .finally(() => {
-        setLoading(false);
-      });
+    setLoadError(null);
+    try {
+      const res = await api.getShipments();
+      setShipments(res.shipments || []);
+    } catch (err: any) {
+      setLoadError(err.message || 'Shipments could not be loaded.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    fetchShipments();
+    void fetchShipments();
   }, []);
 
-  const handleCreateShipment = (e: FormEvent) => {
+  const handleCreateShipment = async (e: FormEvent) => {
     e.preventDefault();
-    if (!formTrackingNumber.trim() || !formOrderNumber.trim()) {
-      alert('Tracking number and order number are required.');
+    const orderNumber = formOrderNumber.trim().toUpperCase();
+    const trackingNumber = formTrackingNumber.trim().toUpperCase();
+    const carrier = formCarrier.trim();
+
+    if (!orderNumber || !trackingNumber || !carrier) {
+      setActionError('Order number, carrier and tracking number are required.');
       return;
     }
 
     setIsSubmitting(true);
-    // Real-time local state addition
-    const newShipment = {
-      id: `shp-${Date.now()}`,
-      tracking_number: formTrackingNumber.trim().toUpperCase(),
-      order_number: formOrderNumber.trim().toUpperCase(),
-      carrier: formCarrier,
-      destination: formDestination.trim() || 'Domestic Customer Address',
-      status: formStatus,
-      created_at: new Date().toISOString()
-    };
+    setActionError(null);
+    setNotice(null);
+    try {
+      const orderResult = await api.getOrders({ search: orderNumber });
+      const order = (orderResult.orders || []).find(
+        (item: any) => String(item.order_number || '').toUpperCase() === orderNumber
+      );
+      if (!order) {
+        throw new Error('Order number was not found in this store. Check the number and try again.');
+      }
+      if (order.fulfillment_status === 'FULFILLED') {
+        throw new Error('This order is already marked as fulfilled.');
+      }
+      if (['CANCELLED', 'VOIDED'].includes(String(order.status || '').toUpperCase())) {
+        throw new Error('Cancelled or voided orders cannot be handed to a carrier.');
+      }
 
-    setTimeout(() => {
-      setShipments((prev) => [newShipment, ...prev]);
-      setIsSubmitting(false);
+      const idempotencyKey = typeof window !== 'undefined' && window.crypto?.randomUUID
+        ? window.crypto.randomUUID()
+        : `fulfillment-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const result = await api.fulfillOrder(order.id, { carrier, trackingNumber }, idempotencyKey);
+
       setShowAddModal(false);
-      // Reset form
       setFormOrderNumber('');
       setFormTrackingNumber('');
-      setFormDestination('');
-      setFormStatus('IN_TRANSIT');
-    }, 300);
+      setNotice(`Order ${order.order_number} was marked as handed to ${result.carrier}. Tracking number: ${result.trackingNumber}. Carrier scan updates are not connected yet.`);
+      await fetchShipments();
+    } catch (err: any) {
+      setActionError(err.message || 'Shipment handoff could not be recorded.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const filteredShipments = shipments.filter((shp) => {
@@ -86,14 +101,14 @@ export const ShipmentsPage: FC = () => {
     }
 
     if (activeTab === 'pending') return shp.status === 'PENDING_PICKUP';
-    if (activeTab === 'in_transit') return shp.status === 'IN_TRANSIT';
+    if (activeTab === 'in_transit') return shp.status === 'SHIPPED' || shp.status === 'IN_TRANSIT';
     if (activeTab === 'out_for_delivery') return shp.status === 'OUT_FOR_DELIVERY';
     if (activeTab === 'delivered') return shp.status === 'DELIVERED';
     return true;
   });
 
   const countDelivered = shipments.filter((s) => s.status === 'DELIVERED').length;
-  const countInTransit = shipments.filter((s) => s.status === 'IN_TRANSIT' || s.status === 'OUT_FOR_DELIVERY').length;
+  const countInTransit = shipments.filter((s) => s.status === 'SHIPPED' || s.status === 'IN_TRANSIT').length;
   const countPending = shipments.filter((s) => s.status === 'PENDING_PICKUP').length;
 
   return (
@@ -106,12 +121,12 @@ export const ShipmentsPage: FC = () => {
             Shipments & Courier Tracking
           </h1>
           <p style={{ fontSize: '14px', color: '#64748b', margin: 0 }}>
-            Dispatch parcels, monitor live transit tracking, and manage third-party logistics fulfillment.
+            Record carrier handoffs and tracking numbers. Live carrier scan updates require a carrier integration.
           </p>
         </div>
 
         <button
-          onClick={() => setShowAddModal(true)}
+          onClick={() => { setActionError(null); setNotice(null); setShowAddModal(true); }}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -132,6 +147,9 @@ export const ShipmentsPage: FC = () => {
         </button>
       </div>
 
+      {notice && <div role="status" style={{ marginBottom: '16px', padding: '12px 14px', border: '1px solid #bfdbfe', borderRadius: '9px', background: '#eff6ff', color: '#1e40af', fontSize: '13px' }}>{notice}</div>}
+      {actionError && !showAddModal && <div role="alert" style={{ marginBottom: '16px', padding: '12px 14px', border: '1px solid #fecaca', borderRadius: '9px', background: '#fef2f2', color: '#b91c1c', fontSize: '13px' }}>{actionError}</div>}
+
       {/* Metrics Row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
         <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px 20px' }}>
@@ -139,7 +157,7 @@ export const ShipmentsPage: FC = () => {
           <div style={{ fontSize: '24px', fontWeight: 700, color: '#0f172a', marginTop: '6px' }}>{shipments.length}</div>
         </div>
         <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px 20px' }}>
-          <div style={{ fontSize: '12px', color: '#0284c7', fontWeight: 600, textTransform: 'uppercase' }}>In Transit</div>
+          <div style={{ fontSize: '12px', color: '#0284c7', fontWeight: 600, textTransform: 'uppercase' }}>Handed Off / In Transit</div>
           <div style={{ fontSize: '24px', fontWeight: 700, color: '#0284c7', marginTop: '6px' }}>{countInTransit}</div>
         </div>
         <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '16px 20px' }}>
@@ -182,7 +200,7 @@ export const ShipmentsPage: FC = () => {
             cursor: 'pointer'
           }}
         >
-          In Transit ({countInTransit})
+          Handed Off / In Transit ({countInTransit})
         </button>
         <button
           onClick={() => setActiveTab('out_for_delivery')}
@@ -280,6 +298,11 @@ export const ShipmentsPage: FC = () => {
         <div style={{ background: '#ffffff', padding: '24px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
           <TableSkeleton rows={4} columns={6} />
         </div>
+      ) : loadError ? (
+        <div role="alert" style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: '12px', padding: '24px', color: '#991b1b' }}>
+          <p style={{ margin: '0 0 12px', fontSize: '13px' }}>{loadError}</p>
+          <button type="button" onClick={() => void fetchShipments()} style={{ minHeight: '40px', padding: '0 14px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>Retry</button>
+        </div>
       ) : filteredShipments.length === 0 ? (
         <EmptyState
           icon={Truck}
@@ -290,7 +313,7 @@ export const ShipmentsPage: FC = () => {
               : 'Dispatched orders with AWB tracking numbers will appear here once processed.'
           }
           actionLabel="Create New Shipment"
-          onAction={() => setShowAddModal(true)}
+          onAction={() => { setActionError(null); setNotice(null); setShowAddModal(true); }}
         />
       ) : (
         <div style={{ background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
@@ -338,7 +361,7 @@ export const ShipmentsPage: FC = () => {
                             : '#0369a1'
                       }}
                     >
-                      {shp.status || 'IN_TRANSIT'}
+                      {shp.status === 'SHIPPED' ? 'Handed to carrier' : shp.status || 'Unknown'}
                     </span>
                   </td>
                   <td style={{ padding: '14px 18px', color: '#64748b' }}>
@@ -346,8 +369,19 @@ export const ShipmentsPage: FC = () => {
                   </td>
                   <td style={{ padding: '14px 18px', textAlign: 'right' }}>
                     <button
-                      onClick={() => alert(`Tracking ${shp.tracking_number} via ${shp.carrier || 'Courier'}: Consignment is currently ${shp.status}.`)}
+                      type="button"
+                      onClick={() => {
+                        if (navigator.clipboard?.writeText) {
+                          void navigator.clipboard.writeText(shp.tracking_number).then(
+                            () => setNotice(`Copied tracking number ${shp.tracking_number}.`),
+                            () => setNotice(`Tracking number: ${shp.tracking_number}`)
+                          );
+                        } else {
+                          setNotice(`Tracking number: ${shp.tracking_number}`);
+                        }
+                      }}
                       style={{
+                        minHeight: '36px',
                         padding: '6px 14px',
                         borderRadius: '6px',
                         border: '1px solid #e2e8f0',
@@ -358,7 +392,7 @@ export const ShipmentsPage: FC = () => {
                         color: '#0f172a'
                       }}
                     >
-                      Track Package
+                      Copy tracking number
                     </button>
                   </td>
                 </tr>
@@ -371,133 +405,49 @@ export const ShipmentsPage: FC = () => {
       {/* Create Shipment Modal */}
       {showAddModal && (
         <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.5)',
-            backdropFilter: 'blur(3px)',
-            zIndex: 1000,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '20px'
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !isSubmitting) setShowAddModal(false);
           }}
+          style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(15, 23, 42, 0.56)', backdropFilter: 'blur(3px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}
         >
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '16px',
-              maxWidth: '520px',
-              width: '100%',
-              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
-              overflow: 'hidden'
-            }}
-          >
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>
-                Create New Courier Shipment
-              </h2>
-              <button
-                onClick={() => setShowAddModal(false)}
-                style={{ background: 'none', border: 'none', fontSize: '20px', color: '#94a3b8', cursor: 'pointer' }}
-              >
-                ✕
-              </button>
+          <section role="dialog" aria-modal="true" aria-labelledby="shipment-modal-title" style={{ backgroundColor: '#ffffff', borderRadius: '16px', maxWidth: '540px', width: '100%', maxHeight: 'calc(100dvh - 32px)', overflowY: 'auto', boxShadow: '0 24px 70px rgba(15, 23, 42, 0.24)' }}>
+            <div style={{ padding: '20px 22px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+              <div>
+                <h2 id="shipment-modal-title" style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>Record carrier handoff</h2>
+                <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#64748b' }}>Use the tracking number issued by your carrier.</p>
+              </div>
+              <button type="button" disabled={isSubmitting} onClick={() => setShowAddModal(false)} aria-label="Close shipment dialog" style={{ width: '40px', height: '40px', border: '1px solid #e2e8f0', borderRadius: '9px', background: '#fff', color: '#64748b', cursor: 'pointer', fontSize: '18px' }}>×</button>
             </div>
 
-            <form onSubmit={handleCreateShipment} style={{ padding: '24px' }}>
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>
-                  Associated Order Number *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. BBZ-1002"
-                  value={formOrderNumber}
-                  onChange={(e) => setFormOrderNumber(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none' }}
-                />
+            <form onSubmit={handleCreateShipment} style={{ padding: '22px' }}>
+              <label htmlFor="shipment-order-number" style={{ display: 'block', fontSize: '12px', fontWeight: 650, color: '#475569', marginBottom: '6px' }}>Order number *</label>
+              <input id="shipment-order-number" type="text" required maxLength={64} placeholder="e.g. BBZ-1002" value={formOrderNumber} onChange={(event) => setFormOrderNumber(event.target.value)} style={{ width: '100%', minHeight: '42px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', marginBottom: '16px' }} />
+
+              <label htmlFor="shipment-carrier" style={{ display: 'block', fontSize: '12px', fontWeight: 650, color: '#475569', marginBottom: '6px' }}>Carrier *</label>
+              <select id="shipment-carrier" required value={formCarrier} onChange={(event) => setFormCarrier(event.target.value)} style={{ width: '100%', minHeight: '42px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', background: '#fff', marginBottom: '16px' }}>
+                <option value="Shiprocket">Shiprocket</option>
+                <option value="Delhivery">Delhivery</option>
+                <option value="BlueDart">BlueDart</option>
+                <option value="DTDC">DTDC</option>
+                <option value="Other">Other carrier</option>
+              </select>
+
+              <label htmlFor="shipment-tracking-number" style={{ display: 'block', fontSize: '12px', fontWeight: 650, color: '#475569', marginBottom: '6px' }}>AWB / tracking number *</label>
+              <input id="shipment-tracking-number" type="text" required minLength={3} maxLength={128} placeholder="e.g. SR982736154" value={formTrackingNumber} onChange={(event) => setFormTrackingNumber(event.target.value.toUpperCase())} style={{ width: '100%', minHeight: '42px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', marginBottom: '14px', textTransform: 'uppercase' }} />
+
+              <div style={{ padding: '11px 12px', marginBottom: '16px', borderRadius: '8px', background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1e40af', fontSize: '11px', lineHeight: 1.5 }}>
+                Saving this handoff marks the order as fulfilled and records the supplied tracking number. It does not book a pickup, buy a shipping label, or receive live carrier scan events. The delivery address is read from the selected order.
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '16px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>
-                    Courier Partner *
-                  </label>
-                  <select
-                    value={formCarrier}
-                    onChange={(e) => setFormCarrier(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none', backgroundColor: '#fff' }}
-                  >
-                    <option value="Shiprocket">Shiprocket</option>
-                    <option value="Delhivery">Delhivery</option>
-                    <option value="BlueDart">BlueDart</option>
-                    <option value="DTDC">DTDC</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>
-                    AWB / Tracking Number *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. SR982736154"
-                    value={formTrackingNumber}
-                    onChange={(e) => setFormTrackingNumber(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none', textTransform: 'uppercase' }}
-                  />
-                </div>
-              </div>
+              {actionError && <div role="alert" style={{ padding: '10px 12px', marginBottom: '14px', borderRadius: '8px', background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: '12px' }}>{actionError}</div>}
 
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>
-                  Destination Delivery Address
-                </label>
-                <input
-                  type="text"
-                  placeholder="Plot 12, Koramangala, Bengaluru - 560034"
-                  value={formDestination}
-                  onChange={(e) => setFormDestination(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none' }}
-                />
-              </div>
-
-              <div style={{ marginBottom: '24px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>
-                  Initial Tracking Status
-                </label>
-                <select
-                  value={formStatus}
-                  onChange={(e) => setFormStatus(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none', backgroundColor: '#fff' }}
-                >
-                  <option value="PENDING_PICKUP">Pending Pickup</option>
-                  <option value="IN_TRANSIT">In Transit</option>
-                  <option value="OUT_FOR_DELIVERY">Out for Delivery</option>
-                  <option value="DELIVERED">Delivered</option>
-                </select>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  style={{ padding: '9px 16px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px', fontWeight: 600, color: '#475569', cursor: 'pointer' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  style={{ padding: '9px 20px', borderRadius: '8px', border: 'none', background: '#0d9488', fontSize: '13px', fontWeight: 600, color: '#fff', cursor: 'pointer' }}
-                >
-                  {isSubmitting ? 'Creating...' : 'Create Shipment'}
-                </button>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', flexWrap: 'wrap' }}>
+                <button type="button" disabled={isSubmitting} onClick={() => setShowAddModal(false)} style={{ minHeight: '42px', padding: '0 16px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px', fontWeight: 600, color: '#475569', cursor: 'pointer' }}>Cancel</button>
+                <button type="submit" disabled={isSubmitting} style={{ minHeight: '42px', padding: '0 18px', borderRadius: '8px', border: 'none', background: '#0d9488', fontSize: '13px', fontWeight: 650, color: '#fff', cursor: isSubmitting ? 'wait' : 'pointer', opacity: isSubmitting ? 0.65 : 1 }}>{isSubmitting ? 'Saving handoff…' : 'Record handoff'}</button>
               </div>
             </form>
-          </div>
+          </section>
         </div>
       )}
     </div>
