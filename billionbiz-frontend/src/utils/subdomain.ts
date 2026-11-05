@@ -194,7 +194,9 @@ export function getPortalUrl(type: 'root' | 'admin' | 'accounts' | 'pos' | 'staf
 export function getStoreUrl(slug: string, path = ''): string {
   const isLocal = isLocalOrPreview();
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
-  if (isLocal) {
+  const hostname = typeof window !== 'undefined' ? window.location.hostname.toLowerCase() : '';
+  const hasLocalManagedProjects = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.endsWith('.localhost') || hostname.endsWith('.local');
+  if (hasLocalManagedProjects) {
     let hash = 2166136261;
     for (const character of slug) {
       hash ^= character.charCodeAt(0);
@@ -203,6 +205,7 @@ export function getStoreUrl(slug: string, path = ''): string {
     const port = 20_000 + ((hash >>> 0) % 20_000);
     return `http://${slug}.localhost:${port}${cleanPath === '/' ? '' : cleanPath}`;
   }
+  if (isLocal) return `/store/${slug}${cleanPath === '/' ? '' : cleanPath}`;
   const rootDomain = import.meta.env.VITE_ROOT_DOMAIN || 'chandraprakash.codes';
   return `https://${slug}.${rootDomain}${cleanPath}`;
 }
