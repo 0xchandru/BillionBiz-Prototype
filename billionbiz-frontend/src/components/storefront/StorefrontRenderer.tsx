@@ -83,7 +83,7 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
   }, [device]);
   const [internalPath, setInternalPath] = useState<string>(currentPath);
   const activePath = previewMode ? (currentPath || internalPath) : (window.location.pathname || currentPath || '/');
-  const brandDisplayName = brand?.brand_name || brand?.name || store?.name || 'Online Store';
+  const brandDisplayName = brand?.brand_name || brand?.name || store?.name || 'Store';
 
   const seoDefaults = (settings as any)?.seoDefaults || (settings as any)?.seo_defaults || {};
   const normalizedActivePath = activePath.replace(/\/+$/, '') || '/';
