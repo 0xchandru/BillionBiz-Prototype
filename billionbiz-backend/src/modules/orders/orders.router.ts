@@ -62,10 +62,7 @@ ordersRouter.get(
       sql += ` AND (o.order_number ILIKE ${params.length} OR c.first_name ILIKE ${params.length} OR c.last_name ILIKE ${params.length} OR c.email ILIKE ${params.length} OR c.phone ILIKE ${params.length})`;
     }
 
-    const whereClause = sql.slice(
-      sql.indexOf('WHERE o.store_id = $1'),
-      sql.indexOf(' GROUP BY')
-    );
+    const whereClause = sql.slice(sql.indexOf('WHERE o.store_id = $1'));
     const countSql = `
       SELECT COUNT(DISTINCT o.id)::int AS total
       FROM orders o
