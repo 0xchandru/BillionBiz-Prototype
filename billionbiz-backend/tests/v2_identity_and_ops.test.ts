@@ -180,6 +180,8 @@ describe('V2 Identity, First-Store Provisioning & Outbox Services', () => {
 
     expect(verifyRes.status).toBe(200);
     expect(verifyRes.body.mfaEnabled).toBe(true);
+    expect(verifyRes.body.token).toBeDefined();
+    authToken = verifyRes.body.token;
 
     const replayRes = await makeRequest('POST', '/api/v1/auth/mfa/verify', {
       body: { code }
@@ -202,6 +204,8 @@ describe('V2 Identity, First-Store Provisioning & Outbox Services', () => {
     });
     expect(recoveryRes.status).toBe(200);
     expect(recoveryRes.body.recoveryCodeConsumed).toBe(true);
+    expect(recoveryRes.body.token).toBeDefined();
+    authToken = recoveryRes.body.token;
 
     const recoveryReplay = await makeRequest('POST', '/api/v1/auth/mfa/verify', {
       body: { recoveryCode: enrollRes.body.recoveryCodes[0] }
