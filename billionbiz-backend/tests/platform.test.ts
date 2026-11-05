@@ -314,6 +314,21 @@ describe('Phase 6: Appointments & Availability Engine', () => {
        ON CONFLICT (id) DO NOTHING`
     );
     await query(
+      `UPDATE staff_profiles
+       SET responsibilities = '["APPOINTMENT_STAFF"]'::jsonb
+       WHERE id = 'staff-admin-default' AND store_id = 'store-shoum-default'`
+    );
+    await query(
+      `UPDATE staff_shifts
+       SET start_time = '09:00:00', end_time = '20:00:00', is_active = TRUE
+       WHERE staff_profile_id = 'staff-admin-default'`
+    );
+    await query(
+      `INSERT INTO staff_shifts (id, staff_profile_id, day_of_week, start_time, end_time, is_active)
+       VALUES ('shift-test-fixture-sunday', 'staff-admin-default', 0, '09:00:00', '20:00:00', TRUE)
+       ON CONFLICT (id) DO UPDATE SET start_time = EXCLUDED.start_time, end_time = EXCLUDED.end_time, is_active = TRUE`
+    );
+    await query(
       `INSERT INTO offering_resources (offering_id, resource_id, is_primary)
        VALUES ('off-test-fixture', 'res-test-fixture', TRUE)
        ON CONFLICT DO NOTHING`
@@ -329,15 +344,17 @@ describe('Phase 6: Appointments & Availability Engine', () => {
 
   it('TC-BOOK-003: should calculate available non-overlapping time slots', async () => {
     const targetDate = new Date();
-    targetDate.setDate(targetDate.getDate() + 7 + Math.floor(Math.random() * 60));
+    targetDate.setDate(targetDate.getDate() + 7);
     const dateStr = targetDate.toISOString().split('T')[0];
 
     const res = await request('GET', `/api/v1/appointments/availability?offeringId=${offeringId}&date=${dateStr}`);
     expect(res.status).toBe(200);
+    expect(res.body.resources).toBeDefined();
+    expect(res.body.resources.length).toBeGreaterThan(0);
     expect(res.body.slots.length).toBeGreaterThan(0);
-    resourceId = res.body.resource.id;
     candidateSlot = res.body.slots.find((s: any) => s.isAvailable);
     expect(candidateSlot).toBeDefined();
+    resourceId = candidateSlot.resourceId;
   });
 
   it('TC-BOOK-004: should hold a time slot temporarily with TTL', async () => {
