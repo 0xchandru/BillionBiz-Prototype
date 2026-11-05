@@ -378,11 +378,7 @@ describe('V2 Native Storefront Runtime & Multi-Tenant Isolation Suite (REQ-STORE
     });
     expect(sendOtp.status).toBe(200);
 
-    const otpDb = await query(
-      `SELECT code FROM verification_otps WHERE identifier = $1 ORDER BY created_at DESC LIMIT 1`,
-      [testEmail]
-    );
-    const code = otpDb.rows[0].code;
+    const code = String(sendOtp.body.testCode);
 
     // 2. Verify OTP
     const verifyOtp = await request('POST', '/api/v1/auth/otp/verify', {
