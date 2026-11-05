@@ -6,7 +6,7 @@ import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 
 async function request(
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE' | 'OPTIONS',
   path: string,
   options: {
     body?: any;
@@ -23,7 +23,7 @@ async function request(
     headers['authorization'] = `Bearer ${options.token}`;
   }
 
-  return new Promise<{ status: number; body: any }>((resolve) => {
+  return new Promise<{ status: number; body: any; headers: Record<string, string> }>((resolve) => {
     const req: any = {
       method,
       url: path,
@@ -51,13 +51,14 @@ async function request(
       _headers: {},
       setHeader: (k: string, v: string) => { res._headers[k.toLowerCase()] = v; },
       getHeader: (k: string) => res._headers[k.toLowerCase()],
+      vary: (k: string) => { res._headers.vary = k; },
       status: (c: number) => { res.statusCode = c; return res; },
       json: (b: any) => {
-        resolve({ status: res.statusCode, body: b });
+        resolve({ status: res.statusCode, body: b, headers: res._headers });
         return res;
       },
       end: () => {
-        resolve({ status: res.statusCode, body: {} });
+        resolve({ status: res.statusCode, body: {}, headers: res._headers });
         return res;
       },
       on: () => res
@@ -65,13 +66,40 @@ async function request(
 
     app(req, res, (err: any) => {
       if (err) {
-        resolve({ status: 500, body: { error: err.message } });
+        resolve({ status: 500, body: { error: err.message }, headers: res._headers });
       } else {
-        resolve({ status: 404, body: { error: 'Not Found' } });
+        resolve({ status: 404, body: { error: 'Not Found' }, headers: res._headers });
       }
     });
   });
 }
+
+describe('CORS preflight policy', () => {
+  it('allows the configured storefront origin, varies by origin, and rejects unlisted origins', async () => {
+    const allowed = await request('OPTIONS', '/api/v1/auth/otp/send', { headers: {
+      origin: 'https://www.chandraprakash.codes',
+      'access-control-request-method': 'POST',
+      'access-control-request-headers': 'content-type,ngrok-skip-browser-warning'
+    } });
+    expect(allowed.status).toBe(204);
+    expect(allowed.headers['access-control-allow-origin']).toBe('https://www.chandraprakash.codes');
+    expect(allowed.headers['access-control-allow-credentials']).toBe('true');
+    expect(allowed.headers.vary).toContain('Origin');
+
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      const denied = await request('OPTIONS', '/api/v1/auth/otp/send', { headers: {
+        origin: 'https://not-allowed.invalid',
+        'access-control-request-method': 'POST'
+      } });
+      expect(denied.status).toBe(204);
+      expect(denied.headers['access-control-allow-origin']).toBeUndefined();
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
+  });
+});
 
 describe('V2 Native Storefront Runtime & Multi-Tenant Isolation Suite (REQ-STOREFRONT-001)', () => {
   let storeAId: string;
@@ -207,6 +235,27 @@ describe('V2 Native Storefront Runtime & Multi-Tenant Isolation Suite (REQ-STORE
     expect(Array.isArray(res.body.products)).toBe(true);
   });
 
+  it('TC-STORE-003B: Store UI configuration saves per tenant and reaches the live storefront response', async () => {
+    const uiConfig = {
+      showBottomNav: true,
+      bottomNavStyle: 'pill',
+      bottomNavLinks: [{ id: 'home', text: 'Home', link: '/', icon: 'Home' }],
+      floatingActions: [{ id: 'top', type: 'back-to-top', label: 'Back to top' }],
+      decorationsEnabled: false,
+      decorationTrigger: 'purchase'
+    };
+    const saved = await request('PATCH', '/api/v1/storefront/settings', { token: storeAToken, body: { uiConfig } });
+    expect(saved.status).toBe(200);
+    expect(saved.body.settings.ui_config).toEqual(uiConfig);
+
+    const editorSettings = await request('GET', '/api/v1/storefront/settings', { token: storeAToken });
+    expect(editorSettings.body.settings.uiConfig).toEqual(uiConfig);
+    const liveStore = await request('GET', `/api/v1/storefront/by-slug/${storeASlug}`);
+    expect(liveStore.body.settings.uiConfig).toEqual(uiConfig);
+
+    await request('PATCH', '/api/v1/storefront/settings', { token: storeAToken, body: { uiConfig: {} } });
+  });
+
   it('TC-STORE-003A: Password protection blocks public data until a store-scoped token is presented', async () => {
     // Ensure Store B has a valid initial publication before testing the gate.
     const draftRender = await request('GET', '/api/v1/storefront/render', { token: storeBToken });
@@ -269,13 +318,14 @@ describe('V2 Native Storefront Runtime & Multi-Tenant Isolation Suite (REQ-STORE
 
   it('TC-STORE-004: Two test stores render distinct persisted content and active releases (REQ-STOREFRONT-001)', async () => {
     // 1. Create distinct page for Store A
-    const titleA = `Shoum Lookbook ${storeAId}`;
+    const runId = Date.now().toString();
+    const titleA = `Shoum Lookbook ${storeAId} ${runId}`;
     const pageARes = await request('POST', '/api/v1/storefront/pages', {
       token: storeAToken,
       headers: { 'x-organization-id': storeAOrgId, 'x-store-id': storeAId },
       body: {
         title: titleA,
-        slug: `lookbook-${storeAId}`,
+        slug: `lookbook-${storeAId}-${runId}`,
         sections: [{ id: 'sec-a-1', type: 'HeroBanner', name: 'Shoum Exclusive Fall Collection' }]
       }
     });
@@ -290,13 +340,13 @@ describe('V2 Native Storefront Runtime & Multi-Tenant Isolation Suite (REQ-STORE
     expect(pubARes.status).toBe(201);
 
     // 3. Create distinct page for Store B
-    const titleB = `Artisan Pottery ${storeBId}`;
+    const titleB = `Artisan Pottery ${storeBId} ${runId}`;
     const pageBRes = await request('POST', '/api/v1/storefront/pages', {
       token: storeBToken,
       headers: { 'x-organization-id': storeBOrgId, 'x-store-id': storeBId },
       body: {
         title: titleB,
-        slug: `pottery-${storeBId}`,
+        slug: `pottery-${storeBId}-${runId}`,
         sections: [{ id: 'sec-b-1', type: 'FeaturedCollection', name: 'Handcrafted Ceramic Mugs' }]
       }
     });

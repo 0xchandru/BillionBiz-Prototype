@@ -119,6 +119,7 @@ export const DEFAULT_THEME_SPACING: ThemeSpacing = {
 };
 
 export interface GlobalThemeData {
+  schemaVersion?: 1;
   presetName: string;
   description: string;
   // Legacy backward compatibility
@@ -861,8 +862,36 @@ export const themePresets: Record<string, GlobalThemeData> = {
 
 export const getDefaultTheme = (): GlobalThemeData => ({
   ...JSON.parse(JSON.stringify(themePresets.Modern)),
+  schemaVersion: 1,
   spacing: { ...DEFAULT_THEME_SPACING }
 });
+
+export const mergeThemeData = <T extends Record<string, any>>(base: T, patch: Record<string, any>): T => {
+  const result: Record<string, any> = { ...base };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const baseValue = result[key] && typeof result[key] === 'object' && !Array.isArray(result[key]) ? result[key] : {};
+      result[key] = mergeThemeData(baseValue, value);
+    } else if (value !== undefined) {
+      result[key] = value;
+    }
+  }
+  return result as T;
+};
+
+export const migrateThemeData = (value: Partial<GlobalThemeData> | Record<string, any>): GlobalThemeData => {
+  const normalized = mergeThemeData(getDefaultTheme(), { ...value, schemaVersion: 1 });
+  const colors = (value as Record<string, any>).colors;
+  if (colors && typeof colors === 'object') {
+    normalized.palette = mergeThemeData(normalized.palette, {
+      brand: { primary: colors.primary, secondary: colors.secondary, accent: colors.accent },
+      background: { background: colors.background },
+      text: { body: colors.text },
+      border: { border: colors.border },
+    });
+  }
+  return normalized;
+};
 
 export const getThemeSpacing = (theme?: Partial<GlobalThemeData>): ThemeSpacing => ({
   ...DEFAULT_THEME_SPACING,

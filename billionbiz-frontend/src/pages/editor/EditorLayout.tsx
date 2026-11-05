@@ -1,18 +1,27 @@
-import React, { useEffect, useRef } from 'react';
+import React, { Suspense, lazy, useEffect, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { getEditorPath, resolveHeaderRowId, resolveFooterRowId } from '../../components/editor/utils/editorNavigation';
 import styles from './EditorLayout.module.css';
-import { EditorTopBar } from '../../components/editor/EditorTopBar';
-import { EditorLeftSidebar } from '../../components/editor/EditorLeftSidebar';
-import { EditorRightSidebar } from '../../components/editor/EditorRightSidebar';
-import { EditorCanvas } from '../../components/editor/EditorCanvas';
 import { useLandingEditorStore } from '../../store/landingEditorStore';
 import { useSiteStore, type PageData } from '../../store/siteStore';
 import type { EditorPanelType } from '../../store/landingEditorStore';
 import { useEditorContextStore } from '../../store/editorContextStore';
-import { EditorSwitchConfirmModal } from '../../components/editor/ui/EditorSwitchConfirmModal';
-import { FooterComponentPicker } from '../../components/editor/engine/FooterComponentPicker';
 import { scrollPreviewToHeaderSection, scrollPreviewToFooterSection, scrollPreviewToSection } from '../../components/editor/utils/previewScroll';
+
+const EditorTopBar = lazy(() => import('../../components/editor/EditorTopBar').then((module) => ({ default: module.EditorTopBar })));
+const EditorLeftSidebar = lazy(() => import('../../components/editor/EditorLeftSidebar').then((module) => ({ default: module.EditorLeftSidebar })));
+const EditorRightSidebar = lazy(() => import('../../components/editor/EditorRightSidebar').then((module) => ({ default: module.EditorRightSidebar })));
+const EditorCanvas = lazy(() => import('../../components/editor/EditorCanvas').then((module) => ({ default: module.EditorCanvas })));
+const EditorSwitchConfirmModal = lazy(() => import('../../components/editor/ui/EditorSwitchConfirmModal').then((module) => ({ default: module.EditorSwitchConfirmModal })));
+const FooterComponentPicker = lazy(() => import('../../components/editor/engine/FooterComponentPicker').then((module) => ({ default: module.FooterComponentPicker })));
+
+const EditorWorkspaceLoading: React.FC = () => (
+  <div role="status" aria-label="Loading store editor" style={{ height: '100%', minHeight: 320, display: 'grid', gridTemplateColumns: '280px minmax(0,1fr) 320px', gap: 12, padding: 12, background: '#f1f5f9' }}>
+    <div style={{ borderRadius: 12, background: 'linear-gradient(90deg,#e2e8f0,#f8fafc,#e2e8f0)', backgroundSize: '200% 100%', animation: 'bbiz-skeleton 1.4s ease infinite' }} />
+    <div style={{ borderRadius: 12, background: 'linear-gradient(90deg,#e2e8f0,#f8fafc,#e2e8f0)', backgroundSize: '200% 100%', animation: 'bbiz-skeleton 1.4s ease infinite' }} />
+    <div style={{ borderRadius: 12, background: 'linear-gradient(90deg,#e2e8f0,#f8fafc,#e2e8f0)', backgroundSize: '200% 100%', animation: 'bbiz-skeleton 1.4s ease infinite' }} />
+  </div>
+);
 
 const resolveHeaderRowIdFromSection = resolveHeaderRowId;
 const resolveFooterRowIdFromSection = resolveFooterRowId;
@@ -104,7 +113,7 @@ const EditorLayout: React.FC = () => {
   const sectionIdParam = searchParams.get('sectionId');
   const tabParam = (searchParams.get('tab') || tab || 'pages').toLowerCase().replace(/\/+$/, '');
 
-  const { setActivePanel, setSelectedPageId, setRightSidebarOpen, isFullPageMode, navigateToPage, pendingEditorSwitch, setPendingEditorSwitch } = useLandingEditorStore();
+  const { setActivePanel, setSelectedPageId, setRightSidebarOpen, isFullPageMode, isRightSidebarOpen, navigateToPage, pendingEditorSwitch, setPendingEditorSwitch } = useLandingEditorStore();
   const lastProcessedUrlRef = useRef<string>('');
 
   // Hydrate Store Editor with real database tenant pages, theme, brand, and settings
@@ -333,34 +342,36 @@ const EditorLayout: React.FC = () => {
 
   return (
     <div className={`${styles.editorWrapper} ${isFullPageMode ? styles.focusMode : ''}`}>
-      <EditorTopBar />
-      <div className={styles.mainEditor}>
-        {!isFullPageMode && <EditorLeftSidebar />}
-        <EditorCanvas />
-        {!isFullPageMode && <EditorRightSidebar />}
-      </div>
-      {pendingEditorSwitch && (
-        <EditorSwitchConfirmModal
-          currentName={pendingEditorSwitch.currentName}
-          targetName={pendingEditorSwitch.targetName}
-          onCancel={() => setPendingEditorSwitch(null)}
-          onConfirm={() => {
-            const confirmAction = pendingEditorSwitch.onConfirm;
-            const targetPage = pendingEditorSwitch.targetPageId;
-            const targetSection = pendingEditorSwitch.targetSectionId;
-            setPendingEditorSwitch(null);
-            confirmAction();
-            if (targetPage === 'footer-global') {
-              scrollPreviewToFooterSection(targetSection || 'footer-main');
-            } else if (targetPage === 'header-global') {
-              scrollPreviewToHeaderSection(targetSection || 'header-main');
-            } else if (targetSection) {
-              scrollPreviewToSection(targetSection);
-            }
-          }}
-        />
-      )}
-      <FooterComponentPicker />
+      <Suspense fallback={<EditorWorkspaceLoading />}>
+        <EditorTopBar />
+        <div className={styles.mainEditor}>
+          {!isFullPageMode && <EditorLeftSidebar />}
+          <EditorCanvas />
+          {!isFullPageMode && isRightSidebarOpen && <EditorRightSidebar />}
+        </div>
+        {pendingEditorSwitch && (
+          <EditorSwitchConfirmModal
+            currentName={pendingEditorSwitch.currentName}
+            targetName={pendingEditorSwitch.targetName}
+            onCancel={() => setPendingEditorSwitch(null)}
+            onConfirm={() => {
+              const confirmAction = pendingEditorSwitch.onConfirm;
+              const targetPage = pendingEditorSwitch.targetPageId;
+              const targetSection = pendingEditorSwitch.targetSectionId;
+              setPendingEditorSwitch(null);
+              confirmAction();
+              if (targetPage === 'footer-global') {
+                scrollPreviewToFooterSection(targetSection || 'footer-main');
+              } else if (targetPage === 'header-global') {
+                scrollPreviewToHeaderSection(targetSection || 'header-main');
+              } else if (targetSection) {
+                scrollPreviewToSection(targetSection);
+              }
+            }}
+          />
+        )}
+        <FooterComponentPicker />
+      </Suspense>
     </div>
   );
 };

@@ -28,6 +28,7 @@ export type DesignSection =
   | 'effects-motion' | 'custom-css'
   | 'loader' | 'scroll-behavior' | 'cursor'
   | 'mobile-nav' | 'mobile-pwa' | 'mobile-app'
+  | 'floating-actions'
   | 'theme' | 'buttons' | 'effects' | 'mobile' | 'mobile-web';
 
 export type SeoSection = 'global' | 'page';
@@ -192,7 +193,7 @@ export const useLandingEditorStore = create<LandingEditorState>((set, get) => ({
 
   // Design defaults
   designSection: 'themes',
-  selectedThemeCategory: 'themes',
+  selectedThemeCategory: 'colors',
 
   // SEO defaults
   seoSection: 'global',
@@ -218,7 +219,7 @@ export const useLandingEditorStore = create<LandingEditorState>((set, get) => ({
   },
   lastDesignMemory: {
     designSection: 'themes',
-    selectedThemeCategory: 'themes',
+    selectedThemeCategory: 'colors',
     isRightSidebarOpen: true,
   },
   lastSeoMemory: {
@@ -623,7 +624,7 @@ export const useLandingEditorStore = create<LandingEditorState>((set, get) => ({
         return {
           ...base,
           designSection: currentDesignMemory.designSection || 'themes',
-          selectedThemeCategory: currentDesignMemory.selectedThemeCategory || 'themes',
+          selectedThemeCategory: currentDesignMemory.selectedThemeCategory === 'themes' ? 'colors' : (currentDesignMemory.selectedThemeCategory || 'colors'),
           selectedPageId: 'landing-page',
           selectedSectionId: null,
           isRightSidebarOpen: currentDesignMemory.isRightSidebarOpen,

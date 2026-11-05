@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   CheckCircle2, Globe, Bell, Shield, FileText,
-  Plug, Code, Key, LockKeyhole, PanelLeftClose, PanelLeftOpen, ChevronRight
+  Plug, Code, Key, LockKeyhole, PanelLeftClose, PanelLeftOpen, ChevronRight, Search
 } from 'lucide-react';
 import { useLandingEditorStore } from '../../../store/landingEditorStore';
 import type { SettingsSection } from '../../../store/landingEditorStore';
@@ -78,6 +78,22 @@ export const SettingsPanel: React.FC = () => {
       </div>
 
       <div className={styles.contextPanelScroll}>
+        <div className={styles.navGroup}>
+          <div className={styles.navGroupTitle}>DISCOVERY</div>
+          <button
+            type="button"
+            className={styles.navItem}
+            onClick={() => setActivePanel('growth')}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9, textAlign: 'left', border: 0, background: 'transparent', font: 'inherit', cursor: 'pointer' }}
+          >
+            <span className={styles.navItemIcon}><Search size={16} /></span>
+            <span className={styles.navItemContent}>
+              <span className={styles.navItemLabel}>Search & SEO</span>
+              <span className={styles.navItemPath}>Search appearance, social previews, and indexing</span>
+            </span>
+            <ChevronRight size={14} className={styles.navItemChevron} />
+          </button>
+        </div>
         {SETTINGS_GROUPS.map((group) => (
           <div key={group.title} className={styles.navGroup}>
             <div className={styles.navGroupTitle}>{group.title}</div>

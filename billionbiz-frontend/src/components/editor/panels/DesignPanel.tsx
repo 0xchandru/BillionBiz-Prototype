@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
-  Palette, Paintbrush, Hash, CreditCard, Ruler,
-  Loader2, FileText, Smartphone, ChevronsUp, Globe,
+  Paintbrush, Hash, CreditCard, Ruler,
+  Loader2, FileText, Smartphone, ChevronsUp, Globe, MousePointerClick,
   PanelLeftClose, PanelLeftOpen, ChevronRight,
 } from 'lucide-react';
 import { useLandingEditorStore } from '../../../store/landingEditorStore';
@@ -10,7 +10,6 @@ import styles from '../../../pages/editor/EditorLayout.module.css';
 
 // ─── Theme sub-nav categories ───
 const THEME_CATEGORIES = [
-  { id: 'themes' as const, label: 'Theme Presets', icon: Palette, desc: 'Preset styles & palettes' },
   { id: 'colors' as const, label: 'Color Palette', icon: Paintbrush, desc: 'Brand, surface & accents' },
   { id: 'typography' as const, label: 'Typography', icon: Hash, desc: 'Fonts & typography scale' },
   { id: 'buttons' as const, label: 'Buttons & Forms', icon: CreditCard, desc: 'Shapes, inputs & CTA styling' },
@@ -33,15 +32,20 @@ export const DesignPanel: React.FC = () => {
 
   const isLoaderActive = designSection === 'loader' && isRightSidebarOpen;
   const isScrollActive = designSection === 'scroll-behavior' && isRightSidebarOpen;
+  const isFloatingActionsActive = designSection === 'floating-actions' && isRightSidebarOpen;
   const isMobileNavActive = (designSection === 'mobile-nav' || designSection === 'mobile') && isRightSidebarOpen;
   const isMobilePwaActive = (designSection === 'mobile-pwa' || designSection === 'mobile-web') && isRightSidebarOpen;
   const isMobileAppActive = designSection === 'mobile-app' && isRightSidebarOpen;
+
+  useEffect(() => {
+    if (selectedThemeCategory === 'themes') setSelectedThemeCategory('colors');
+  }, [selectedThemeCategory, setSelectedThemeCategory]);
 
   return (
     <div className={styles.contextPanelInner}>
       <div className={styles.contextPanelHeader}>
         <div>
-          <h3 className={styles.contextPanelTitle}>Design system</h3>
+          <h3 className={styles.contextPanelTitle}>Design</h3>
           <p className={styles.contextPanelDesc}>One consistent visual language across every page</p>
         </div>
         <button
@@ -56,7 +60,7 @@ export const DesignPanel: React.FC = () => {
       <div className={styles.contextPanelScroll}>
         {/* Group 1: Theme Styling */}
         <div className={styles.navGroup}>
-          <div className={styles.navGroupTitle}>GLOBAL DESIGN TOKENS</div>
+        <div className={styles.navGroupTitle}>GLOBAL DESIGN TOKENS</div>
 
           {THEME_CATEGORIES.map((cat) => {
             const isSelected = isThemeCategoryActive(cat.id);
@@ -123,6 +127,22 @@ export const DesignPanel: React.FC = () => {
             <div className={styles.navItemContent}>
               <span className={`${styles.navItemLabel} ${isScrollActive ? styles.navItemLabelActive : ''}`}>Scroll Behavior</span>
               <span className={styles.navItemPath}>Smooth scroll &amp; back-to-top</span>
+            </div>
+            <ChevronRight size={14} className={styles.navItemChevron} />
+          </div>
+
+          <div
+            className={`${styles.navItem} ${isFloatingActionsActive ? styles.navItemActive : ''}`}
+            onClick={() => {
+              setDesignSection('floating-actions');
+              setActivePanel('design');
+              setRightSidebarOpen(true);
+            }}
+          >
+            <div className={`${styles.navItemIcon} ${isFloatingActionsActive ? styles.navItemIconActive : ''}`}><MousePointerClick size={16} /></div>
+            <div className={styles.navItemContent}>
+              <span className={`${styles.navItemLabel} ${isFloatingActionsActive ? styles.navItemLabelActive : ''}`}>Floating actions</span>
+              <span className={styles.navItemPath}>Calls to action, links, and celebrations</span>
             </div>
             <ChevronRight size={14} className={styles.navItemChevron} />
           </div>

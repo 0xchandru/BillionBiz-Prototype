@@ -12,6 +12,7 @@ import { FooterTreeRenderer } from '../editor/sections/FooterTreeRenderer';
 import type { FooterTreeNode } from '../editor/engine/footerTreeTypes';
 import type { FooterRow } from '../editor/engine/types';
 import { useStorefrontCartStore } from '../../store/storefrontCartStore';
+import { StorefrontUtilities } from './StorefrontUtilities';
 
 interface StoreLayoutProps {
   children: React.ReactNode;
@@ -31,6 +32,7 @@ interface StoreLayoutProps {
   footerRows?: FooterRow[];
   useEditorChrome?: boolean;
   device?: 'desktop' | 'tablet' | 'mobile';
+  settings?: Record<string, any>;
 }
 
 export const StoreLayout: React.FC<StoreLayoutProps> = ({
@@ -40,7 +42,9 @@ export const StoreLayout: React.FC<StoreLayoutProps> = ({
   footerTree,
   footerRows,
   useEditorChrome = false,
-  device = 'desktop'
+  device = 'desktop',
+  settings = {},
+  currentPath = '/',
 }) => {
   const { items, isOpen, setIsOpen, updateQuantity, removeItem, getSubtotal, getTotalCount } = useStorefrontCartStore();
   const subtotal = getSubtotal();
@@ -67,7 +71,7 @@ export const StoreLayout: React.FC<StoreLayoutProps> = ({
       </header>
 
       {/* 2. Main Page Content */}
-      <main className="flex-1 w-full">
+      <main className="flex-1 w-full" style={{ paddingBottom: device === 'mobile' && settings.showBottomNav !== false ? '86px' : undefined }}>
         {children}
       </main>
 
@@ -80,6 +84,8 @@ export const StoreLayout: React.FC<StoreLayoutProps> = ({
           isEditorInteractive={useEditorChrome}
         />
       </div>
+
+      <StorefrontUtilities settings={settings} device={device} currentPath={currentPath} onNavigate={onNavigate} />
 
       {/* 4. Slide-Over Cart Drawer */}
       {isOpen && (

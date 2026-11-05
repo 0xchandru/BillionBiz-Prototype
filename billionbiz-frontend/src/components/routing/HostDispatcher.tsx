@@ -54,7 +54,7 @@ const POSCountersPage = lazy(() => import('../../pages/POSCounters'));
 const POSShiftsPage = lazy(() => import('../../pages/POSShifts'));
 
 const StoreNavigationPage = lazy(() => import('../../pages/StoreNavigation'));
-import ExtensionsPage from '../../pages/Extensions';
+const ExtensionsPage = lazy(() => import('../../pages/Extensions'));
 const GeneralSettingsPage = lazy(() => import('../../pages/GeneralSettings'));
 const AccountSettingsPage = lazy(() => import('../../pages/AccountSettings'));
 const SecuritySettingsPage = lazy(() => import('../../pages/SecuritySettings'));
@@ -63,7 +63,7 @@ const PaymentsSettingsPage = lazy(() => import('../../pages/PaymentsSettings'));
 const FulfillmentSettingsPage = lazy(() => import('../../pages/FulfillmentSettings'));
 const NotificationsSettingsPage = lazy(() => import('../../pages/NotificationsSettings'));
 const IntegrationsSettingsPage = lazy(() => import('../../pages/IntegrationsSettings'));
-const ThemeStyles = lazy(() => import('../../pages/ThemeStyles'));
+const ThemeLibraryPage = lazy(() => import('../../pages/ThemeLibraryPage'));
 const OnlineStoreOverview = lazy(() => import('../../pages/OnlineStoreOverview'));
 const EditorLayout = lazy(() => import('../../pages/editor/EditorLayout'));
 
@@ -74,7 +74,7 @@ const POSPage = lazy(() => import('../../pages/POS'));
 const StorefrontPage = lazy(() => import('../../pages/StorefrontPage'));
 const CustomerPortalPage = lazy(() => import('../../pages/CustomerPortalPage').then((module) => ({ default: module.CustomerPortalPage })));
 
-const RouteLoadingFallback: React.FC = () => (
+export const RouteLoadingFallback: React.FC = () => (
   <div className="route-loading-shell" role="status" aria-live="polite" aria-label="Loading page">
     <div className="route-loading-topbar" />
     <div className="route-loading-content">
@@ -101,9 +101,8 @@ const ExternalRedirect: React.FC<{ to: string }> = ({ to }) => {
  * Common Merchant Admin Route Tree Component
  * Reused for both local/preview and production admin subdomain
  */
-const renderAdminRoutes = (): React.ReactElement => (
-  <Suspense fallback={<RouteLoadingFallback />}>
-  <Route element={<ProtectedRoute />}>
+export const renderAdminRoutes = (): React.ReactElement => (
+  <Route element={<Suspense fallback={<RouteLoadingFallback />}><ProtectedRoute /></Suspense>}>
     <Route element={<AppLayout />}>
       <Route path="/dashboard" element={<Dashboard />} />
 
@@ -153,9 +152,9 @@ const renderAdminRoutes = (): React.ReactElement => (
       <Route path="/online-store/overview" element={<OnlineStoreOverview />} />
       <Route path="/pages" element={<Pages />} />
       <Route path="/online-store/pages" element={<Pages />} />
-      <Route path="/online-store/themes" element={<ThemeStyles />} />
+      <Route path="/online-store/themes" element={<Navigate to="/theme" replace />} />
       <Route path="/online-store/navigation" element={<StoreNavigationPage />} />
-      <Route path="/theme" element={<Navigate to="/online-store/themes" replace />} />
+      <Route path="/theme" element={<ThemeLibraryPage />} />
 
       {/* Plugins & Marketplace */}
       <Route path="/plugins" element={<ExtensionsPage defaultTab="all" />} />
@@ -189,7 +188,6 @@ const renderAdminRoutes = (): React.ReactElement => (
     {/* Embedded POS Preview in Admin */}
     <Route path="/pos" element={<Navigate to="/pos-counters" replace />} />
   </Route>
-  </Suspense>
 );
 
 /**

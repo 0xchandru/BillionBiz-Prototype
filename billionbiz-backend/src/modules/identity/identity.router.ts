@@ -703,7 +703,7 @@ identityRouter.post('/mfa/verify', requireAuth, async (req: Request, res: Respon
        mfa_failed_attempts = 0,
        mfa_locked_until = NULL
        WHERE id = $2
-         AND mfa_recovery_codes @> jsonb_build_array($1)
+         AND mfa_recovery_codes @> jsonb_build_array($1::text)
          AND (mfa_locked_until IS NULL OR mfa_locked_until <= NOW())
        RETURNING id`,
       [recoveryHash, userId]

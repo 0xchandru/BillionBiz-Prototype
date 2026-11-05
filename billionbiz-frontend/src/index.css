@@ -154,3 +154,7 @@ button {
     transition-duration: 0.01ms !important;
   }
 }
+@keyframes bbiz-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}

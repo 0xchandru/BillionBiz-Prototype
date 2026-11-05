@@ -13,6 +13,7 @@ interface WebsitePreviewProps {
   highlightSection?: 'header' | 'footer' | null;
   className?: string;
   style?: React.CSSProperties;
+  useEditorChrome?: boolean;
 }
 
 export const WebsitePreview: React.FC<WebsitePreviewProps> = ({
@@ -20,7 +21,8 @@ export const WebsitePreview: React.FC<WebsitePreviewProps> = ({
   overrideDevice,
   highlightSection: _highlightSection,
   className = '',
-  style = {}
+  style = {},
+  useEditorChrome = true
 }) => {
   const storeDevice = useLandingEditorStore((s) => s.device);
   const selectedPageId = useLandingEditorStore((s) => s.selectedPageId);
@@ -123,7 +125,12 @@ export const WebsitePreview: React.FC<WebsitePreviewProps> = ({
     social_links: settings?.socialLinks || serverData?.brand?.social_links || {}
   };
 
-  const effectiveTheme = serverData?.theme || theme || {};
+  const effectiveTheme = theme || serverData?.theme || {};
+  const effectiveSettings = {
+    ...(serverData?.settings || {}),
+    ...(serverData?.settings?.uiConfig || {}),
+    ...(settings || {}),
+  };
   const effectiveProducts = serverData?.products || [];
   const effectiveCategories = serverData?.categories || [];
   const effectiveOfferings = serverData?.offerings || [];
@@ -190,7 +197,7 @@ export const WebsitePreview: React.FC<WebsitePreviewProps> = ({
         overflowX: 'hidden',
         overflowY: 'auto',
         alignItems: 'flex-start',
-        padding: activeDevice === 'desktop' ? '0' : '0 16px 32px 16px',
+        padding: activeDevice === 'desktop' ? '24px 28px 32px' : activeDevice === 'tablet' ? '20px 16px 32px' : '16px 12px 28px',
         ...style
       }}
       frameStyle={frameStyle}
@@ -211,14 +218,14 @@ export const WebsitePreview: React.FC<WebsitePreviewProps> = ({
         }}
         brand={effectiveBrand}
         themeTokens={effectiveTheme}
-        settings={serverData?.settings || settings}
+        settings={effectiveSettings}
         pages={pages && pages.length > 0 ? pages : (serverData?.pages || [])}
         currentPath={currentPath}
         products={effectiveProducts}
         categories={effectiveCategories}
         offerings={effectiveOfferings}
         previewMode={true}
-        useEditorChrome={true}
+        useEditorChrome={useEditorChrome}
         device={activeDevice}
         onNavigate={(targetPath) => {
           const matched = pages.find((p) => p.path === targetPath);

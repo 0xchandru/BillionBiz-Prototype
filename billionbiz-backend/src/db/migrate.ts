@@ -909,6 +909,7 @@ export async function runMigrations() {
     ALTER TABLE storefront_settings ADD COLUMN IF NOT EXISTS active_release_id VARCHAR(64);
     ALTER TABLE storefront_settings ADD COLUMN IF NOT EXISTS redirects JSONB NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE storefront_settings ADD COLUMN IF NOT EXISTS seo_defaults JSONB NOT NULL DEFAULT '{}'::jsonb;
+    ALTER TABLE storefront_settings ADD COLUMN IF NOT EXISTS ui_config JSONB NOT NULL DEFAULT '{}'::jsonb;
 
     ALTER TABLE store_themes ADD COLUMN IF NOT EXISTS tokens JSONB NOT NULL DEFAULT '{}'::jsonb;
 

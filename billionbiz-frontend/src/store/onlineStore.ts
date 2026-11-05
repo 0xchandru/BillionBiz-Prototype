@@ -56,7 +56,7 @@ export interface PageData {
 }
 
 import type { GlobalThemeData } from '../components/editor/theme/themePresets';
-import { DEFAULT_THEME_SPACING, getDefaultTheme, themePresets } from '../components/editor/theme/themePresets';
+import { DEFAULT_THEME_SPACING, getDefaultTheme, mergeThemeData, migrateThemeData, themePresets } from '../components/editor/theme/themePresets';
 import { useThemeHistoryStore } from './themeHistoryStore';
 
 export type ThemeData = GlobalThemeData;
@@ -325,6 +325,11 @@ export const getInitialSettings = (): Record<string, any> => {
     announcement: '',
     copyright: `© ${new Date().getFullYear()} ${dynamicStoreName}. All rights reserved.`,
     showBottomNav: true,
+    floatingActions: [],
+    floatingPosition: 'right',
+    floatingStyle: 'circle',
+    decorationsEnabled: false,
+    decorationTrigger: 'purchase',
     bottomNavLinks: [
       { id: 'home', icon: 'Home', text: 'Home', link: '/' },
       { id: 'shop', icon: 'Grid', text: 'Shop', link: '/collections/all' },
@@ -424,6 +429,7 @@ export const useOnlineStore = create<OnlineStoreState>()(
             const s = settingsRes.value.settings;
             newSettings = {
               ...newSettings,
+              ...(s.uiConfig && typeof s.uiConfig === 'object' ? s.uiConfig : {}),
               mode: s.mode || newSettings.mode,
               primaryDomain: s.primaryDomain || newSettings.primaryDomain,
               domains: s.domains || newSettings.domains,
@@ -438,14 +444,14 @@ export const useOnlineStore = create<OnlineStoreState>()(
           if (themeRes.status === 'fulfilled' && themeRes.value?.theme) {
             const t = themeRes.value.theme;
             const currentTheme = get().theme;
-            stateUpdates.theme = {
+            stateUpdates.theme = migrateThemeData({
               ...currentTheme,
               presetName: t.preset_name || currentTheme.presetName || 'modern',
-              palette: t.palette ? { ...currentTheme.palette, ...t.palette } : currentTheme.palette,
-              typography: t.typography ? { ...currentTheme.typography, ...t.typography } : currentTheme.typography,
-              buttons: t.buttons ? { ...currentTheme.buttons, ...t.buttons } : currentTheme.buttons,
-              effects: t.effects ? { ...currentTheme.effects, ...t.effects } : currentTheme.effects,
-            };
+              palette: t.palette ? mergeThemeData(currentTheme.palette, t.palette) : currentTheme.palette,
+              typography: t.typography ? mergeThemeData(currentTheme.typography, t.typography) : currentTheme.typography,
+              buttons: t.buttons ? mergeThemeData(currentTheme.buttons, t.buttons) : currentTheme.buttons,
+              effects: t.effects ? mergeThemeData(currentTheme.effects, t.effects) : currentTheme.effects,
+            });
           }
 
           set({ ...stateUpdates, isLoading: false });
@@ -472,6 +478,12 @@ export const useOnlineStore = create<OnlineStoreState>()(
         if (newSettings.redirects !== undefined) settingFields.redirects = newSettings.redirects;
         if (newSettings.seoDefaults !== undefined) settingFields.seoDefaults = newSettings.seoDefaults;
         if (newSettings.primaryDomain !== undefined) settingFields.primaryDomain = newSettings.primaryDomain;
+        const uiConfigKeys = [
+          'showBottomNav', 'bottomNavLinks', 'bottomNavStyle', 'bottomNavPosition', 'bottomNavActiveColor',
+          'floatingActions', 'floatingPosition', 'floatingStyle', 'decorationsEnabled', 'decorationTrigger'
+        ];
+        const uiConfig = Object.fromEntries(uiConfigKeys.filter((key) => newSettings[key] !== undefined).map((key) => [key, newSettings[key]]));
+        if (Object.keys(uiConfig).length > 0) settingFields.uiConfig = uiConfig;
 
         const requests: Promise<any>[] = [];
         if (Object.keys(brandFields).length > 0) {
@@ -673,41 +685,26 @@ export const useOnlineStore = create<OnlineStoreState>()(
   updateTheme: (newTheme, forceHistory = false) => {
     useThemeHistoryStore.getState().pushState(get().theme, forceHistory);
     set((state) => {
-      const merged = { ...state.theme, ...newTheme };
+      const patch = newTheme as Record<string, any>;
+      const merged = mergeThemeData(state.theme, patch);
       // Synchronize legacy colors object if palette is updated
-      if (newTheme.colors) {
-        merged.colors = { ...newTheme.colors };
-      } else if (newTheme.palette?.brand?.primary) {
+      if (patch.colors) {
+        merged.colors = mergeThemeData(state.theme.colors, patch.colors);
+        merged.palette = mergeThemeData(merged.palette, {
+          brand: { primary: patch.colors.primary, secondary: patch.colors.secondary, accent: patch.colors.accent },
+          background: { background: patch.colors.background },
+          text: { body: patch.colors.text },
+          border: { border: patch.colors.border },
+        });
+      } else if (patch.palette?.brand?.primary) {
         merged.colors = {
           ...merged.colors,
-          primary: newTheme.palette.brand.primary,
-          secondary: newTheme.palette.brand.secondary || merged.colors.secondary,
-          background: newTheme.palette.background.background || merged.colors.background,
-          text: newTheme.palette.text.body || merged.colors.text,
-          accent: newTheme.palette.brand.accent || merged.colors.accent,
-          border: newTheme.palette.border.border || merged.colors.border,
-        };
-      } else if (newTheme.colors?.primary && merged.palette) {
-        merged.palette = {
-          ...merged.palette,
-          brand: {
-            ...merged.palette.brand,
-            primary: newTheme.colors.primary,
-            secondary: newTheme.colors.secondary || merged.palette.brand.secondary,
-            accent: newTheme.colors.accent || merged.palette.brand.accent,
-          },
-          background: {
-            ...merged.palette.background,
-            background: newTheme.colors.background || merged.palette.background.background,
-          },
-          text: {
-            ...merged.palette.text,
-            body: newTheme.colors.text || merged.palette.text.body,
-          },
-          border: {
-            ...merged.palette.border,
-            border: newTheme.colors.border || merged.palette.border.border,
-          },
+          primary: patch.palette.brand.primary,
+          secondary: patch.palette.brand.secondary || merged.colors.secondary,
+          background: patch.palette.background.background || merged.colors.background,
+          text: patch.palette.text.body || merged.colors.text,
+          accent: patch.palette.brand.accent || merged.colors.accent,
+          border: patch.palette.border.border || merged.colors.border,
         };
       }
       return { theme: merged, hasUnsavedChanges: true };

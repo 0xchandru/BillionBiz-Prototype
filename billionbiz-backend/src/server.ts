@@ -88,6 +88,8 @@ export function isAllowedOrigin(origin: string | undefined): boolean {
 app.use((req, res, next) => {
   const origin = req.headers.origin;
 
+  if (origin) res.vary('Origin');
+
   if (origin && isAllowedOrigin(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');

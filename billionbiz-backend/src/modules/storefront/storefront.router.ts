@@ -371,7 +371,7 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
   const settingsRes = await query(
     `SELECT mode, home_page, navigation_config, icon_visibility, brand_name, tagline,
             logo_url, favicon_url, social_links, primary_domain, password_enabled,
-            password_hash, maintenance_mode
+            password_hash, maintenance_mode, ui_config
      FROM storefront_settings
      WHERE store_id = $1`,
     [store.id]
@@ -561,7 +561,10 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
       passwordEnabled: Boolean(settingsRow.password_enabled),
       // Maintenance mode is an immediate operational control, not a draft design token.
       maintenanceMode: Boolean(settingsRow.maintenance_mode),
-      seoDefaults: publishedSettings.seoDefaults || {}
+      seoDefaults: publishedSettings.seoDefaults || {},
+      // UI behavior is operational storefront configuration: reflect saved
+      // edits immediately on the live site without requiring a new release.
+      uiConfig: settingsRow.ui_config || publishedSettings.uiConfig || {}
     }
   });
 });
@@ -779,7 +782,7 @@ storefrontRouter.get('/render', requireAuth, resolveTenant, async (req: Request,
   );
 
   const settingsRes = await query(
-    `SELECT mode, home_page, navigation_config, icon_visibility, brand_name, tagline, logo_url, favicon_url, social_links, primary_domain, password_enabled, maintenance_mode
+    `SELECT mode, home_page, navigation_config, icon_visibility, brand_name, tagline, logo_url, favicon_url, social_links, primary_domain, password_enabled, maintenance_mode, ui_config
      FROM storefront_settings WHERE store_id = $1`,
     [storeId]
   );
@@ -805,7 +808,8 @@ storefrontRouter.get('/render', requireAuth, resolveTenant, async (req: Request,
       navigation: settingsRow.navigation_config || [],
       primaryDomain: settingsRow.primary_domain || `${store.slug}.${PLATFORM_MAIN_DOMAIN}`,
       passwordEnabled: settingsRow.password_enabled || false,
-      maintenanceMode: settingsRow.maintenance_mode || false
+      maintenanceMode: settingsRow.maintenance_mode || false,
+      uiConfig: settingsRow.ui_config || {}
     },
     activeRelease: latestRel.rows[0]?.snapshot || null,
     releaseNumber: latestRel.rows[0]?.release_number || null
@@ -994,7 +998,8 @@ storefrontRouter.post(
           primaryDomain: settingsRow.primary_domain,
           passwordEnabled: settingsRow.password_enabled,
           maintenanceMode: settingsRow.maintenance_mode,
-          seoDefaults: settingsRow.seo_defaults || {}
+          seoDefaults: settingsRow.seo_defaults || {},
+          uiConfig: settingsRow.ui_config || {}
         },
         pages: pagesRes.rows,
         publishedAt: new Date().toISOString()
@@ -1176,8 +1181,9 @@ storefrontRouter.post(
            primary_domain = $9,
            password_enabled = $10,
            maintenance_mode = $11,
+           ui_config = $12,
            updated_at = NOW()
-         WHERE store_id = $12`,
+         WHERE store_id = $13`,
         [
           brand.name || brand.brand_name || null,
           brand.tagline || '',
@@ -1190,6 +1196,7 @@ storefrontRouter.post(
           settings.primaryDomain || null,
           Boolean(settings.passwordEnabled ?? settings.password_enabled),
           Boolean(settings.maintenanceMode ?? settings.maintenance_mode),
+          JSON.stringify(settings.uiConfig || {}),
           storeId
         ]
       );
@@ -1444,7 +1451,7 @@ storefrontRouter.patch(
 storefrontRouter.get('/settings', requireAuth, resolveTenant, async (req: Request, res: Response) => {
   const storeId = req.tenant!.storeId;
   const settingsRes = await query(
-    `SELECT mode, home_page, primary_domain, password_enabled, maintenance_mode, redirects, seo_defaults
+    `SELECT mode, home_page, primary_domain, password_enabled, maintenance_mode, redirects, seo_defaults, ui_config
      FROM storefront_settings WHERE store_id = $1`,
     [storeId]
   );
@@ -1463,6 +1470,7 @@ storefrontRouter.get('/settings', requireAuth, resolveTenant, async (req: Reques
       maintenanceMode: s.maintenance_mode || false,
       redirects: s.redirects || [],
       seoDefaults: s.seo_defaults || {},
+      uiConfig: s.ui_config || {},
       domains: domainsRes.rows
     }
   });
@@ -1476,7 +1484,11 @@ storefrontRouter.patch(
   requirePermission('store.editor.edit'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
-    const { passwordEnabled, password, maintenanceMode, redirects, seoDefaults, primaryDomain } = req.body;
+    const { passwordEnabled, password, maintenanceMode, redirects, seoDefaults, primaryDomain, uiConfig } = req.body;
+
+    if (uiConfig !== undefined && (!uiConfig || typeof uiConfig !== 'object' || Array.isArray(uiConfig) || Buffer.byteLength(JSON.stringify(uiConfig), 'utf8') > 64000)) {
+      return res.status(400).json({ error: 'INVALID_STOREFRONT_UI_CONFIG', message: 'Storefront interface settings must be an object smaller than 64 KB.' });
+    }
 
     if (primaryDomain !== undefined && primaryDomain !== null && String(primaryDomain).trim() !== '') {
       const domainCheck = await query(
@@ -1524,9 +1536,18 @@ storefrontRouter.patch(
 
     const updated = await query(
       `INSERT INTO storefront_settings (
-         store_id, password_enabled, password_hash, maintenance_mode, redirects, seo_defaults, primary_domain
+         store_id, password_enabled, password_hash, maintenance_mode, redirects, seo_defaults, primary_domain, ui_config
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       VALUES (
+         $1,
+         COALESCE($2, FALSE),
+         $3,
+         COALESCE($4, FALSE),
+         COALESCE($5::jsonb, '[]'::jsonb),
+         COALESCE($6::jsonb, '{}'::jsonb),
+         $7,
+         COALESCE($8::jsonb, '{}'::jsonb)
+       )
        ON CONFLICT (store_id) DO UPDATE SET
          password_enabled = COALESCE($2, storefront_settings.password_enabled),
          password_hash = COALESCE($3, storefront_settings.password_hash),
@@ -1534,8 +1555,9 @@ storefrontRouter.patch(
          redirects = COALESCE($5, storefront_settings.redirects),
          seo_defaults = COALESCE($6, storefront_settings.seo_defaults),
          primary_domain = COALESCE($7, storefront_settings.primary_domain),
+         ui_config = COALESCE($8::jsonb, storefront_settings.ui_config),
          updated_at = NOW()
-       RETURNING mode, home_page, primary_domain, password_enabled, maintenance_mode, redirects, seo_defaults`,
+       RETURNING mode, home_page, primary_domain, password_enabled, maintenance_mode, redirects, seo_defaults, ui_config`,
       [
         storeId,
         passwordEnabled !== undefined ? Boolean(passwordEnabled) : null,
@@ -1543,7 +1565,8 @@ storefrontRouter.patch(
         maintenanceMode !== undefined ? Boolean(maintenanceMode) : null,
         redirects ? JSON.stringify(redirects) : null,
         seoDefaults ? JSON.stringify(seoDefaults) : null,
-        primaryDomain || null
+        primaryDomain || null,
+        uiConfig !== undefined ? JSON.stringify(uiConfig) : null
       ]
     );
 

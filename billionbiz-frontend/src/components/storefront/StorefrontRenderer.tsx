@@ -1,20 +1,29 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { ThemeTokenProvider } from './ThemeTokenProvider';
 import { StoreLayout } from './StoreLayout';
-import { HomePageView } from './pages/HomePageView';
-import { ShopPageView } from './pages/ShopPageView';
-import { ProductDetailPageView } from './pages/ProductDetailPageView';
-import { CollectionsPageView } from './pages/CollectionsPageView';
-import { CartPageView } from './pages/CartPageView';
-import { CheckoutPageView } from './pages/CheckoutPageView';
-import { AccountPageView } from './pages/AccountPageView';
-import { BookingPageView } from './pages/BookingPageView';
-import { PolicyPageView } from './pages/PolicyPageView';
-import { ContactPageView } from './pages/ContactPageView';
-import { PasswordGateView } from './pages/PasswordGateView';
-import { System404View } from './pages/System404View';
 import { Hammer } from 'lucide-react';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
+
+const HomePageView = lazy(() => import('./pages/HomePageView').then((module) => ({ default: module.HomePageView })));
+const ShopPageView = lazy(() => import('./pages/ShopPageView').then((module) => ({ default: module.ShopPageView })));
+const ProductDetailPageView = lazy(() => import('./pages/ProductDetailPageView').then((module) => ({ default: module.ProductDetailPageView })));
+const CollectionsPageView = lazy(() => import('./pages/CollectionsPageView').then((module) => ({ default: module.CollectionsPageView })));
+const CartPageView = lazy(() => import('./pages/CartPageView').then((module) => ({ default: module.CartPageView })));
+const CheckoutPageView = lazy(() => import('./pages/CheckoutPageView').then((module) => ({ default: module.CheckoutPageView })));
+const AccountPageView = lazy(() => import('./pages/AccountPageView').then((module) => ({ default: module.AccountPageView })));
+const BookingPageView = lazy(() => import('./pages/BookingPageView').then((module) => ({ default: module.BookingPageView })));
+const PolicyPageView = lazy(() => import('./pages/PolicyPageView').then((module) => ({ default: module.PolicyPageView })));
+const ContactPageView = lazy(() => import('./pages/ContactPageView').then((module) => ({ default: module.ContactPageView })));
+const PasswordGateView = lazy(() => import('./pages/PasswordGateView').then((module) => ({ default: module.PasswordGateView })));
+const System404View = lazy(() => import('./pages/System404View').then((module) => ({ default: module.System404View })));
+
+const StorefrontContentSkeleton: React.FC = () => (
+    <div aria-label="Loading storefront page" role="status" style={{ maxWidth: 1180, margin: '32px auto', padding: '24px', display: 'grid', gap: 18 }}>
+    <div style={{ height: 210, borderRadius: 16, background: 'linear-gradient(90deg,#e2e8f0,#f8fafc,#e2e8f0)', backgroundSize: '200% 100%', animation: 'bbiz-shimmer 1.4s ease infinite' }} />
+    <div style={{ height: 28, width: '42%', borderRadius: 8, background: 'linear-gradient(90deg,#e2e8f0,#f8fafc,#e2e8f0)', backgroundSize: '200% 100%', animation: 'bbiz-shimmer 1.4s ease infinite' }} />
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 14 }}>{[1, 2, 3].map((item) => <div key={item} style={{ height: 190, borderRadius: 12, background: 'linear-gradient(90deg,#e2e8f0,#f8fafc,#e2e8f0)', backgroundSize: '200% 100%', animation: 'bbiz-shimmer 1.4s ease infinite' }} />)}</div>
+  </div>
+);
 
 export interface StorefrontRendererProps {
   store?: {
@@ -33,13 +42,7 @@ export interface StorefrontRendererProps {
     social_links?: Record<string, string>;
   };
   themeTokens?: Record<string, any>;
-  settings?: {
-    password_enabled?: boolean;
-    password_hash?: string;
-    maintenance_mode?: boolean;
-    seo_defaults?: any;
-    primary_domain?: string;
-  };
+  settings?: Record<string, any>;
   pages?: any[];
   currentPath?: string;
   products?: any[];
@@ -350,8 +353,9 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
         useEditorChrome={useEditorChrome}
         device={runtimeDevice}
         currentPath={activePath}
+        settings={{ ...(settings || {}), ...(settings?.uiConfig || {}) }}
       >
-        {renderPageView()}
+        <Suspense fallback={<StorefrontContentSkeleton />}>{renderPageView()}</Suspense>
       </StoreLayout>
     </ThemeTokenProvider>
   );

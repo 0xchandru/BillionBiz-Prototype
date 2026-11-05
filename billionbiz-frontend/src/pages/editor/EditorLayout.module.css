@@ -33,6 +33,11 @@
   overflow: hidden;
 }
 
+@keyframes bbiz-skeleton {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
 /* ---------------- Top Bar ---------------- */
 /* ---------------- Top Bar (Compact) ---------------- */
 .topBar {

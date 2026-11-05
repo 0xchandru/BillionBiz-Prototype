@@ -174,7 +174,7 @@ export const EditorTopBar: React.FC = () => {
 
   const persistCurrentScope = useCallback(async () => {
     if (isTheme) {
-      await saveThemeToBackend(theme);
+      await Promise.all([saveThemeToBackend(theme), saveSettingsToBackend(settings)]);
       return;
     }
 

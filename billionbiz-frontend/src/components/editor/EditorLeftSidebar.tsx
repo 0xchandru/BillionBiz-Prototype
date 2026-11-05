@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import {
-  Files, Store, Palette, Settings, TrendingUp,
+  Files, Store, Palette, Settings,
   Home, ShoppingBag, ShoppingCart,
   Search as SearchIcon, AlertTriangle, Cookie, Bell, FileText,
   Shield, Truck, RotateCcw, Phone, Heart,
@@ -102,7 +102,7 @@ const pageIconMap: Record<string, React.FC<{ size?: number }>> = {
   'reviews-page': Heart,
 };
 
-// ─── Top-Level Navigation Tabs (5-Tab Architecture) ───
+// ─── Top-Level Navigation Tabs ───
 interface TabDef {
   id: EditorPanelType;
   label: string;
@@ -111,10 +111,9 @@ interface TabDef {
 
 const TABS: TabDef[] = [
   { id: 'pages', label: 'Pages', icon: Files },
-  { id: 'brand', label: 'Identity', icon: Store },
-  { id: 'design', label: 'Design system', icon: Palette },
-  { id: 'growth', label: 'Growth', icon: TrendingUp },
-  { id: 'settings', label: 'Store setup', icon: Settings },
+  { id: 'design', label: 'Design', icon: Palette },
+  { id: 'brand', label: 'Brand', icon: Store },
+  { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
 // ─── Chrome component entries (Header, Footer, Toaster, Cookie / Consent) ───
@@ -253,7 +252,7 @@ export const EditorLeftSidebar: React.FC = () => {
       'pages': '/editor/pages',
       'brand': '/editor/brand',
       'design': '/editor/design',
-      'growth': '/editor/growth',
+      'growth': '/editor/settings',
       'settings': '/editor/settings',
       'store-brand': '/editor/brand',
       'design-experience': '/editor/design',
@@ -859,7 +858,7 @@ export const EditorLeftSidebar: React.FC = () => {
         <div className={styles.horizontalTabBar}>
           {TABS.map(tab => {
             const Icon = tab.icon;
-            const isActive = activePanel === tab.id || (tab.id === 'brand' && activePanel === 'store-brand') || (tab.id === 'design' && activePanel === 'design-experience');
+            const isActive = activePanel === tab.id || (tab.id === 'brand' && activePanel === 'store-brand') || (tab.id === 'design' && activePanel === 'design-experience') || (tab.id === 'settings' && (activePanel === 'growth' || activePanel === 'seo-growth'));
             return (
               <button
                 key={tab.id}
@@ -922,7 +921,7 @@ export const EditorLeftSidebar: React.FC = () => {
           width: '48px',
           position: 'relative',
           flexShrink: 0,
-          zIndex: 40
+          zIndex: isHovered ? 80 : 40
         }}
       >
         {/* Collapsed strip with quick expand button and icon toggles */}
@@ -937,7 +936,7 @@ export const EditorLeftSidebar: React.FC = () => {
           <div className={styles.collapsedDivider} />
           {!isPageDetail && TABS.map(tab => {
             const Icon = tab.icon;
-            const isActive = activePanel === tab.id || (tab.id === 'brand' && activePanel === 'store-brand') || (tab.id === 'design' && activePanel === 'design-experience');
+            const isActive = activePanel === tab.id || (tab.id === 'brand' && activePanel === 'store-brand') || (tab.id === 'design' && activePanel === 'design-experience') || (tab.id === 'settings' && (activePanel === 'growth' || activePanel === 'seo-growth'));
             return (
               <button
                 key={tab.id}

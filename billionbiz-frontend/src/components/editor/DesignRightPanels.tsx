@@ -900,7 +900,49 @@ export const ScrollBehaviorSidebarPanel: React.FC<DesignRightPanelProps> = ({ is
 
 
 // ─────────────────────────────────────────────────────────────
-// 3. MOBILE NAVIGATION SIDEBAR PANEL
+// 3. GLOBAL FLOATING ACTIONS AND DECORATIONS
+export const FloatingActionsSidebarPanel: React.FC<DesignRightPanelProps> = ({ isHidden = false }) => {
+  const { settings, updateSettings } = useSiteStore();
+  const { closeRightSidebar } = useLandingEditorStore();
+  const actions = Array.isArray(settings.floatingActions) ? settings.floatingActions : [];
+  const addAction = (type: string) => {
+    if (actions.length >= 4) return;
+    const labels: Record<string, string> = { link: 'Visit link', call: 'Call us', whatsapp: 'WhatsApp', cart: 'Open cart', coupon: 'Copy coupon', 'back-to-top': 'Back to top' };
+    updateSettings({ floatingActions: [...actions, { id: `${Date.now()}`, type, label: labels[type] || 'Action', target: '' }] });
+  };
+  const updateAction = (id: string, patch: Record<string, any>) => updateSettings({ floatingActions: actions.map((item: any) => item.id === id ? { ...item, ...patch } : item) });
+
+  return <aside className={`${styles.rightPanel} ${isHidden ? styles.rightPanelHidden : ''}`}>
+    <div className={styles.panelHeader} style={{ padding: '14px 18px' }}>
+      <div className={styles.phLeft}><button className={styles.iconBtn} onClick={closeRightSidebar} title="Close panel"><ChevronRight size={18} /></button><h3 className={styles.fw600}>Floating actions</h3></div>
+    </div>
+    <div className={styles.settingsContentArea} style={{ padding: 16, overflowY: 'auto' }}>
+      <p style={{ margin: '0 0 14px', color: '#64748b', fontSize: 12, lineHeight: 1.5 }}>Add safe, built-in actions that stay available across storefront pages.</p>
+      <label style={{ display: 'grid', gap: 6, fontSize: 12, fontWeight: 650, marginBottom: 14 }}>Add action
+        <select defaultValue="" onChange={(event) => { if (event.target.value) addAction(event.target.value); event.target.value = ''; }} style={{ padding: 9, border: '1px solid #cbd5e1', borderRadius: 8, background: '#fff' }}>
+          <option value="" disabled>Choose an action</option><option value="link">Link</option><option value="call">Call</option><option value="whatsapp">WhatsApp</option><option value="cart">Open cart</option><option value="coupon">Copy coupon</option><option value="back-to-top">Back to top</option>
+        </select>
+      </label>
+      {actions.map((action: any) => <div key={action.id} style={{ display: 'grid', gap: 8, marginBottom: 10, padding: 12, border: '1px solid #e2e8f0', borderRadius: 10, background: '#fff' }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input aria-label="Button label" value={action.label || ''} onChange={(event) => updateAction(action.id, { label: event.target.value })} placeholder="Button label" style={{ minWidth: 0, flex: 1, padding: 8, border: '1px solid #cbd5e1', borderRadius: 7 }} />
+          <input aria-label="Button color" type="color" value={action.color || '#2563eb'} onChange={(event) => updateAction(action.id, { color: event.target.value })} />
+          <button type="button" onClick={() => updateSettings({ floatingActions: actions.filter((item: any) => item.id !== action.id) })} aria-label="Remove action" style={{ border: 0, background: 'transparent', color: '#dc2626', cursor: 'pointer' }}><Trash2 size={16} /></button>
+        </div>
+        {['link', 'call', 'whatsapp', 'coupon'].includes(action.type) && <input aria-label="Action target" value={action.target || ''} onChange={(event) => updateAction(action.id, { target: event.target.value })} placeholder={action.type === 'link' ? 'https://… or /page' : action.type === 'coupon' ? 'Coupon code' : 'Phone number'} style={{ padding: 8, border: '1px solid #cbd5e1', borderRadius: 7 }} />}
+        {action.type === 'whatsapp' && <input aria-label="WhatsApp message" value={action.message || ''} onChange={(event) => updateAction(action.id, { message: event.target.value })} placeholder="Optional message" style={{ padding: 8, border: '1px solid #cbd5e1', borderRadius: 7 }} />}
+      </div>)}
+      <div style={{ display: 'grid', gap: 10, margin: '16px 0', fontSize: 12 }}>
+        <label>Placement<select value={settings.floatingPosition || 'bottom-right'} onChange={(event) => updateSettings({ floatingPosition: event.target.value })} style={{ display: 'block', width: '100%', padding: 8, marginTop: 5, border: '1px solid #cbd5e1', borderRadius: 7 }}><option value="bottom-right">Bottom right</option><option value="bottom-left">Bottom left</option><option value="middle-right">Middle right</option><option value="middle-left">Middle left</option><option value="top-right">Top right</option><option value="top-left">Top left</option></select></label>
+        <label>Button shape<select value={settings.floatingStyle || 'circle'} onChange={(event) => updateSettings({ floatingStyle: event.target.value })} style={{ display: 'block', width: '100%', padding: 8, marginTop: 5, border: '1px solid #cbd5e1', borderRadius: 7 }}><option value="circle">Icon circle</option><option value="pill">Labeled pill</option></select></label>
+      </div>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '10px 0', borderTop: '1px solid #e2e8f0', fontSize: 12 }}><input type="checkbox" checked={settings.decorationsEnabled === true} onChange={(event) => updateSettings({ decorationsEnabled: event.target.checked, decorationTrigger: 'purchase' })} /><span><strong>Celebrate completed orders</strong><br />Optional confetti on the thank-you page. Respects reduced-motion settings.</span></label>
+      {actions.length >= 4 && <p style={{ color: '#64748b', fontSize: 11 }}>You can add up to four floating actions.</p>}
+    </div>
+  </aside>;
+};
+
+// 4. MOBILE NAVIGATION SIDEBAR PANEL
 // ─────────────────────────────────────────────────────────────
 interface BottomNavItem {
   id: string;

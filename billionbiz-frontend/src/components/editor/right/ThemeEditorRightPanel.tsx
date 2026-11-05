@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { ChevronRight } from 'lucide-react';
 import { useLandingEditorStore } from '../../../store/landingEditorStore';
 import { useSiteStore } from '../../../store/siteStore';
-import { ThemesPanel } from '../theme/panels/ThemesPanel';
 import { ColorPalettePanel } from '../theme/panels/ColorPalettePanel';
 import { TypographyPanel } from '../theme/panels/TypographyPanel';
 import { ButtonsPanel } from '../theme/panels/ButtonsPanel';
@@ -19,6 +18,7 @@ import {
   MobileNavSidebarPanel,
   MobilePwaSidebarPanel,
   MobileAppSidebarPanel,
+  FloatingActionsSidebarPanel,
 } from '../DesignRightPanels';
 import styles from '../../../pages/editor/EditorLayout.module.css';
 
@@ -44,7 +44,7 @@ const ThemeCategoryRightPanel: React.FC<{ isHidden?: boolean }> = ({ isHidden = 
     effects: 'Effects',
     'custom-css': 'Custom CSS',
   };
-  const activeCategory = selectedThemeCategory || 'themes';
+  const activeCategory = selectedThemeCategory === 'themes' ? 'colors' : (selectedThemeCategory || 'colors');
   const title = categoryTitles[activeCategory] || 'Theme';
 
   const categoryResetLabels: Record<ThemeCategoryType, string> = {
@@ -158,7 +158,6 @@ const ThemeCategoryRightPanel: React.FC<{ isHidden?: boolean }> = ({ isHidden = 
           />
         </div>
         <div className={styles.propContent} style={{ padding: '16px', overflowY: 'auto' }}>
-          {activeCategory === 'themes' && <ThemesPanel />}
           {activeCategory === 'colors' && <ColorPalettePanel />}
           {activeCategory === 'typography' && <TypographyPanel />}
           {activeCategory === 'buttons' && <ButtonsPanel />}
@@ -279,6 +278,9 @@ export const ThemeEditorRightPanel: React.FC<ThemeEditorRightPanelProps> = ({ is
   }
   if (designSection === 'scroll-behavior') {
     return <ScrollBehaviorSidebarPanel key="scroll-behavior" isHidden={isHidden} />;
+  }
+  if (designSection === 'floating-actions') {
+    return <FloatingActionsSidebarPanel key="floating-actions" isHidden={isHidden} />;
   }
   if (designSection === 'mobile-nav' || designSection === 'mobile') {
     return <MobileNavSidebarPanel key="mobile-nav" isHidden={isHidden} />;
