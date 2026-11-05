@@ -233,25 +233,16 @@ export const Sidebar: FC<SidebarProps> = ({ mobileOpen, onClose }) => {
     }
   }, [location.pathname]);
 
-  // Exclusive Accordion Toggle:
-  // 1. Opening one closes all others.
-  // 2. Automatically selects its first submenu item & navigates to it.
+  // Expanding a group only reveals its destinations. Navigation happens
+  // when a destination link is selected, so an accordion click never
+  // changes the current page unexpectedly.
   const handleDropdownClick = (section: NavSection) => {
     if (!section.items || section.items.length === 0) {
       if (section.path) navigate(section.path);
       return;
     }
 
-    if (activeDropdown === section.id) {
-      // Allow collapsing
-      setActiveDropdown(null);
-    } else {
-      setActiveDropdown(section.id);
-      if (section.items.length > 0) {
-        const firstItem = section.items[0];
-        navigate(firstItem.path);
-      }
-    }
+    setActiveDropdown((current) => current === section.id ? null : section.id);
   };
 
   const isHomeActive = location.pathname === '/dashboard';
@@ -326,6 +317,7 @@ export const Sidebar: FC<SidebarProps> = ({ mobileOpen, onClose }) => {
                   <Link 
                     to={section.path || '/plugins'} 
                     className={`${styles.itemBtn} ${active ? styles.itemActiveDirect : ''}`}
+                    aria-current={active ? 'page' : undefined}
                   >
                     <div className={styles.itemLeft}>
                       <Icon size={18} className={styles.itemIcon} />
@@ -345,6 +337,7 @@ export const Sidebar: FC<SidebarProps> = ({ mobileOpen, onClose }) => {
                   className={`${styles.dropdownBtn} ${isOpen ? styles.dropdownBtnOpen : ''}`}
                   onClick={() => handleDropdownClick(section)}
                   aria-expanded={isOpen}
+                  aria-controls={`nav-${section.id}-items`}
                 >
                   <div className={styles.itemLeft}>
                     <Icon size={18} className={styles.itemIcon} />
@@ -359,7 +352,7 @@ export const Sidebar: FC<SidebarProps> = ({ mobileOpen, onClose }) => {
 
                 {/* Submenu Items List */}
                 {isOpen && (
-                  <div className={styles.subList}>
+                  <div id={`nav-${section.id}-items`} className={styles.subList}>
                     {section.items.map((sub) => {
                       const active = isSubItemActive(sub);
                       return (
