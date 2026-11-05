@@ -20,12 +20,12 @@ import {
   MessageSquare
 } from 'lucide-react';
 
-type LoginView = 'PASSWORD' | 'OTP_REQUEST' | 'OTP_VERIFY';
+type LoginView = 'PASSWORD' | 'OTP_REQUEST' | 'OTP_VERIFY' | 'MFA_VERIFY';
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { loginUnified, loginGoogle, isAuthenticated, isLoading: isAuthLoading, error: authError, clearError } = useAuthStore();
+  const { loginUnified, loginGoogle, completeMfaChallenge, isAuthenticated, isLoading: isAuthLoading, error: authError, clearError } = useAuthStore();
 
   const from = (location.state as any)?.from?.pathname || '/dashboard';
 
@@ -48,6 +48,11 @@ export default function LoginPage() {
   const [selectedCountry, setSelectedCountry] = useState<Country>(COUNTRIES[0]);
   const [password, setPassword] = useState('');
   const [otpCode, setOtpCode] = useState('');
+  const [mfaChallengeToken, setMfaChallengeToken] = useState('');
+  const [mfaExpiresInSeconds, setMfaExpiresInSeconds] = useState(300);
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaRecoveryCode, setMfaRecoveryCode] = useState('');
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
   // UI state
@@ -74,6 +79,18 @@ export default function LoginPage() {
 
   const targetIdentifier = (formattedIdentifier || rawIdentifier).trim();
 
+  const enterMfaChallenge = (result: { requiresMfa?: boolean; challengeToken?: string; expiresInSeconds?: number }) => {
+    if (!result.requiresMfa || !result.challengeToken) return false;
+    setMfaChallengeToken(result.challengeToken);
+    setMfaExpiresInSeconds(result.expiresInSeconds || 300);
+    setMfaCode('');
+    setMfaRecoveryCode('');
+    setUseRecoveryCode(false);
+    setUiError(null);
+    setView('MFA_VERIFY');
+    return true;
+  };
+
   // 1. Password-based Login Submit
   const handlePasswordLogin = async (e: FormEvent) => {
     e.preventDefault();
@@ -92,6 +109,10 @@ export default function LoginPage() {
     }
 
     const res = await loginUnified(validation.cleanValue, { password });
+    if (res.requiresMfa) {
+      if (!enterMfaChallenge(res)) setUiError('The MFA challenge could not be started. Please sign in again.');
+      return;
+    }
     if (res.success) {
       navigate(res.destination || from, { replace: true });
     } else if (res.error) {
@@ -150,11 +171,56 @@ export default function LoginPage() {
     const identifierToVerify = contactValidation.isValid ? contactValidation.cleanValue : targetIdentifier;
 
     const res = await loginUnified(identifierToVerify, { otp: otpCode.trim() });
+    if (res.requiresMfa) {
+      if (!enterMfaChallenge(res)) setUiError('The MFA challenge could not be started. Please sign in again.');
+      return;
+    }
     if (res.success) {
       navigate(res.destination || from, { replace: true });
     } else if (res.error) {
       setUiError(res.error);
     }
+  };
+
+  const handleCompleteMfaChallenge = async (e: FormEvent) => {
+    e.preventDefault();
+    setUiError(null);
+    clearError();
+
+    if (!mfaChallengeToken) {
+      setUiError('The MFA challenge has expired. Start sign-in again.');
+      setView('PASSWORD');
+      return;
+    }
+
+    if (useRecoveryCode && !mfaRecoveryCode.trim()) {
+      setUiError('Enter one of your unused recovery codes.');
+      return;
+    }
+    if (!useRecoveryCode && !validateOtpCode(mfaCode).isValid) {
+      setUiError('Enter the current 6-digit authenticator code.');
+      return;
+    }
+
+    const result = await completeMfaChallenge(
+      mfaChallengeToken,
+      useRecoveryCode ? { recoveryCode: mfaRecoveryCode.trim() } : { code: mfaCode.trim() }
+    );
+    if (result.success) {
+      navigate(result.destination || from, { replace: true });
+    } else {
+      setUiError(result.error || 'MFA verification failed. Check your code and try again.');
+    }
+  };
+
+  const handleRestartSignIn = () => {
+    setMfaChallengeToken('');
+    setMfaCode('');
+    setMfaRecoveryCode('');
+    setUseRecoveryCode(false);
+    setUiError(null);
+    clearError();
+    setView('PASSWORD');
   };
 
   // 5. Google Sign-In Handler
@@ -167,7 +233,9 @@ export default function LoginPage() {
         async (credential) => {
           const res = await loginGoogle({ credential });
           setIsSubmitting(false);
-          if (res.success) {
+          if (res.requiresMfa) {
+            if (!enterMfaChallenge(res)) setUiError('The MFA challenge could not be started. Please sign in again.');
+          } else if (res.success) {
             navigate(res.destination || from, { replace: true });
           } else if (res.error) {
             setUiError(res.error);
@@ -430,6 +498,100 @@ export default function LoginPage() {
         )}
 
         {/* VIEW 3: OTP VERIFICATION (ENTER 6-DIGIT CODE) */}
+        {view === 'MFA_VERIFY' && (
+          <div>
+            <button type="button" onClick={handleRestartSignIn} className="auth-back-btn">
+              <ArrowLeft style={{ width: 14, height: 14 }} />
+              <span>Back to sign in</span>
+            </button>
+
+            <div className="auth-card-header" style={{ marginTop: '0.5rem' }}>
+              <h1 className="auth-card-title">Two-step verification</h1>
+              <p className="auth-card-desc">
+                Your account has multi-factor authentication enabled. Verify your identity to complete sign-in.
+              </p>
+            </div>
+
+            <form onSubmit={handleCompleteMfaChallenge}>
+              {!useRecoveryCode ? (
+                <div className="auth-form-group">
+                  <label className="auth-label" htmlFor="mfa-authenticator-code">Authenticator code</label>
+                  <input
+                    id="mfa-authenticator-code"
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    pattern="[0-9]{6}"
+                    value={mfaCode}
+                    onChange={(event) => setMfaCode(event.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+                    placeholder="123456"
+                    className="auth-otp-input"
+                    autoFocus
+                  />
+                  <p style={{ margin: '8px 0 0', color: '#64748b', fontSize: '0.75rem' }}>
+                    Open your authenticator app and enter the current 6-digit code.
+                  </p>
+                </div>
+              ) : (
+                <div className="auth-form-group">
+                  <label className="auth-label" htmlFor="mfa-recovery-code">Recovery code</label>
+                  <input
+                    id="mfa-recovery-code"
+                    type="text"
+                    autoComplete="off"
+                    maxLength={128}
+                    value={mfaRecoveryCode}
+                    onChange={(event) => setMfaRecoveryCode(event.target.value)}
+                    placeholder="Enter an unused recovery code"
+                    className="auth-input"
+                    autoFocus
+                  />
+                  <p style={{ margin: '8px 0 0', color: '#64748b', fontSize: '0.75rem' }}>
+                    Each recovery code can be used once. Store your remaining codes safely.
+                  </p>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', margin: '0 0 16px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUseRecoveryCode((current) => !current);
+                    setMfaCode('');
+                    setMfaRecoveryCode('');
+                    setUiError(null);
+                  }}
+                  style={{ padding: 0, border: 0, background: 'none', color: '#2563eb', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 650 }}
+                >
+                  {useRecoveryCode ? 'Use authenticator code' : 'Use a recovery code'}
+                </button>
+                <span style={{ color: '#64748b', fontSize: '0.72rem' }}>
+                  Challenge expires in {Math.max(1, Math.ceil(mfaExpiresInSeconds / 60))} min
+                </span>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isAuthLoading || (!useRecoveryCode && mfaCode.length !== 6) || (useRecoveryCode && !mfaRecoveryCode.trim())}
+                className="auth-btn-primary"
+              >
+                {isAuthLoading ? (
+                  <>
+                    <RefreshCw style={{ width: 16, height: 16 }} className="animate-spin" />
+                    Verifying...
+                  </>
+                ) : (
+                  <>
+                    Complete sign in
+                    <ArrowRight style={{ width: 16, height: 16 }} />
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
+        )}
+
         {view === 'OTP_VERIFY' && (
           <div>
             <button
