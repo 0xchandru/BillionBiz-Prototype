@@ -9,6 +9,9 @@ export interface CartLineItem {
   price: number;
   compareAtPrice?: number;
   quantity: number;
+  quantityStep?: number;
+  minimumQuantity?: number;
+  sellingUnit?: string;
   imageUrl?: string;
   variantId?: string;
   variantTitle?: string;
@@ -46,12 +49,17 @@ export const useStorefrontCartStore = create<StorefrontCartState>()(
           : Number(rawCompareAt) / 100;
         const imageUrl = product.media?.[0]?.url || product.media_urls?.[0] || undefined;
 
+        const minimumQuantity = Math.max(0.001, Number(product.minimum_quantity || 1));
+        const quantityStep = Math.max(0.001, Number(product.quantity_step || 1));
+        const requestedQuantity = Math.max(minimumQuantity, Number(quantity) || minimumQuantity);
+        const initialQuantity = Number((minimumQuantity + Math.ceil((requestedQuantity - minimumQuantity) / quantityStep - 0.000001) * quantityStep).toFixed(3));
+
         set((state) => {
           const existing = state.items.find((item) => item.id === lineId);
           if (existing) {
             return {
               items: state.items.map((item) =>
-                item.id === lineId ? { ...item, quantity: item.quantity + quantity } : item
+                item.id === lineId ? { ...item, quantity: Number((item.quantity + initialQuantity).toFixed(3)) } : item
               ),
               isOpen: true
             };
@@ -66,7 +74,10 @@ export const useStorefrontCartStore = create<StorefrontCartState>()(
                 handle: product.handle || product.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
                 price,
                 compareAtPrice: compareAt,
-                quantity,
+                quantity: initialQuantity,
+                quantityStep,
+                minimumQuantity,
+                sellingUnit: product.selling_unit || 'pcs',
                 imageUrl,
                 variantId: variant?.id,
                 variantTitle: variant?.sku || variant?.title
@@ -80,7 +91,11 @@ export const useStorefrontCartStore = create<StorefrontCartState>()(
       updateQuantity: (id: string, delta: number) => {
         set((state) => ({
           items: state.items
-            .map((item) => (item.id === id ? { ...item, quantity: Math.max(0, item.quantity + delta) } : item))
+            .map((item) => {
+              if (item.id !== id) return item;
+              const nextQuantity = Number((item.quantity + delta * (item.quantityStep || 1)).toFixed(3));
+              return { ...item, quantity: delta < 0 && nextQuantity < (item.minimumQuantity || 1) ? 0 : Math.max(item.minimumQuantity || 1, nextQuantity) };
+            })
             .filter((item) => item.quantity > 0)
         }));
       },

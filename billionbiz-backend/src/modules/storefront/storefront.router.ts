@@ -7,7 +7,7 @@ import { query, withTransaction } from '../../db/pool.js';
 import { requireAuth, requirePermission, JWT_SECRET } from '../../middleware/auth.js';
 import { resolveTenant } from '../../middleware/tenant.js';
 import { handleIdempotency } from '../../middleware/idempotency.js';
-import { recordAudit, enqueueOutbox } from '../../core/auditAndOutbox.js';
+import { recordAudit, enqueueOutbox, publishOutboxEvent, broadcastCommittedOutboxEvent } from '../../core/auditAndOutbox.js';
 import { realtimeGateway } from '../../core/realtimeGateway.js';
 import { provisionDefaultStorefront } from './storefrontProvisioner.js';
 import { getStoreProjectPort, syncStoreProjects } from './storeProjectManager.js';
@@ -17,6 +17,24 @@ import { resolveCname } from 'node:dns/promises';
 import { validatePageSectionDocument } from './sectionDocumentValidation.js';
 
 export const storefrontRouter = Router();
+
+async function resolveStorefrontOrderTenant(req: Request, res: Response, next: (error?: unknown) => void) {
+  try {
+    const result = await query(
+      `SELECT id, organization_id, currency FROM stores WHERE LOWER(slug) = LOWER($1) AND status = 'ACTIVE'`,
+      [req.params.slug]
+    );
+    if (!result.rowCount) {
+      return res.status(404).json({ error: 'STORE_NOT_FOUND', message: 'This store is unavailable.' });
+    }
+    const store = result.rows[0];
+    req.tenant = { storeId: store.id, organizationId: store.organization_id };
+    res.locals.storefrontOrderStore = store;
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+}
 
 async function resolvePublicStore(slug: string) {
   const found = await query(`SELECT id, name, slug FROM stores WHERE LOWER(slug) = LOWER($1) AND status = 'ACTIVE'`, [slug]);
@@ -32,6 +50,123 @@ function getStoreCustomer(req: Request): { storeId: string; customerId: string; 
     return { storeId: String(payload.storeId), customerId: String(payload.customerId), email: String(payload.email) };
   } catch { return null; }
 }
+
+storefrontRouter.post('/by-slug/:slug/orders', resolveStorefrontOrderTenant, handleIdempotency, async (req: Request, res: Response) => {
+  const storeRow = res.locals.storefrontOrderStore as { id: string; organization_id: string; currency: string };
+  const customerDetails = req.body?.customerDetails || {};
+  const email = typeof customerDetails.email === 'string' ? customerDetails.email.trim().toLowerCase() : '';
+  const phone = typeof customerDetails.phone === 'string' ? customerDetails.phone.trim() : '';
+  const fullName = typeof customerDetails.fullName === 'string' ? customerDetails.fullName.trim() : '';
+  const address = req.body?.shippingAddress || {};
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 255) return res.status(400).json({ error: 'INVALID_CUSTOMER_EMAIL', message: 'Enter a valid email address.' });
+  if (fullName.length < 2 || fullName.length > 128 || typeof address.line1 !== 'string' || !address.line1.trim() || typeof address.city !== 'string' || !address.city.trim() || typeof address.state !== 'string' || !address.state.trim() || typeof address.postalCode !== 'string' || !address.postalCode.trim()) return res.status(400).json({ error: 'INVALID_SHIPPING_ADDRESS', message: 'Enter your name and complete delivery address.' });
+  if (String(req.body?.paymentMethod || 'cod').toLowerCase() !== 'cod') return res.status(409).json({ error: 'PAYMENT_PROVIDER_UNAVAILABLE', message: 'Online payment is not configured for this store. Choose Cash on Delivery.' });
+  if (!Array.isArray(req.body?.items) || !req.body.items.length || req.body.items.length > 100) return res.status(400).json({ error: 'INVALID_ORDER_ITEMS', message: 'Your cart must contain 1 to 100 items.' });
+
+  const quantities = new Map<string, number>();
+  for (const item of req.body.items) {
+    const variantId = typeof item?.variantId === 'string' ? item.variantId.trim() : '';
+    const quantity = Number(item?.quantity);
+    if (!variantId || !Number.isFinite(quantity) || quantity <= 0 || quantity > 9999 || Math.abs(quantity * 1000 - Math.round(quantity * 1000)) > 0.00001) return res.status(400).json({ error: 'INVALID_ORDER_QUANTITY', message: 'Each cart quantity must be a positive value with at most three decimal places.' });
+    quantities.set(variantId, (quantities.get(variantId) || 0) + quantity);
+  }
+
+  const authenticatedCustomer = getStoreCustomer(req);
+  if (authenticatedCustomer && authenticatedCustomer.storeId !== storeRow.id) return res.status(403).json({ error: 'CUSTOMER_STORE_MISMATCH', message: 'Sign in to the correct store before checking out.' });
+  const nameParts = fullName.split(/\s+/);
+  const firstName = nameParts.shift() || 'Customer';
+  const lastName = nameParts.join(' ');
+  const orderId = `ord-${uuidv4()}`;
+  const orderNumber = `BBZ-${Date.now().toString().slice(-8)}-${uuidv4().slice(0, 4).toUpperCase()}`;
+  let totalMinor = 0;
+  let createdCustomerId: string | null = authenticatedCustomer?.customerId || null;
+  let event: Awaited<ReturnType<typeof publishOutboxEvent>> | null = null;
+  try {
+    await withTransaction(async (client) => {
+      if (createdCustomerId) {
+        const customer = await client.query(`SELECT id FROM customers WHERE id = $1 AND store_id = $2`, [createdCustomerId, storeRow.id]);
+        if (!customer.rowCount) throw new Error('CUSTOMER_NOT_FOUND');
+      } else {
+        const customer = await client.query(`SELECT id FROM customers WHERE store_id = $1 AND LOWER(email) = $2 FOR UPDATE`, [storeRow.id, email]);
+        if (customer.rowCount) {
+          createdCustomerId = customer.rows[0].id;
+          await client.query(`UPDATE customers SET first_name = $1, last_name = $2, phone = COALESCE(NULLIF($3,''),phone), default_address = $4, updated_at = NOW() WHERE id = $5 AND store_id = $6`, [firstName, lastName, phone, JSON.stringify(address), createdCustomerId, storeRow.id]);
+        } else {
+          createdCustomerId = `cust-${uuidv4()}`;
+          await client.query(`INSERT INTO customers (id, store_id, email, phone, first_name, last_name, default_address) VALUES ($1,$2,$3,$4,$5,$6,$7)`, [createdCustomerId, storeRow.id, email, phone || null, firstName, lastName, JSON.stringify(address)]);
+        }
+      }
+
+      const lines: Array<{ id: string; productId: string; variantId: string; sku: string; title: string; priceMinor: number; quantity: number; totalMinor: number }> = [];
+      const reservationRows: Array<{ orderLineId: string; balanceId: string; quantity: number }> = [];
+      for (const [variantId, quantity] of quantities) {
+        const variantResult = await client.query(
+          `SELECT v.id, v.sku, v.price_minor, p.id AS product_id, p.name AS product_name, p.minimum_quantity, p.quantity_step
+           FROM product_variants v JOIN products p ON p.id = v.product_id
+           WHERE v.id = $1 AND p.store_id = $2 AND p.status = 'ACTIVE' AND v.is_active = TRUE FOR UPDATE OF v`,
+          [variantId, storeRow.id]
+        );
+        if (!variantResult.rowCount) throw new Error('VARIANT_NOT_AVAILABLE');
+        const variant = variantResult.rows[0];
+        const minimum = Number(variant.minimum_quantity || 1);
+        const step = Number(variant.quantity_step || 1);
+        if (quantity + 0.000001 < minimum || Math.abs((quantity - minimum) / step - Math.round((quantity - minimum) / step)) > 0.00001) throw new Error('INVALID_PRODUCT_QUANTITY');
+        const priceMinor = Number(variant.price_minor);
+        if (!Number.isSafeInteger(priceMinor) || priceMinor < 0) throw new Error('INVALID_PRODUCT_PRICE');
+        const quantityMilli = Math.round(quantity * 1000);
+        const lineMinor = Math.round(priceMinor * quantityMilli / 1000);
+        if (!Number.isSafeInteger(lineMinor) || !Number.isSafeInteger(totalMinor + lineMinor)) throw new Error('ORDER_TOTAL_TOO_LARGE');
+
+        const balances = await client.query(
+          `SELECT ib.id, ib.available
+           FROM inventory_balances ib JOIN inventory_locations il ON il.id = ib.location_id
+           WHERE ib.variant_id = $1 AND il.store_id = $2 AND il.status = 'ACTIVE'
+           ORDER BY il.is_default DESC, il.created_at ASC FOR UPDATE OF ib`,
+          [variantId, storeRow.id]
+        );
+        if (balances.rowCount) {
+          const available = balances.rows.reduce((sum: number, balance: any) => sum + Number(balance.available), 0);
+          if (available + 0.000001 < quantity) throw new Error('INSUFFICIENT_STOCK');
+        }
+        const lineId = `line-${uuidv4()}`;
+        lines.push({ id: lineId, productId: variant.product_id, variantId, sku: variant.sku, title: variant.product_name, priceMinor, quantity, totalMinor: lineMinor });
+        totalMinor += lineMinor;
+        let remaining = balances.rowCount ? quantity : 0;
+        for (const balance of balances.rows) {
+          if (remaining <= 0) break;
+          const reserve = Math.min(remaining, Number(balance.available));
+          if (reserve <= 0) continue;
+          await client.query(`UPDATE inventory_balances SET reserved = reserved + $1, available = available - $1, updated_at = NOW() WHERE id = $2`, [reserve, balance.id]);
+          reservationRows.push({ orderLineId: lineId, balanceId: balance.id, quantity: reserve });
+          remaining = Math.round((remaining - reserve) * 1000) / 1000;
+        }
+      }
+
+      await client.query(
+        `INSERT INTO orders (id, store_id, order_number, customer_id, channel, status, payment_status, fulfillment_status, currency, subtotal_minor, shipping_minor, total_minor, shipping_address, billing_address)
+         VALUES ($1,$2,$3,$4,'STOREFRONT','OPEN','PENDING','UNFULFILLED',$5,$6,0,$6,$7,$7)`,
+        [orderId, storeRow.id, orderNumber, createdCustomerId, storeRow.currency || 'INR', totalMinor, JSON.stringify(address)]
+      );
+      for (const line of lines) {
+        await client.query(`INSERT INTO order_lines (id, order_id, product_id, variant_id, sku, title, unit_price_minor, quantity, total_minor, snapshot) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, [line.id, orderId, line.productId, line.variantId, line.sku, line.title, line.priceMinor, line.quantity, line.totalMinor, JSON.stringify({ title: line.title, sku: line.sku, price: line.priceMinor })]);
+      }
+      for (const reservation of reservationRows) {
+        await client.query(`INSERT INTO order_inventory_reservations (order_line_id, balance_id, quantity) VALUES ($1,$2,$3)`, [reservation.orderLineId, reservation.balanceId, reservation.quantity]);
+      }
+      await client.query(`INSERT INTO order_status_history (id, order_id, from_status, to_status, reason, actor_id) VALUES ($1,$2,'NONE','OPEN','Storefront checkout','guest')`, [`osh-${uuidv4()}`, orderId]);
+      event = await publishOutboxEvent(client, storeRow.organization_id, storeRow.id, 'ORDER_CREATED', 'ORDER', orderId, { orderId, orderNumber, totalAmount: totalMinor, customerName: fullName, email, phone, channel: 'STOREFRONT' });
+    });
+  } catch (error: any) {
+    if (error?.message === 'VARIANT_NOT_AVAILABLE') return res.status(409).json({ error: 'VARIANT_NOT_AVAILABLE', message: 'One or more items are no longer available. Refresh your cart and try again.' });
+    if (error?.message === 'INVALID_PRODUCT_QUANTITY') return res.status(400).json({ error: 'INVALID_PRODUCT_QUANTITY', message: 'One or more item quantities do not meet the product minimum or quantity step.' });
+    if (error?.message === 'INSUFFICIENT_STOCK') return res.status(409).json({ error: 'INSUFFICIENT_STOCK', message: 'There is not enough stock for one or more cart items.' });
+    if (error?.message === 'CUSTOMER_NOT_FOUND') return res.status(401).json({ error: 'CUSTOMER_NOT_FOUND', message: 'Your customer account could not be verified.' });
+    if (error?.message === 'INVALID_PRODUCT_PRICE' || error?.message === 'ORDER_TOTAL_TOO_LARGE') return res.status(409).json({ error: 'PRODUCT_PRICE_UNAVAILABLE', message: 'A product price needs attention. Contact the store and try again later.' });
+    throw error;
+  }
+  if (event) broadcastCommittedOutboxEvent(event);
+  return res.status(201).json({ message: 'Order created successfully', orderId, orderNumber, totalMinor, paymentStatus: 'PENDING' });
+});
 
 storefrontRouter.post('/by-slug/:slug/customers/register', async (req: Request, res: Response) => {
   const store = await resolvePublicStore(String(req.params.slug));
@@ -578,6 +713,9 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
        p.description,
        p.brand,
        p.product_type,
+       p.selling_unit,
+       p.minimum_quantity,
+       p.quantity_step,
        p.media,
        p.category_id,
        c.name AS category_name,
@@ -597,7 +735,7 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
          FROM product_variants v
          LEFT JOIN LATERAL (
            SELECT
-             CASE WHEN COUNT(ib.id) = 0 THEN NULL ELSE SUM(ib.available)::integer END AS available,
+             CASE WHEN COUNT(ib.id) = 0 THEN NULL ELSE SUM(ib.available) END AS available,
              COUNT(ib.id) > 0 AS is_tracked
            FROM inventory_balances ib
            WHERE ib.variant_id = v.id
@@ -1695,7 +1833,7 @@ storefrontRouter.get('/domains', requireAuth, resolveTenant, async (req: Request
 storefrontRouter.get('/provisioning/status', requireAuth, resolveTenant, async (req: Request, res: Response) => {
   const storeId = req.tenant!.storeId;
   const row = await query(
-    `SELECT sp.*, sd.id AS domain_id, sd.domain, sd.is_verified, sd.ssl_status
+    `SELECT s.slug, sp.*, sd.id AS domain_id, sd.domain, sd.is_verified, sd.ssl_status
      FROM stores s LEFT JOIN storefront_provisioning sp ON sp.store_id = s.id
      LEFT JOIN store_domains sd ON sd.store_id = s.id AND sd.is_primary = TRUE
      WHERE s.id = $1 LIMIT 1`, [storeId]);
@@ -1728,11 +1866,20 @@ storefrontRouter.get('/provisioning/status', requireAuth, resolveTenant, async (
     await query(`UPDATE storefront_provisioning SET domain_status = $2, https_status = $3, last_error = $4, updated_at = NOW() WHERE store_id = $1`, [storeId, dnsStatus, httpsStatus, dnsError || (dnsStatus === 'ACTIVE' ? 'HTTPS certificate or storefront response is not ready.' : null)]);
   }
   res.json({
-    status: dnsStatus === 'ACTIVE' && httpsStatus === 'ACTIVE' ? 'LIVE' : (state.status || 'PENDING'),
+    // Never reflect a stale LIVE database status while the current probes fail.
+    // LOCAL_READY describes an editor preview only; public readiness is LIVE only
+    // after both the configured DNS target and HTTPS response have been verified.
+    status: dnsStatus === 'ACTIVE' && httpsStatus === 'ACTIVE'
+      ? 'LIVE'
+      : state.status === 'FAILED'
+        ? 'FAILED'
+        : state.status === 'LOCAL_READY'
+          ? 'LOCAL_READY'
+          : 'PENDING',
     projectName: state.project_name || `billionbiz-store-${req.tenant!.storeId}`,
     localProjectPath: state.local_project_path || null,
     deploymentUrl: state.deployment_url || null,
-    previewUrl: `http://${state.domain?.split('.')[0] || 'store'}.localhost:${getStoreProjectPort(state.domain?.split('.')[0] || 'store')}`,
+    previewUrl: `http://${state.slug || 'store'}.localhost:${getStoreProjectPort(state.slug || 'store')}`,
     domain: state.domain,
     domainStatus: dnsStatus,
     httpsStatus,

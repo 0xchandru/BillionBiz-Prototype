@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
 import { CheckCircle2, ArrowRight, Lock, CreditCard, Banknote, ArrowLeft } from 'lucide-react';
 import { useStorefrontCartStore } from '../../../store/storefrontCartStore';
+import { apiClient } from '../../../api/client';
 
 interface CheckoutPageViewProps {
   onNavigate?: (path: string) => void;
   brandName?: string;
+  storeSlug?: string;
 }
 
-export const CheckoutPageView: React.FC<CheckoutPageViewProps> = ({ onNavigate, brandName = 'Store' }) => {
+export const CheckoutPageView: React.FC<CheckoutPageViewProps> = ({ onNavigate, brandName = 'Store', storeSlug = '' }) => {
   const { items, getSubtotal, clearCart } = useStorefrontCartStore();
   const subtotal = getSubtotal();
-  const shipping = subtotal > 1500 || subtotal === 0 ? 0 : 99;
+  const shipping = 0;
   const total = subtotal + shipping;
 
   const [email, setEmail] = useState('');
@@ -19,16 +21,41 @@ export const CheckoutPageView: React.FC<CheckoutPageViewProps> = ({ onNavigate, 
   const [city, setCity] = useState('');
   const [stateName, setStateName] = useState('Karnataka');
   const [postalCode, setPostalCode] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'cod' | 'online'>('online');
+  const [paymentMethod, setPaymentMethod] = useState<'cod' | 'online'>('cod');
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [orderNumber, setOrderNumber] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
-  const handlePlaceOrder = (e: React.FormEvent) => {
+  const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    const generatedOrderNum = `BBZ-${Math.floor(100000 + Math.random() * 900000)}`;
-    setOrderNumber(generatedOrderNum);
-    setOrderPlaced(true);
-    clearCart();
+    if (!items.length || !storeSlug || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      const [firstName, ...lastNameParts] = fullName.trim().split(/\s+/);
+      const accountToken = localStorage.getItem(`billionbiz_customer:${storeSlug}`);
+      const result = await apiClient<{ orderNumber: string }>('/storefront/by-slug/' + encodeURIComponent(storeSlug) + '/orders', {
+        method: 'POST',
+        headers: {
+          'Idempotency-Key': `storefront-${storeSlug}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+          ...(accountToken ? { Authorization: `Bearer ${accountToken}` } : {})
+        },
+        body: JSON.stringify({
+          paymentMethod,
+          customerDetails: { email, fullName, firstName, lastName: lastNameParts.join(' ') },
+          shippingAddress: { line1: address, city, state: stateName, postalCode, country: 'India' },
+          items: items.map((item) => ({ variantId: item.variantId, quantity: item.quantity }))
+        })
+      });
+      setOrderNumber(result.orderNumber);
+      setOrderPlaced(true);
+      clearCart();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'We could not place your order. Please try again.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (orderPlaced) {
@@ -38,12 +65,12 @@ export const CheckoutPageView: React.FC<CheckoutPageViewProps> = ({ onNavigate, 
           <CheckCircle2 size={36} />
         </div>
         <div className="space-y-2">
-          <h1 className="text-3xl font-black text-slate-900 dark:text-white">Order Confirmed!</h1>
+          <h1 className="text-3xl font-black text-slate-900 dark:text-white">Order Received</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Thank you, {fullName}. We have received your order <strong>#{orderNumber}</strong> at {brandName}.
+            Thank you, {fullName}. Your order <strong>#{orderNumber}</strong> has been saved at {brandName}.
           </p>
           <p className="text-xs text-slate-400">
-            A confirmation receipt and live tracking updates will be dispatched to {email}.
+            Payment is due on delivery. Keep your order number for reference.
           </p>
         </div>
 
@@ -62,6 +89,8 @@ export const CheckoutPageView: React.FC<CheckoutPageViewProps> = ({ onNavigate, 
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
       <div className="flex items-center justify-between border-b border-[var(--theme-border)] pb-4">
         <div className="space-y-1">
+          {error && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-xs font-medium text-rose-700">{error}</p>}
+          {!items.length && <p role="status" className="rounded-lg bg-slate-100 p-3 text-xs text-slate-600">Your cart is empty. Add a product before checkout.</p>}
           <button
             onClick={() => onNavigate?.('/cart')}
             className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition mb-1 cursor-pointer"
@@ -183,13 +212,13 @@ export const CheckoutPageView: React.FC<CheckoutPageViewProps> = ({ onNavigate, 
                   type="radio"
                   name="payment"
                   checked={paymentMethod === 'online'}
-                  onChange={() => setPaymentMethod('online')}
+                  disabled
                   className="hidden"
                 />
                 <CreditCard size={20} className="text-indigo-600" />
                 <div>
-                  <span className="text-sm font-bold text-slate-900 dark:text-white block">UPI / Cards / Netbanking</span>
-                  <span className="text-xs text-slate-400 block">Instant automated payment verification</span>
+                  <span className="text-sm font-bold text-slate-900 dark:text-white block">Online payments</span>
+                  <span className="text-xs text-slate-400 block">Not configured for this store</span>
                 </div>
               </label>
 
@@ -225,7 +254,7 @@ export const CheckoutPageView: React.FC<CheckoutPageViewProps> = ({ onNavigate, 
             {items.map((item) => (
               <div key={item.id} className="py-2.5 flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2 min-w-0 pr-2">
-                  <span className="font-bold text-slate-400">{item.quantity}×</span>
+                  <span className="font-bold text-slate-400">{item.quantity} {item.sellingUnit || 'pcs'}</span>
                   <span className="truncate font-semibold text-slate-800 dark:text-slate-200">{item.name}</span>
                 </div>
                 <span className="font-bold text-slate-900 dark:text-white shrink-0">
@@ -259,9 +288,10 @@ export const CheckoutPageView: React.FC<CheckoutPageViewProps> = ({ onNavigate, 
 
           <button
             type="submit"
-            className="w-full py-3.5 rounded-xl bg-[var(--theme-btn-primary-bg)] text-[var(--theme-btn-primary-text)] font-bold text-sm shadow-md hover:opacity-90 transition flex items-center justify-center gap-2 cursor-pointer"
+            disabled={busy || !items.length || !storeSlug}
+            className="w-full py-3.5 rounded-xl bg-[var(--theme-btn-primary-bg)] text-[var(--theme-btn-primary-text)] font-bold text-sm shadow-md hover:opacity-90 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <span>Complete Order</span>
+            <span>{busy ? 'Placing order…' : 'Place Cash on Delivery Order'}</span>
             <ArrowRight size={15} />
           </button>
         </div>

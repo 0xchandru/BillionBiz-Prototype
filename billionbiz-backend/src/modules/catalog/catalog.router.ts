@@ -77,8 +77,8 @@ catalogRouter.get(
              COALESCE(json_agg(DISTINCT jsonb_build_object('id', pc.category_id, 'name', cc.name, 'slug', cc.slug))
                FILTER (WHERE pc.category_id IS NOT NULL), '[]') AS categories,
              COALESCE(
-               json_agg(DISTINCT
-                 json_build_object(
+               jsonb_agg(DISTINCT
+                 jsonb_build_object(
                    'id', v.id,
                    'sku', v.sku,
                    'barcode', v.barcode,
@@ -90,7 +90,7 @@ catalogRouter.get(
                    'stock_available', COALESCE(ib.available, 0),
                    'stock_on_hand', COALESCE(ib.on_hand, 0)
                  )
-               ) FILTER (WHERE v.id IS NOT NULL), '[]'
+               ) FILTER (WHERE v.id IS NOT NULL), '[]'::jsonb
              ) as variants
       FROM products p
       LEFT JOIN categories c ON c.id = p.category_id

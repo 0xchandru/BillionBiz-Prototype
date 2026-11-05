@@ -251,7 +251,7 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
 
     // 6. Checkout
     if (cleanPath === '/checkout') {
-      return <CheckoutPageView onNavigate={handleNavigate} brandName={brandDisplayName} />;
+      return <CheckoutPageView onNavigate={handleNavigate} brandName={brandDisplayName} storeSlug={store?.slug} />;
     }
 
     // 7. Account / Login

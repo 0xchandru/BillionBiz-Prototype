@@ -81,7 +81,7 @@ export const CartPageView: React.FC<CartPageViewProps> = ({ onNavigate }) => {
                     <Minus size={13} />
                   </button>
                   <span className="px-3 text-xs font-bold text-slate-900 dark:text-white">
-                    {item.quantity}
+                    {item.quantity} {item.sellingUnit || 'pcs'}
                   </span>
                   <button
                     onClick={() => updateQuantity(item.id, 1)}

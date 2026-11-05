@@ -84,7 +84,7 @@ async function writeProjectFiles(store: StoreRow, port: number): Promise<string>
   return projectDir;
 }
 
-function startProject(store: StoreRow, projectDir: string, port: number): void {
+async function startProject(store: StoreRow, projectDir: string, port: number): Promise<void> {
   const viteEntrypoint = path.join(frontendRoot, 'node_modules', 'vite', 'bin', 'vite.js');
   const child = spawn(process.execPath, [viteEntrypoint, '--config', path.join(projectDir, 'vite.config.ts')], {
     cwd: projectDir,
@@ -110,6 +110,28 @@ function startProject(store: StoreRow, projectDir: string, port: number): void {
 
   runningProjects.set(store.id, { process: child, port });
   console.log(`[Store Project ${store.slug}] Starting React storefront at http://${store.slug}.localhost:${port}`);
+
+  // A spawned process is not a ready preview. Wait until Vite serves the generated
+  // app, and fail provisioning if it exits or never begins listening.
+  const deadline = Date.now() + 30_000;
+  let lastError = 'The storefront preview did not start listening.';
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null || child.killed) {
+      runningProjects.delete(store.id);
+      throw new Error(`The storefront preview exited before becoming ready (code ${child.exitCode ?? 'unknown'}).`);
+    }
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1500) });
+      if (response.ok) return;
+      lastError = `The storefront preview returned HTTP ${response.status}.`;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  child.kill();
+  runningProjects.delete(store.id);
+  throw new Error(`The storefront preview did not become ready: ${lastError}`);
 }
 
 export async function syncStoreProjects(): Promise<void> {
@@ -134,7 +156,7 @@ export async function syncStoreProjects(): Promise<void> {
       const port = getStoreProjectPort(store.slug);
       try {
         const projectDir = await writeProjectFiles(store, port);
-        startProject(store, projectDir, port);
+        await startProject(store, projectDir, port);
         await pool.query(
           `INSERT INTO storefront_provisioning (store_id, plan_code, status, project_name, local_project_path, attempts)
            VALUES ($1, 'FREE_TRIAL', 'LOCAL_READY', $2, $3, 1)

@@ -18,7 +18,9 @@ export const ProductDetailPageView: React.FC<ProductDetailPageViewProps> = ({
   onNavigate
 }) => {
   const { addItem } = useStorefrontCartStore();
-  const [quantity, setQuantity] = useState(1);
+  const [quantityDraft, setQuantityDraft] = useState(0);
+  const [selectedVariantId, setSelectedVariantId] = useState('');
+  const [activeImageDraft, setActiveImageDraft] = useState('');
 
   // If no products exist in the store catalog, render truthful empty state
   if (!directProduct && (!products || products.length === 0)) {
@@ -43,13 +45,20 @@ export const ProductDetailPageView: React.FC<ProductDetailPageViewProps> = ({
     products.find((p) => p.handle === productHandle || p.id === productHandle) ||
     products[0];
 
-  const price = product.price_minor ? product.price_minor / 100 : 999;
-  const comparePrice = product.compare_at_minor ? product.compare_at_minor / 100 : null;
+  const variants = Array.isArray(product.variants) ? product.variants : [];
+  const selectedVariant = variants.find((variant: any) => variant.id === selectedVariantId) || variants[0];
+  const price = Number(selectedVariant?.price_minor ?? product.price_minor ?? 0) / 100;
+  const comparePrice = selectedVariant?.compare_at_minor ? Number(selectedVariant.compare_at_minor) / 100 : null;
+  const minQuantity = Number(product.minimum_quantity || 1);
+  const quantityStep = Number(product.quantity_step || 1);
+  const quantity = quantityDraft > 0 ? quantityDraft : minQuantity;
+  const unit = product.selling_unit || 'pcs';
+  const isSoldOut = Boolean(selectedVariant?.stock_tracked && Number(selectedVariant.stock_available || 0) < quantity);
   const images = (product.media && product.media.length > 0)
     ? product.media.map((m: any) => m.url)
     : ['https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800&fit=crop'];
 
-  const [activeImage, setActiveImage] = useState(images[0]);
+  const activeImage = images.includes(activeImageDraft) ? activeImageDraft : images[0];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
@@ -78,7 +87,7 @@ export const ProductDetailPageView: React.FC<ProductDetailPageViewProps> = ({
               {images.map((img: string, i: number) => (
                 <button
                   key={i}
-                  onClick={() => setActiveImage(img)}
+                  onClick={() => setActiveImageDraft(img)}
                   className={`w-16 h-16 rounded-lg overflow-hidden border-2 shrink-0 transition ${
                     activeImage === img ? 'border-indigo-600' : 'border-transparent opacity-70 hover:opacity-100'
                   }`}
@@ -101,9 +110,6 @@ export const ProductDetailPageView: React.FC<ProductDetailPageViewProps> = ({
             <h1 className="text-3xl font-extrabold text-slate-900 dark:text-white">
               {product.name}
             </h1>
-            <p className="text-xs text-slate-400 font-mono">
-              SKU: {product.sku || 'STD-001'}
-            </p>
           </div>
 
           <div className="flex items-baseline gap-3">
@@ -116,9 +122,11 @@ export const ProductDetailPageView: React.FC<ProductDetailPageViewProps> = ({
               </span>
             )}
             <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-400">
-              In Stock
+              {isSoldOut ? 'Sold out' : 'In Stock'}
             </span>
           </div>
+
+          {variants.length > 1 && <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">Options<select value={selectedVariant?.id || ''} onChange={(event) => { setSelectedVariantId(event.target.value); setQuantityDraft(0); }} className="mt-2 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800">{variants.map((variant: any) => { const title = Object.values(variant.option_values || {}).filter(Boolean).join(' / ') || 'Default'; return <option key={variant.id} value={variant.id}>{title}{variant.stock_tracked && Number(variant.stock_available) <= 0 ? ' · Sold out' : ''}</option>; })}</select></label>}
 
           {/* Quantity selector & Add to Cart */}
           <div className="space-y-4 pt-4 border-t border-[var(--theme-border)]">
@@ -126,14 +134,14 @@ export const ProductDetailPageView: React.FC<ProductDetailPageViewProps> = ({
               <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Quantity:</span>
               <div className="flex items-center border border-slate-300 dark:border-slate-700 rounded-lg overflow-hidden">
                 <button
-                  onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                  onClick={() => setQuantityDraft(Math.max(minQuantity, Number((quantity - quantityStep).toFixed(3))))}
                   className="px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
                   -
                 </button>
-                <span className="px-4 text-xs font-bold text-slate-900 dark:text-white">{quantity}</span>
+                <span className="px-4 text-xs font-bold text-slate-900 dark:text-white">{quantity} {unit}</span>
                 <button
-                  onClick={() => setQuantity((q) => q + 1)}
+                  onClick={() => setQuantityDraft(Number((quantity + quantityStep).toFixed(3)))}
                   className="px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
                   +
@@ -143,8 +151,9 @@ export const ProductDetailPageView: React.FC<ProductDetailPageViewProps> = ({
 
             <div className="flex gap-3">
               <button
-                onClick={() => addItem(product, undefined, quantity)}
-                className="flex-1 py-3.5 rounded-xl bg-[var(--theme-btn-primary-bg)] text-[var(--theme-btn-primary-text)] font-bold text-sm shadow-md hover:opacity-90 transition flex items-center justify-center gap-2 cursor-pointer"
+                disabled={!selectedVariant || isSoldOut}
+                onClick={() => addItem(product, selectedVariant, quantity)}
+                className="flex-1 py-3.5 rounded-xl bg-[var(--theme-btn-primary-bg)] text-[var(--theme-btn-primary-text)] font-bold text-sm shadow-md hover:opacity-90 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <ShoppingBag size={18} />
                 <span>Add to Cart — ₹{(price * quantity).toLocaleString('en-IN')}</span>

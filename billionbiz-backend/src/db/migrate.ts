@@ -1129,6 +1129,17 @@ export async function runMigrations() {
     ALTER TABLE inventory_balances ALTER COLUMN available TYPE NUMERIC(12,3) USING available::numeric;
     ALTER TABLE inventory_movements ALTER COLUMN quantity TYPE NUMERIC(12,3) USING quantity::numeric;
     ALTER TABLE order_lines ALTER COLUMN quantity TYPE NUMERIC(12,3) USING quantity::numeric;
+
+    CREATE TABLE IF NOT EXISTS order_inventory_reservations (
+      order_line_id VARCHAR(64) NOT NULL REFERENCES order_lines(id) ON DELETE CASCADE,
+      balance_id VARCHAR(64) NOT NULL REFERENCES inventory_balances(id) ON DELETE RESTRICT,
+      quantity NUMERIC(12,3) NOT NULL CHECK (quantity > 0),
+      released_at TIMESTAMPTZ,
+      fulfilled_at TIMESTAMPTZ,
+      PRIMARY KEY (order_line_id, balance_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_order_inventory_reservations_open
+      ON order_inventory_reservations(balance_id) WHERE released_at IS NULL AND fulfilled_at IS NULL;
   `);
 
   console.log('[Migration] All migrations completed successfully.');

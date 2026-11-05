@@ -168,7 +168,7 @@ export const StoreLayout: React.FC<StoreLayoutProps> = ({
                           <Minus size={13} />
                         </button>
                         <span className="px-2 text-xs font-bold text-slate-800 dark:text-slate-200">
-                          {item.quantity}
+                          {item.quantity} {item.sellingUnit || 'pcs'}
                         </span>
                         <button
                           onClick={() => updateQuantity(item.id, 1)}

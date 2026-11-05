@@ -842,6 +842,19 @@ ordersRouter.patch(
 
     await withTransaction(async (client) => {
       await client.query(`UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2 AND store_id = $3`, [status, orderId, storeId]);
+      if (['CANCELLED', 'VOIDED'].includes(String(status).toUpperCase()) && !['CANCELLED', 'VOIDED'].includes(String(fromStatus).toUpperCase())) {
+        const reservations = await client.query(
+          `SELECT r.order_line_id, r.balance_id, r.quantity
+           FROM order_inventory_reservations r JOIN order_lines ol ON ol.id = r.order_line_id
+           WHERE ol.order_id = $1 AND r.released_at IS NULL AND r.fulfilled_at IS NULL
+           FOR UPDATE OF r`,
+          [orderId]
+        );
+        for (const reservation of reservations.rows) {
+          await client.query(`UPDATE inventory_balances SET reserved = GREATEST(0, reserved - $1), available = available + $1, updated_at = NOW() WHERE id = $2`, [reservation.quantity, reservation.balance_id]);
+          await client.query(`UPDATE order_inventory_reservations SET released_at = NOW() WHERE order_line_id = $1 AND balance_id = $2`, [reservation.order_line_id, reservation.balance_id]);
+        }
+      }
       await client.query(
         `INSERT INTO order_status_history (id, order_id, from_status, to_status, reason, actor_id)
          VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -901,6 +914,20 @@ ordersRouter.post(
            VALUES ($1, $2, $3, $4, 'SHIPPED')`,
           [fulfillmentId, orderId, trackingNumber, carrier]
         );
+
+        const reservations = await client.query(
+          `SELECT r.order_line_id, r.balance_id, r.quantity, ib.variant_id, ib.location_id
+           FROM order_inventory_reservations r JOIN order_lines ol ON ol.id = r.order_line_id
+           JOIN inventory_balances ib ON ib.id = r.balance_id
+           WHERE ol.order_id = $1 AND r.released_at IS NULL AND r.fulfilled_at IS NULL
+           FOR UPDATE OF r, ib`,
+          [orderId]
+        );
+        for (const reservation of reservations.rows) {
+          await client.query(`UPDATE inventory_balances SET on_hand = GREATEST(0, on_hand - $1), reserved = GREATEST(0, reserved - $1), updated_at = NOW() WHERE id = $2`, [reservation.quantity, reservation.balance_id]);
+          await client.query(`INSERT INTO inventory_movements (id, variant_id, location_id, movement_type, quantity, reference_type, reference_id, note) VALUES ($1,$2,$3,'SALE',$4,'ORDER',$5,'Storefront order fulfilled')`, [`mov-${uuidv4()}`, reservation.variant_id, reservation.location_id, -Number(reservation.quantity), orderId]);
+          await client.query(`UPDATE order_inventory_reservations SET fulfilled_at = NOW() WHERE order_line_id = $1 AND balance_id = $2`, [reservation.order_line_id, reservation.balance_id]);
+        }
 
         await client.query(
           `UPDATE orders
