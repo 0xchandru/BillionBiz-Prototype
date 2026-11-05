@@ -279,6 +279,51 @@ describe('Phase 4: Orders & Fulfillment', () => {
     createdOrderId = res.body.orderId;
   });
 
+  it('TC-ORD-002: should create a persistent manual order for a phone-only customer', async () => {
+    const prodRes = await request('GET', '/api/v1/catalog/products');
+    const variantId = prodRes.body.products[0].variants[0].id;
+    const phone = `+9198765432${String(Date.now()).slice(-2)}`;
+
+    const createRes = await request('POST', '/api/v1/orders', {
+      body: {
+        channel: 'MANUAL',
+        customerDetails: {
+          firstName: 'Priya',
+          lastName: 'Sharma',
+          phone
+        },
+        items: [{ variantId, quantity: 2 }]
+      }
+    });
+
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.orderId).toBeDefined();
+    expect(createRes.body.orderNumber).toContain('BBZ-');
+
+    const listRes = await request('GET', `/api/v1/orders?search=${encodeURIComponent(createRes.body.orderNumber)}`);
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.total).toBe(1);
+    expect(listRes.body.orders[0].customer_name).toBe('Priya Sharma');
+    expect(listRes.body.orders[0].customer_email).toBeNull();
+    expect(listRes.body.orders[0].phone).toBe(phone);
+    expect(listRes.body.orders[0].payment_status).toBe('PENDING');
+    expect(Number(listRes.body.orders[0].item_count)).toBeGreaterThan(0);
+  });
+
+  it('TC-ORD-003: rejects invalid manual order quantities', async () => {
+    const prodRes = await request('GET', '/api/v1/catalog/products');
+    const variantId = prodRes.body.products[0].variants[0].id;
+    const res = await request('POST', '/api/v1/orders', {
+      body: {
+        channel: 'MANUAL',
+        items: [{ variantId, quantity: 0 }]
+      }
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('INVALID_ORDER_QUANTITY');
+  });
+
   it('TC-SHP-001: should fulfill order with tracking number and carrier', async () => {
     const res = await request('POST', `/api/v1/orders/${createdOrderId}/fulfill`, {
       body: {
