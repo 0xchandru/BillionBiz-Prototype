@@ -369,22 +369,27 @@ appointmentsRouter.get(
   requirePermission('appointments.view'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
+    const [shiftsRes, timezoneRes] = await Promise.all([
+      query(
+        `SELECT s.id, s.staff_profile_id, s.day_of_week, s.start_time, s.end_time, s.is_active,
+                sp.display_name AS staff_name
+         FROM staff_shifts s
+         JOIN staff_profiles sp ON sp.id = s.staff_profile_id
+         WHERE sp.store_id = $1 AND sp.is_active = TRUE
+         ORDER BY s.day_of_week ASC, s.start_time ASC`,
+        [storeId]
+      ),
+      query(
+        `SELECT COALESCE(
+           (SELECT timezone FROM store_booking_settings WHERE store_id = $1),
+           (SELECT timezone FROM stores WHERE id = $1),
+           'Asia/Kolkata'
+         ) AS timezone`,
+        [storeId]
+      )
+    ]);
 
-    // Fetch shifts for all active staff in the store
-    const shiftsRes = await query(
-      `SELECT s.id, s.staff_profile_id, s.day_of_week, s.start_time, s.end_time, s.is_active,
-              sp.display_name as staff_name
-       FROM staff_shifts s
-       JOIN staff_profiles sp ON sp.id = s.staff_profile_id
-       WHERE sp.store_id = $1
-       ORDER BY s.day_of_week ASC, s.start_time ASC`,
-      [storeId]
-    );
-
-    res.json({
-      timezone: 'Asia/Kolkata',
-      shifts: shiftsRes.rows
-    });
+    res.json({ timezone: timezoneRes.rows[0]?.timezone || 'Asia/Kolkata', shifts: shiftsRes.rows });
   }
 );
 
@@ -396,28 +401,74 @@ appointmentsRouter.put(
   requirePermission('schedule.manage'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
-    const { shifts = [] } = req.body;
+    const { shifts } = req.body || {};
+    if (!Array.isArray(shifts) || shifts.length > 1000) {
+      return res.status(400).json({ error: 'INVALID_SHIFTS', message: 'Provide an array of no more than 1,000 staff shifts.' });
+    }
 
-    await withTransaction(async (client) => {
-      for (const shift of shifts) {
-        if (shift.id) {
-          await client.query(
-            `UPDATE staff_shifts
-             SET start_time = $1, end_time = $2, is_active = $3
-             WHERE id = $4`,
-            [shift.startTime, shift.endTime, shift.isActive, shift.id]
-          );
-        } else if (shift.staffProfileId) {
-          await client.query(
-            `INSERT INTO staff_shifts (id, staff_profile_id, day_of_week, start_time, end_time, is_active)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
-            [`shift-${uuidv4()}`, shift.staffProfileId, shift.dayOfWeek, shift.startTime, shift.endTime, shift.isActive !== false]
-          );
+    try {
+      await withTransaction(async (client) => {
+        for (const shift of shifts) {
+          const dayOfWeek = Number(shift.dayOfWeek);
+          const startMinutes = minutesFromTime(shift.startTime);
+          const endMinutes = minutesFromTime(shift.endTime);
+          if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6 ||
+              startMinutes === null || endMinutes === null || endMinutes <= startMinutes) {
+            throw Object.assign(new Error('Each shift requires a valid weekday and an end time after its start time.'), {
+              statusCode: 400,
+              code: 'INVALID_SHIFT_TIME'
+            });
+          }
+
+          if (shift.id) {
+            const updated = await client.query(
+              `UPDATE staff_shifts s
+               SET start_time = $1, end_time = $2, is_active = $3
+               FROM staff_profiles sp
+               WHERE s.id = $4
+                 AND s.staff_profile_id = sp.id
+                 AND sp.store_id = $5
+                 AND sp.is_active = TRUE`,
+              [shift.startTime, shift.endTime, shift.isActive !== false, shift.id, storeId]
+            );
+            if (updated.rowCount === 0) {
+              throw Object.assign(new Error('A shift was not found in the active store.'), {
+                statusCode: 404,
+                code: 'SHIFT_NOT_FOUND'
+              });
+            }
+          } else if (typeof shift.staffProfileId === 'string' && shift.staffProfileId) {
+            const staff = await client.query(
+              `SELECT id FROM staff_profiles
+               WHERE id = $1 AND store_id = $2 AND is_active = TRUE
+               FOR UPDATE`,
+              [shift.staffProfileId, storeId]
+            );
+            if (staff.rowCount === 0) {
+              throw Object.assign(new Error('The selected staff member does not belong to the active store.'), {
+                statusCode: 404,
+                code: 'STAFF_NOT_FOUND'
+              });
+            }
+            await client.query(
+              `INSERT INTO staff_shifts (id, staff_profile_id, day_of_week, start_time, end_time, is_active)
+               VALUES ($1, $2, $3, $4, $5, $6)`,
+              [`shift-${uuidv4()}`, shift.staffProfileId, dayOfWeek, shift.startTime, shift.endTime, shift.isActive !== false]
+            );
+          } else {
+            throw Object.assign(new Error('Each new shift must specify a staff profile.'), {
+              statusCode: 400,
+              code: 'STAFF_REQUIRED'
+            });
+          }
         }
-      }
-    });
+      });
+    } catch (error: any) {
+      if (error.statusCode) return res.status(error.statusCode).json({ error: error.code, message: error.message });
+      throw error;
+    }
 
-    res.json({ message: 'Working hours schedule updated in Asia/Kolkata timezone' });
+    res.json({ message: 'Staff working hours saved successfully.' });
   }
 );
 
