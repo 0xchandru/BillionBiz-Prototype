@@ -385,6 +385,30 @@ describe('Reserved Subdomains & DNS Validation Specification Tests', () => {
   });
 
   describe('4. Platform Protection & Host Resolution Middleware', () => {
+    it('does not expose a verified hostname while its store is not ACTIVE', async () => {
+      const storeRes = await query(
+        `SELECT id FROM stores WHERE LOWER(slug) = LOWER($1) LIMIT 1`,
+        [existingSlug]
+      );
+      expect(storeRes.rowCount).toBe(1);
+      const storeId = storeRes.rows[0].id;
+
+      await query(`UPDATE stores SET status = 'PROVISIONING' WHERE id = $1`, [storeId]);
+      try {
+        const res = await makeRequest('GET', '/api/v1/storefront/render', {
+          headers: {
+            host: `${existingSlug}.${PLATFORM_MAIN_DOMAIN}`,
+            authorization: `Bearer ${registeredStoreToken}`
+          }
+        });
+
+        expect(res.status).toBe(404);
+        expect(res.body.error).toBe('STORE_NOT_FOUND');
+      } finally {
+        await query(`UPDATE stores SET status = 'ACTIVE' WHERE id = $1`, [storeId]);
+      }
+    });
+
     it('returns 404 STORE_NOT_FOUND for an unregistered store host after authentication', async () => {
       const res = await makeRequest('GET', '/api/v1/storefront/render', {
         headers: {
