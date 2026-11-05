@@ -141,11 +141,16 @@ export default function LoginPage() {
 
     setIsSubmitting(true);
     try {
-      await api.sendOtp({
+      const sent = await api.sendOtp({
         identifier: validation.cleanValue,
         type: 'LOGIN'
       });
 
+      if (sent.devOtpPreview) {
+        setOtpCode(sent.devOtpPreview);
+      } else {
+        setOtpCode('');
+      }
       setResendCooldown(45);
       setView('OTP_VERIFY');
     } catch (err: any) {
