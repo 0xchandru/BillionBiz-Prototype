@@ -5,7 +5,8 @@ import { requireAuth, requirePermission } from '../../middleware/auth.js';
 import { resolveTenant } from '../../middleware/tenant.js';
 import { requireCapability } from '../../middleware/capabilities.js';
 import { handleIdempotency } from '../../middleware/idempotency.js';
-import { recordAudit } from '../../core/auditAndOutbox.js';
+import { recordAudit, publishOutboxEvent, broadcastCommittedOutboxEvent } from '../../core/auditAndOutbox.js';
+import type { RealtimeEvent } from '../../core/realtimeGateway.js';
 
 export const ordersRouter = Router();
 
@@ -774,6 +775,7 @@ ordersRouter.post(
 
     const orderId = `ord-${uuidv4()}`;
     const orderNumber = `BBZ-${Date.now().toString().slice(-6)}`;
+    let committedEvent: RealtimeEvent | null = null;
 
     await withTransaction(async (client) => {
       let effectiveCustomerId = customerId;
@@ -893,8 +895,25 @@ ordersRouter.post(
         targetId: orderId,
         changes: { orderNumber, totalMinor, itemCount: items.length }
       });
+      committedEvent = await publishOutboxEvent(
+        client,
+        req.tenant!.organizationId,
+        storeId,
+        'ORDER_CREATED',
+        'ORDER',
+        orderId,
+        {
+          orderId,
+          orderNumber,
+          totalAmount: totalMinor,
+          customerName: [customerDetails?.firstName, customerDetails?.lastName].filter(Boolean).join(' '),
+          email: customerDetails?.email || undefined,
+          channel
+        }
+      );
     });
 
+    if (committedEvent) broadcastCommittedOutboxEvent(committedEvent);
     res.status(201).json({
       message: 'Order created successfully',
       orderId,
