@@ -704,6 +704,79 @@ appointmentsRouter.get(
       [offeringId, storeId, parsedDate.dayOfWeek]
     );
 
+    const eligibleResourceIds = Array.from(new Set(
+      resourcesRes.rows.map((resource: any) => resource.id).filter((id: unknown): id is string => typeof id === 'string')
+    ));
+    if (eligibleResourceIds.length > 200) {
+      return res.status(422).json({
+        error: 'TOO_MANY_BOOKABLE_RESOURCES',
+        message: 'This service has more than 200 eligible resources. Narrow its staff assignment before calculating availability.'
+      });
+    }
+
+    const nextLocalDay = new Date(Date.UTC(parsedDate.year, parsedDate.month - 1, parsedDate.day + 1));
+    const dayStart = localDateTimeToUtc(parsedDate.year, parsedDate.month, parsedDate.day, 0, 0, timeZone);
+    const nextDayStart = localDateTimeToUtc(
+      nextLocalDay.getUTCFullYear(),
+      nextLocalDay.getUTCMonth() + 1,
+      nextLocalDay.getUTCDate(),
+      0,
+      0,
+      timeZone
+    );
+    const conflictRangeStart = new Date(dayStart.getTime() - bufferBefore * 60 * 1000);
+    const conflictRangeEnd = new Date(nextDayStart.getTime() + bufferAfter * 60 * 1000);
+
+    const [bookingsRes, holdsRes, timeOffRes] = eligibleResourceIds.length === 0
+      ? [{ rows: [] }, { rows: [] }, { rows: [] }] as any
+      : await Promise.all([
+          query(
+            `SELECT resource_id, start_time, end_time
+             FROM bookings
+             WHERE store_id = $1 AND resource_id = ANY($2::varchar[])
+               AND status NOT IN ('CANCELLED', 'NO_SHOW')
+               AND start_time < $4 AND end_time > $3`,
+            [storeId, eligibleResourceIds, conflictRangeStart.toISOString(), conflictRangeEnd.toISOString()]
+          ),
+          query(
+            `SELECT resource_id, start_time, end_time
+             FROM booking_holds
+             WHERE store_id = $1 AND resource_id = ANY($2::varchar[])
+               AND expires_at > NOW()
+               AND start_time < $4 AND end_time > $3`,
+            [storeId, eligibleResourceIds, conflictRangeStart.toISOString(), conflictRangeEnd.toISOString()]
+          ),
+          query(
+            `SELECT r.id AS resource_id, t.start_time, t.end_time
+             FROM time_off t
+             JOIN resources r ON r.staff_profile_id = t.staff_profile_id
+             WHERE r.store_id = $1 AND r.id = ANY($2::varchar[])
+               AND t.start_time < $4 AND t.end_time > $3`,
+            [storeId, eligibleResourceIds, conflictRangeStart.toISOString(), conflictRangeEnd.toISOString()]
+          )
+        ]);
+
+    const groupByResource = (rows: any[]) => {
+      const result = new Map<string, Array<{ start: number; end: number }>>();
+      for (const row of rows) {
+        const start = new Date(row.start_time).getTime();
+        const end = new Date(row.end_time).getTime();
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+        const list = result.get(row.resource_id) || [];
+        list.push({ start, end });
+        result.set(row.resource_id, list);
+      }
+      return result;
+    };
+    const bookingsByResource = groupByResource(bookingsRes.rows);
+    const holdsByResource = groupByResource(holdsRes.rows);
+    const timeOffByResource = groupByResource(timeOffRes.rows);
+    const hasOverlap = (
+      entries: Array<{ start: number; end: number }> | undefined,
+      start: number,
+      end: number
+    ) => Boolean(entries?.some((entry) => entry.start < end && entry.end > start));
+
     const nowMs = Date.now();
     const earliestStartMs = nowMs + minNoticeHours * 60 * 60 * 1000;
     const slots: Array<{
@@ -739,40 +812,12 @@ appointmentsRouter.get(
         if (seen.has(slotKey)) continue;
         seen.add(slotKey);
 
-        let isAvailable = startLocalDateTime.getTime() >= earliestStartMs;
-        if (isAvailable) {
-          const [bookingConflict, holdConflict, timeOffConflict] = await Promise.all([
-            query(
-              `SELECT 1
-               FROM bookings
-               WHERE store_id = $1 AND resource_id = $2
-                 AND status NOT IN ('CANCELLED', 'NO_SHOW')
-                 AND start_time < $4 AND end_time > $3
-               LIMIT 1`,
-              [storeId, resource.id, conflictStart.toISOString(), conflictEnd.toISOString()]
-            ),
-            query(
-              `SELECT 1
-               FROM booking_holds
-               WHERE store_id = $1 AND resource_id = $2
-                 AND expires_at > NOW()
-                 AND start_time < $4 AND end_time > $3
-               LIMIT 1`,
-              [storeId, resource.id, conflictStart.toISOString(), conflictEnd.toISOString()]
-            ),
-            query(
-              `SELECT 1
-               FROM time_off
-               WHERE staff_profile_id = $1
-                 AND start_time < $3 AND end_time > $2
-               LIMIT 1`,
-              [resource.staff_profile_id, conflictStart.toISOString(), conflictEnd.toISOString()]
-            )
-          ]);
-          isAvailable = bookingConflict.rowCount === 0 &&
-            holdConflict.rowCount === 0 &&
-            timeOffConflict.rowCount === 0;
-        }
+        const conflictStartMs = conflictStart.getTime();
+        const conflictEndMs = conflictEnd.getTime();
+        const isAvailable = startLocalDateTime.getTime() >= earliestStartMs &&
+          !hasOverlap(bookingsByResource.get(resource.id), conflictStartMs, conflictEndMs) &&
+          !hasOverlap(holdsByResource.get(resource.id), conflictStartMs, conflictEndMs) &&
+          !hasOverlap(timeOffByResource.get(resource.id), conflictStartMs, conflictEndMs);
 
         slots.push({
           timeLabel: `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')} - ${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`,
