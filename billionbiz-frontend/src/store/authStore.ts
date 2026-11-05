@@ -85,8 +85,19 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ isLoading: true, error: null });
     try {
       const res: AuthResponse = await api.login({ email, password });
+      if (res.mfaRequired) {
+        if (!res.challengeToken) throw new Error('The server requested MFA but did not return a valid challenge. Start sign-in again.');
+        set({ isLoading: false, isAuthenticated: false, error: null });
+        return {
+          success: false,
+          requiresMfa: true,
+          challengeToken: res.challengeToken,
+          expiresInSeconds: res.expiresInSeconds || 300
+        };
+      }
+
       const { token, user, organizations, portalDestination } = res;
-      if (typeof token !== 'string' || !token.trim()) throw new Error('Authentication did not return a valid session token. Complete any required verification step and try again.');
+      if (typeof token !== 'string' || !token.trim()) throw new Error('Authentication did not return a valid session token.');
 
       // Extract first org & store
       const primaryOrg = organizations && organizations.length > 0 ? organizations[0] : null;
