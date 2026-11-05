@@ -495,7 +495,7 @@ export const EditorTopBar: React.FC = () => {
                   useLandingEditorStore.getState().navigateToPagesList();
                   navigate('/editor/pages');
                 } else {
-                  navigate('/pages');
+                  navigate('/dashboard');
                 }
               }}
               title={isPageEditor ? "Back to All Pages" : "Back to Dashboard"}
