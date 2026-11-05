@@ -4,7 +4,8 @@ import { query, withTransaction } from '../../db/pool.js';
 import { requireAuth, requirePermission } from '../../middleware/auth.js';
 import { resolveTenant } from '../../middleware/tenant.js';
 import { handleIdempotency } from '../../middleware/idempotency.js';
-import { recordAudit } from '../../core/auditAndOutbox.js';
+import { recordAudit, publishOutboxEvent, broadcastCommittedOutboxEvent } from '../../core/auditAndOutbox.js';
+import type { RealtimeEvent } from '../../core/realtimeGateway.js';
 
 export const posRouter = Router();
 
@@ -300,6 +301,7 @@ posRouter.post('/checkout', requireAuth, resolveTenant, requirePermission('pos.c
   const orderId = `ord-pos-${uuidv4()}`;
   const orderNumber = `POS-${Date.now().toString().slice(-6)}-${uuidv4().slice(0, 4).toUpperCase()}`;
   let totalOrderAmount = 0;
+  const committedEvents: RealtimeEvent[] = [];
 
   try {
     await withTransaction(async (client) => {
@@ -487,11 +489,41 @@ posRouter.post('/checkout', requireAuth, resolveTenant, requirePermission('pos.c
         targetId: orderId,
         changes: { orderNumber, totalOrderAmount, paymentMethod, itemCount: orderLines.length, appointmentBookingId: appointmentBookingId || null }
       });
+      committedEvents.push(await publishOutboxEvent(
+        client,
+        req.tenant!.organizationId,
+        storeId,
+        'ORDER_CREATED',
+        'ORDER',
+        orderId,
+        {
+          orderId,
+          orderNumber,
+          totalAmount: totalOrderAmount,
+          paymentMethod,
+          channel: 'POS',
+          itemCount: orderLines.length,
+          appointmentBookingId: appointmentBookingId || null
+        }
+      ));
+      if (appointmentBookingId) {
+        committedEvents.push(await publishOutboxEvent(
+          client,
+          req.tenant!.organizationId,
+          storeId,
+          'APPOINTMENT_PAYMENT_COMPLETED',
+          'BOOKING',
+          appointmentBookingId,
+          { bookingId: appointmentBookingId, orderId, amountMinor: totalOrderAmount, paymentMethod }
+        ));
+      }
     });
   } catch (error: any) {
     if (error.statusCode) return res.status(error.statusCode).json({ error: error.code, message: error.message });
     throw error;
   }
+
+  committedEvents.forEach(broadcastCommittedOutboxEvent);
 
   const cashReceived = paymentMethod === 'CASH' ? Number(cashTenderedMinor ?? totalOrderAmount) : totalOrderAmount;
   const changeDueMinor = paymentMethod === 'CASH' ? Math.max(0, cashReceived - totalOrderAmount) : 0;
