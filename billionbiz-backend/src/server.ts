@@ -148,7 +148,14 @@ app.use(
   })
 );
 app.options('*', (req, res) => res.status(204).end());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, _res, buffer) => {
+    // Payment-provider signatures are calculated over the exact received bytes,
+    // not a re-serialized JavaScript object.
+    (req as any).rawBody = Buffer.from(buffer);
+  }
+}));
 
 // Request logging in dev
 if (process.env.NODE_ENV !== 'test') {
