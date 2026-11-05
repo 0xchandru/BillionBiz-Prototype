@@ -554,34 +554,39 @@ extensionsRouter.post('/razorpay/webhook', async (req: Request, res: Response) =
 });
 
 // POST /api/v1/extensions/shiprocket/create-shipment (T-023, REQ-EXT-007)
-extensionsRouter.post('/shiprocket/create-shipment', requireAuth, resolveTenant, async (req: Request, res: Response) => {
-  const { orderId } = req.body;
+extensionsRouter.post(
+  '/shiprocket/create-shipment',
+  requireAuth,
+  resolveTenant,
+  requirePermission('fulfillment.manage'),
+  async (req: Request, res: Response) => {
+    const storeId = req.tenant!.storeId;
+    const orderId = typeof req.body?.orderId === 'string' ? req.body.orderId.trim() : '';
 
-  if (!orderId) {
-    return res.status(400).json({ error: 'MISSING_DATA', message: 'Order ID is required' });
+    if (!orderId) {
+      return res.status(400).json({
+        error: 'MISSING_ORDER_ID',
+        message: 'A valid order ID is required.'
+      });
+    }
+
+    const order = await query(
+      `SELECT id FROM orders WHERE id = $1 AND store_id = $2`,
+      [orderId, storeId]
+    );
+    if (order.rowCount === 0) {
+      return res.status(404).json({
+        error: 'ORDER_NOT_FOUND',
+        message: 'The order was not found in this store.'
+      });
+    }
+
+    // This endpoint is intentionally fail-closed until Shiprocket credentials,
+    // live API booking, label retrieval, and webhook reconciliation are wired.
+    // Never invent an AWB, label, tracking URL, or fulfillment state.
+    return res.status(503).json({
+      error: 'SHIPROCKET_NOT_CONFIGURED',
+      message: 'Live Shiprocket booking is not configured. No label was purchased and no shipment or fulfillment status was changed.'
+    });
   }
-
-  const awbNumber = `SR-${Math.floor(1000000000 + Math.random() * 9000000000)}`;
-  const labelUrl = `https://shiprocket.example.com/labels/${awbNumber}.pdf`;
-
-  await withTransaction(async (client) => {
-    await client.query(
-      `INSERT INTO fulfillments (id, order_id, tracking_number, carrier, tracking_url, status)
-       VALUES ($1, $2, $3, 'Shiprocket Express', $4, 'BOOKED')`,
-      [`ful-${uuidv4()}`, orderId, awbNumber, `https://shiprocket.co/tracking/${awbNumber}`]
-    );
-
-    await client.query(
-      `UPDATE orders SET fulfillment_status = 'FULFILLED', updated_at = NOW() WHERE id = $1`,
-      [orderId]
-    );
-  });
-
-  res.status(201).json({
-    message: 'Shipment created with Shiprocket adapter',
-    awbNumber,
-    carrier: 'Shiprocket Express',
-    trackingUrl: `https://shiprocket.co/tracking/${awbNumber}`,
-    labelUrl
-  });
-});
+);
