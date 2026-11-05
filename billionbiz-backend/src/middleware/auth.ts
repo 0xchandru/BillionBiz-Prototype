@@ -14,6 +14,7 @@ export interface AuthContext {
   storeId?: string;
   role?: string;
   permissions?: string[];
+  mfaVerified?: boolean;
 }
 
 declare global {
@@ -57,7 +58,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     // A revoked platform-admin flag or downgraded organization role must take
     // effect even if the previous JWT has not reached its expiry time.
     const identityRes = await query(
-      `SELECT u.is_platform_admin, om.role AS membership_role
+      `SELECT u.is_platform_admin, u.mfa_enabled, om.role AS membership_role
        FROM users u
        LEFT JOIN organization_memberships om
          ON om.user_id = u.id
@@ -77,6 +78,12 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
     const identity = identityRes.rows[0];
     const isPlatformAdmin = identity.is_platform_admin === true;
+    if (identity.mfa_enabled === true && decoded.mfaVerified !== true) {
+      return res.status(401).json({
+        error: 'MFA_REQUIRED',
+        message: 'This account requires a completed multi-factor login. Sign in again and enter your authenticator code.'
+      });
+    }
     const membershipRole = identity.membership_role || undefined;
 
     if (decoded.organizationId && !isPlatformAdmin && !membershipRole) {
