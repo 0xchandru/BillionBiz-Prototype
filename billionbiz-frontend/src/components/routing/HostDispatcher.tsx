@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { parseSubdomain, getPortalUrl, isLocalOrPreview } from '../../utils/subdomain';
+import { hasVerifiedAuthSession } from '../../utils/authSession';
 import { useAuthStore } from '../../store/authStore';
 
 // Layout & Route Guards
@@ -195,7 +196,8 @@ export const renderAdminRoutes = (): React.ReactElement => (
  */
 export const HostDispatcher: React.FC = () => {
   const subInfo = parseSubdomain();
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, user } = useAuthStore();
+  const hasVerifiedSession = hasVerifiedAuthSession(isAuthenticated, user);
   const isLocal = isLocalOrPreview() && subInfo.type === 'local';
   const rootDomain = (import.meta.env.VITE_ROOT_DOMAIN || 'chandraprakash.codes').toLowerCase();
   const adminPortalHost = `admin.${rootDomain}`;
@@ -211,11 +213,11 @@ export const HostDispatcher: React.FC = () => {
         {/* Auth Pages */}
         <Route
           path="/login"
-          element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginPage />}
+          element={hasVerifiedSession ? <Navigate to="/dashboard" replace /> : <LoginPage />}
         />
         <Route
           path="/register"
-          element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <RegisterPage />}
+          element={hasVerifiedSession ? <Navigate to="/dashboard" replace /> : <RegisterPage />}
         />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
@@ -491,7 +493,7 @@ export const HostDispatcher: React.FC = () => {
     <Routes>
       <Route
         path="/login"
-        element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginPage />}
+        element={hasVerifiedSession ? <Navigate to="/dashboard" replace /> : <LoginPage />}
       />
       {/* Registration is strictly NOT available on the Admin subdomain -> 404 */}
       <Route
@@ -506,7 +508,7 @@ export const HostDispatcher: React.FC = () => {
       <Route
         path="/"
         element={
-          isAuthenticated ? (
+          hasVerifiedSession ? (
             <Navigate to="/dashboard" replace />
           ) : (
             <Navigate to="/login" replace />

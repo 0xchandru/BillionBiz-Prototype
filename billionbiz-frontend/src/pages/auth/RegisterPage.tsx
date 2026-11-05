@@ -8,6 +8,7 @@ import type { Country } from '../../components/auth/CountryPhoneInput';
 import { validateContactInput, validateOtpCode } from '../../utils/validators';
 import { initiateGoogleSignIn, decodeGoogleCredential } from '../../utils/googleAuth';
 import { redirectToAdminDashboard } from '../../utils/crossDomainAuth';
+import { hasVerifiedAuthSession } from '../../utils/authSession';
 import { validateSubdomainSlug, PLATFORM_MAIN_DOMAIN } from '../../utils/reservedSubdomains';
 import logoLightBg from '../../assets/logo-light-bg.png';
 import {
@@ -83,7 +84,16 @@ const PLANS: PlanOption[] = [
 ];
 
 export default function RegisterPage() {
-  const { registerStreamlined, isAuthenticated, isLoading: isStoreLoading, error: storeError, clearError } = useAuthStore();
+  const {
+    registerStreamlined,
+    isAuthenticated,
+    user,
+    token,
+    checkAuth,
+    isLoading: isStoreLoading,
+    error: storeError,
+    clearError
+  } = useAuthStore();
 
   // UI status
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -93,10 +103,19 @@ export default function RegisterPage() {
 
   // Redirect if already authenticated
   useEffect(() => {
-    if (isAuthenticated && !isSubmitting) {
+    if (token && !user) {
+      void checkAuth();
+    }
+  }, [token, user, checkAuth]);
+
+  useEffect(() => {
+    // A token cookie alone is not a verified session. Only redirect after
+    // the API has confirmed the user, otherwise stale cross-subdomain tokens
+    // bounce registration back to login.
+    if (hasVerifiedAuthSession(isAuthenticated, user) && !isSubmitting) {
       redirectToAdminDashboard();
     }
-  }, [isAuthenticated, isSubmitting]);
+  }, [isAuthenticated, user, isSubmitting]);
 
   // Phase flow: contact -> otp -> details -> plan
   const [phase, setPhase] = useState<RegisterPhase>('contact');

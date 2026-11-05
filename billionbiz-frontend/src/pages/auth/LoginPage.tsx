@@ -8,6 +8,7 @@ import type { Country } from '../../components/auth/CountryPhoneInput';
 import { validateContactInput, validateOtpCode } from '../../utils/validators';
 import { initiateGoogleSignIn } from '../../utils/googleAuth';
 import { getPortalUrl } from '../../utils/subdomain';
+import { hasVerifiedAuthSession } from '../../utils/authSession';
 import logoLightBg from '../../assets/logo-light-bg.png';
 import {
   Lock,
@@ -25,16 +26,33 @@ type LoginView = 'PASSWORD' | 'OTP_REQUEST' | 'OTP_VERIFY' | 'MFA_VERIFY';
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { loginUnified, loginGoogle, completeMfaChallenge, isAuthenticated, isLoading: isAuthLoading, error: authError, clearError } = useAuthStore();
+  const {
+    loginUnified,
+    loginGoogle,
+    completeMfaChallenge,
+    isAuthenticated,
+    user,
+    token,
+    checkAuth,
+    isLoading: isAuthLoading,
+    error: authError,
+    clearError
+  } = useAuthStore();
 
   const from = (location.state as any)?.from?.pathname || '/dashboard';
 
   // If already authenticated, redirect
   useEffect(() => {
-    if (isAuthenticated) {
+    if (token && !user) {
+      void checkAuth();
+    }
+  }, [token, user, checkAuth]);
+
+  useEffect(() => {
+    if (hasVerifiedAuthSession(isAuthenticated, user)) {
       navigate(from, { replace: true });
     }
-  }, [isAuthenticated, navigate, from]);
+  }, [isAuthenticated, user, navigate, from]);
 
   // Current view: PASSWORD (default), OTP_REQUEST (single input), OTP_VERIFY (enter code)
   const [view, setView] = useState<LoginView>('PASSWORD');
