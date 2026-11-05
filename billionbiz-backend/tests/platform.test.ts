@@ -559,26 +559,28 @@ describe('Phase 5: Extensions (Razorpay & Shiprocket)', () => {
         payment: { entity: { id: 'pay_9999', amount: 150000 } }
       }
     };
+    const signature = crypto
+      .createHmac('sha256', 'billionbiz-test-razorpay-webhook-secret')
+      .update(JSON.stringify(webhookEvent))
+      .digest('hex');
+    const headers = {
+      'x-razorpay-signature': signature,
+      'x-razorpay-event-id': testEventId
+    };
 
-    // First delivery
     const res1 = await request('POST', '/api/v1/extensions/razorpay/webhook', {
       body: webhookEvent,
-      headers: {
-        'x-razorpay-signature': 'test_sandbox_signature'
-      }
+      headers
     });
     expect(res1.status).toBe(200);
     expect(res1.body.status).toBe('ACKNOWLEDGED');
 
-    // Duplicate delivery
     const res2 = await request('POST', '/api/v1/extensions/razorpay/webhook', {
       body: webhookEvent,
-      headers: {
-        'x-razorpay-signature': 'test_sandbox_signature'
-      }
+      headers
     });
     expect(res2.status).toBe(200);
-    expect(res2.body.status).toBe('ALREADY_PROCESSED');
+    expect(res2.body.status).toBe('ALREADY_RECEIVED');
   });
 });
 
