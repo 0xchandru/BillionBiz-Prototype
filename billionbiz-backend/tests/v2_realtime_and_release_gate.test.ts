@@ -430,6 +430,24 @@ describe('V2 Realtime, Concurrency & Release Gate Suite', () => {
     expect(checkoutRes2.status).toBe(201);
     expect(checkoutRes2.body.receipt.orderNumber).toBe(orderNumber1);
 
+    // Reusing the same key with a different payload must never replay a prior
+    // response or execute a second checkout.
+    const conflictingRetry = await api('POST', '/api/v1/pos/checkout', {
+      token: tenantAToken,
+      orgId: tenantAOrgId,
+      storeId: tenantAStoreId,
+      headers: { 'idempotency-key': idempotencyKey },
+      body: {
+        counterId,
+        sessionId,
+        items: [{ variantId, quantity: 1 }],
+        paymentMethod: 'CASH',
+        cashTenderedMinor: 3000
+      }
+    });
+    expect(conflictingRetry.status).toBe(409);
+    expect(conflictingRetry.body.error).toBe('IDEMPOTENCY_KEY_REUSED');
+
     // Verify inventory deducted exactly once (10 - 2 = 8, not 6)
     const invRes = await query('SELECT on_hand FROM inventory_balances WHERE variant_id = $1', [variantId]);
     expect(parseInt(invRes.rows[0].on_hand, 10)).toBe(8);
