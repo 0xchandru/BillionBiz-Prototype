@@ -601,21 +601,6 @@ export const EditorLeftSidebar: React.FC = () => {
             </div>
           )}
 
-          {/* Divider Line above Legal */}
-          {legalPages.length > 0 && (
-            <>
-              <div style={{ height: '1px', backgroundColor: 'var(--border-color, #e2e8f0)', margin: '14px 4px 14px' }} />
-
-              {/* Group 8: LEGAL */}
-              <div className={styles.navGroup} style={{ marginBottom: '14px' }}>
-                <div className={styles.referenceGroupHeader}>
-                  <span>LEGAL</span>
-                  <span className={styles.referenceGroupCount}>{legalPages.length}</span>
-                </div>
-                {legalPages.map(page => renderPageListItem(page))}
-              </div>
-            </>
-          )}
         </div>
       </div>
     );

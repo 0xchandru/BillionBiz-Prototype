@@ -493,7 +493,7 @@ export const PageRenderer: React.FC<PageRendererProps> = ({ page, overrideDevice
             const isBody = !isHeader && !isFooter;
 
             let isCurrentlyActive = false;
-            if (isPages && isRightSidebarOpen) {
+            if (isPages && pagesNavLevel === 'page-detail' && isRightSidebarOpen) {
               if (selectedPageId === 'header-global') {
                 if (isHeader) {
                   const targetRowId = selectedTarget && 'rowId' in selectedTarget ? (selectedTarget as any).rowId : null;
@@ -569,7 +569,11 @@ export const PageRenderer: React.FC<PageRendererProps> = ({ page, overrideDevice
               <SectionRenderer
                 section={section}
                 overrideDevice={overrideDevice}
-                isEditorInteractive={isPages}
+                isEditorInteractive={isPages && isRightSidebarOpen && (
+                  (isBody) ||
+                  (isHeader && selectedPageId === 'header-global') ||
+                  (isFooter && selectedPageId === 'footer-global')
+                )}
                 useEditorModel={isHeader || isHeaderEditor}
               />
               
@@ -612,7 +616,7 @@ export const PageRenderer: React.FC<PageRendererProps> = ({ page, overrideDevice
                 <SectionRenderer
                   section={section}
                   overrideDevice={overrideDevice}
-                  isEditorInteractive={isPages}
+                  isEditorInteractive={isHeaderInteractive && selectedPageId === 'header-global' && isRightSidebarOpen}
                   useEditorModel={true}
                 />
               </div>
@@ -640,7 +644,7 @@ export const PageRenderer: React.FC<PageRendererProps> = ({ page, overrideDevice
           {/* Footer Sections */}
           {selectedPageId === 'footer-global' ? (
             <FooterTreeRenderer
-              isEditorInteractive={true}
+              isEditorInteractive={pagesNavLevel === 'page-detail' && isRightSidebarOpen}
               device={(overrideDevice || device) as any}
             />
           ) : (
@@ -657,7 +661,7 @@ export const PageRenderer: React.FC<PageRendererProps> = ({ page, overrideDevice
                   <SectionRenderer
                     section={section}
                     overrideDevice={overrideDevice}
-                    isEditorInteractive={false}
+                    isEditorInteractive={isFooterInteractive && selectedPageId === 'footer-global' && isRightSidebarOpen}
                     useEditorModel={true}
                   />
                 </div>

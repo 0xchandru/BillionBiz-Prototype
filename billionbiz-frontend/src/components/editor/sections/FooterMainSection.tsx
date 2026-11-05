@@ -205,13 +205,15 @@ export const FooterMainSection: React.FC<FooterMainSectionProps> = ({
   const borderColor = styling.borderColor || 'var(--footer-border, #e2e8f0)';
   const containerMode = layout.container || 'constrained';
 
+  const navigate = useNavigate();
+  const { selectedPageId, isRightSidebarOpen, navigateToPage, setRightSidebarOpen, setSelectedSectionId, requestEditorSwitch } = useLandingEditorStore();
   const isRowSelected =
+    isEditorInteractive &&
+    selectedPageId === 'footer-global' &&
+    isRightSidebarOpen &&
     selectedTarget.type === 'row' &&
     selectedTarget.editorType === 'footer' &&
     (selectedTarget.rowId === activeRow?.id || selectedTarget.rowId === 'row-main-nav');
-
-  const navigate = useNavigate();
-  const { selectedPageId, navigateToPage, setRightSidebarOpen, setSelectedSectionId, requestEditorSwitch } = useLandingEditorStore();
 
   const handleRowClick = (e: React.MouseEvent) => {
     if (!isEditorInteractive && !useEditorModel) return;

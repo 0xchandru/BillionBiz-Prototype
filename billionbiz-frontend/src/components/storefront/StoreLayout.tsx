@@ -12,6 +12,7 @@ import { FooterTreeRenderer } from '../editor/sections/FooterTreeRenderer';
 import type { FooterTreeNode } from '../editor/engine/footerTreeTypes';
 import type { FooterRow } from '../editor/engine/types';
 import { useStorefrontCartStore } from '../../store/storefrontCartStore';
+import { useLandingEditorStore } from '../../store/landingEditorStore';
 import { StorefrontUtilities } from './StorefrontUtilities';
 
 interface StoreLayoutProps {
@@ -47,6 +48,11 @@ export const StoreLayout: React.FC<StoreLayoutProps> = ({
   currentPath = '/',
 }) => {
   const { items, isOpen, setIsOpen, updateQuantity, removeItem, getSubtotal, getTotalCount } = useStorefrontCartStore();
+  const selectedPageId = useLandingEditorStore((state) => state.selectedPageId);
+  const pagesNavLevel = useLandingEditorStore((state) => state.pagesNavLevel);
+  const isRightSidebarOpen = useLandingEditorStore((state) => state.isRightSidebarOpen);
+  const globalHeaderEditable = useEditorChrome && selectedPageId === 'header-global' && pagesNavLevel === 'page-detail' && isRightSidebarOpen;
+  const globalFooterEditable = useEditorChrome && selectedPageId === 'footer-global' && pagesNavLevel === 'page-detail' && isRightSidebarOpen;
   const subtotal = getSubtotal();
   const totalCount = getTotalCount();
 
@@ -65,7 +71,7 @@ export const StoreLayout: React.FC<StoreLayoutProps> = ({
         <HeaderNavbarSection
           props={headerProps}
           device={device}
-          isEditorInteractive={useEditorChrome}
+          isEditorInteractive={globalHeaderEditable}
           useEditorModel={useEditorChrome}
         />
       </header>
@@ -81,7 +87,7 @@ export const StoreLayout: React.FC<StoreLayoutProps> = ({
           tree={useEditorChrome ? undefined : footerTree}
           rows={useEditorChrome ? undefined : footerRows}
           device={device}
-          isEditorInteractive={useEditorChrome}
+          isEditorInteractive={globalFooterEditable}
         />
       </div>
 

@@ -334,13 +334,13 @@ catalogRouter.patch('/products/:id', requireAuth, resolveTenant, requirePermissi
       if (!variant?.id) continue;
       await client.query(
         `UPDATE product_variants SET sku = COALESCE($1, sku), barcode = COALESCE($2, barcode),
-         price_minor = COALESCE($3, price_minor), compare_at_minor = COALESCE($4, compare_at_minor),
+         price_minor = COALESCE($3, price_minor), compare_at_minor = CASE WHEN $10::boolean THEN $4 ELSE compare_at_minor END,
          cost_minor = COALESCE($5, cost_minor), option_values = COALESCE($6::jsonb, option_values),
          is_active = COALESCE($7, is_active), updated_at = NOW()
          WHERE id = $8 AND product_id = $9`,
         [variant.sku ?? null, variant.barcode ?? null, variant.priceMinor ?? null, variant.compareAtMinor ?? null,
          variant.costMinor ?? null, variant.optionValues === undefined ? null : JSON.stringify(variant.optionValues),
-         variant.isActive ?? null, variant.id, productId]
+         variant.isActive ?? null, variant.id, productId, Object.prototype.hasOwnProperty.call(variant, 'compareAtMinor')]
       );
     }
   });

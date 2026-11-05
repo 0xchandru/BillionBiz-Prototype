@@ -17,6 +17,8 @@ import { useNavigate } from 'react-router-dom';
 import styles from './Pages.module.css';
 import { getEditorPath } from '../components/editor/utils/editorNavigation';
 import { apiClient } from '../api/client';
+import { Skeleton } from '../components/common/SkeletonLoader';
+import { ErrorState } from '../components/common/ErrorState';
 
 const RESERVED_SYSTEM_PATHS = [
   '/',
@@ -42,7 +44,8 @@ export const Pages = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterTab, setFilterTab] = useState<'all' | 'system' | 'custom'>('all');
   const [livePages, setLivePages] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedPageForEdit, setSelectedPageForEdit] = useState<any>(null);
@@ -66,12 +69,15 @@ export const Pages = () => {
   const fetchPages = async () => {
     try {
       setLoading(true);
+      setLoadError(null);
       const res = await apiClient<any>('/storefront/pages');
       if (res && Array.isArray(res.pages)) {
         setLivePages(res.pages);
+      } else {
+        throw new Error('The server returned an invalid pages list.');
       }
     } catch (err) {
-      console.warn('Could not fetch pages from backend, using store state:', err);
+      setLoadError(err instanceof Error ? err.message : 'Could not load your store pages.');
     } finally {
       setLoading(false);
     }
@@ -425,9 +431,18 @@ export const Pages = () => {
           <div style={{ textAlign: 'right' }}>Actions</div>
         </div>
 
-        {filteredPages.length === 0 ? (
+        {loading && livePages.length === 0 ? (
+          <div style={{ display: 'grid', gap: 1, padding: '14px 18px' }} aria-label="Loading pages">
+            {[0, 1, 2, 3, 4].map((row) => <div key={row} style={{ display: 'grid', gridTemplateColumns: '2fr 1.5fr 1fr 1fr 140px', gap: 16, alignItems: 'center', padding: '12px 0', borderBottom: '1px solid var(--color-border)' }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}><Skeleton width={32} height={32} /><div style={{ flex: 1 }}><Skeleton width="55%" height={14} /><Skeleton width="35%" height={11} style={{ marginTop: 6 }} /></div></div>
+              <Skeleton width="65%" height={13} /><Skeleton width="55%" height={13} /><Skeleton width="40%" height={13} /><Skeleton width="100%" height={30} />
+            </div>)}
+          </div>
+        ) : loadError && livePages.length === 0 ? (
+          <ErrorState title="Pages couldn’t load" message={loadError} onRetry={() => void fetchPages()} />
+        ) : filteredPages.length === 0 ? (
           <div style={{ padding: '40px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-            No pages found matching your search.
+            {loadError ? <><p style={{ marginTop: 0 }}>Your last saved pages are shown, but refresh failed: {loadError}</p><button type="button" onClick={() => void fetchPages()} className={styles.btnOutline}>Retry</button></> : searchQuery || filterTab !== 'all' ? 'No pages match this filter.' : 'No pages are available for this store yet.'}
           </div>
         ) : (
           filteredPages.map((page) => (

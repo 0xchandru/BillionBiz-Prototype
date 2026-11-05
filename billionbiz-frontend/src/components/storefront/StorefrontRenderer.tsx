@@ -200,6 +200,7 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
           currencyCode={store?.currency || 'INR'}
           onNavigate={handleNavigate}
           device={runtimeDevice}
+          editorPreview={previewMode}
           sections={homePage?.sections || []}
         />
       );
