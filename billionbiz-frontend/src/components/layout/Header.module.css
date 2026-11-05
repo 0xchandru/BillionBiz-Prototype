@@ -320,6 +320,10 @@
 .profileBtn {
   display: flex;
   align-items: center;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
   gap: 9px;
   cursor: pointer;
   padding: 4px 8px;
