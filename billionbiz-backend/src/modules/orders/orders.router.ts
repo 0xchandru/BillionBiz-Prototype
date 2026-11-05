@@ -27,7 +27,9 @@ ordersRouter.get(
              o.currency, o.subtotal_minor, o.discount_minor, o.tax_minor, o.shipping_minor, o.total_minor,
              o.shipping_address, o.billing_address, o.created_at, o.updated_at,
              c.first_name, c.last_name, c.email, c.phone,
-             COUNT(ol.id) as item_count
+             TRIM(CONCAT_WS(' ', NULLIF(c.first_name, ''), NULLIF(c.last_name, ''))) AS customer_name,
+             c.email AS customer_email,
+             COUNT(ol.id)::int AS item_count
       FROM orders o
       LEFT JOIN customers c ON c.id = o.customer_id
       LEFT JOIN order_lines ol ON ol.order_id = o.id
@@ -57,19 +59,27 @@ ordersRouter.get(
     }
     if (search) {
       params.push(`%${search}%`);
-      sql += ` AND (o.order_number ILIKE $${params.length} OR c.first_name ILIKE $${params.length} OR c.last_name ILIKE $${params.length} OR c.email ILIKE $${params.length})`;
+      sql += ` AND (o.order_number ILIKE ${params.length} OR c.first_name ILIKE ${params.length} OR c.last_name ILIKE ${params.length} OR c.email ILIKE ${params.length} OR c.phone ILIKE ${params.length})`;
     }
+
+    const whereClause = sql.slice(
+      sql.indexOf('WHERE o.store_id = $1'),
+      sql.indexOf(' GROUP BY')
+    );
+    const countSql = `
+      SELECT COUNT(DISTINCT o.id)::int AS total
+      FROM orders o
+      LEFT JOIN customers c ON c.id = o.customer_id
+      ${whereClause}
+    `;
+    const countRes = await query(countSql, [...params]);
 
     sql += ` GROUP BY o.id, c.first_name, c.last_name, c.email, c.phone
              ORDER BY o.created_at DESC
-             LIMIT $${params.length + 1} OFFSET $${params.length + 2};`;
+             LIMIT ${params.length + 1} OFFSET ${params.length + 2};`;
     params.push(parseInt(limit as string, 10), parseInt(offset as string, 10));
 
     const result = await query(sql, params);
-
-    // Total count for pagination
-    const countSql = `SELECT COUNT(id) as total FROM orders WHERE store_id = $1`;
-    const countRes = await query(countSql, [storeId]);
 
     res.json({ orders: result.rows, total: parseInt(countRes.rows[0]?.total || '0', 10) });
   }
@@ -772,6 +782,54 @@ ordersRouter.post(
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'EMPTY_ORDER', message: 'Order must contain at least one item' });
     }
+    if (items.length > 100) {
+      return res.status(400).json({ error: 'TOO_MANY_ORDER_ITEMS', message: 'An order cannot contain more than 100 line items' });
+    }
+
+    const normalizedChannel = String(channel).trim().toUpperCase();
+    if (!['STOREFRONT', 'POS', 'MANUAL'].includes(normalizedChannel)) {
+      return res.status(400).json({ error: 'INVALID_ORDER_CHANNEL', message: 'Order channel must be STOREFRONT, POS, or MANUAL' });
+    }
+
+    for (const [index, item] of items.entries()) {
+      const quantity = Number(item?.quantity ?? 1);
+      if (!item || typeof item.variantId !== 'string' || !item.variantId.trim()) {
+        return res.status(400).json({ error: 'INVALID_ORDER_ITEM', message: `Line ${index + 1} must include a product variant` });
+      }
+      if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 9999) {
+        return res.status(400).json({ error: 'INVALID_ORDER_QUANTITY', message: `Line ${index + 1} quantity must be a whole number between 1 and 9999` });
+      }
+    }
+
+    if (customerId && typeof customerId !== 'string') {
+      return res.status(400).json({ error: 'INVALID_CUSTOMER', message: 'Customer ID must be a string' });
+    }
+
+    const normalizedEmail = typeof customerDetails?.email === 'string'
+      ? customerDetails.email.trim().toLowerCase()
+      : '';
+    const normalizedPhone = typeof customerDetails?.phone === 'string'
+      ? customerDetails.phone.trim()
+      : '';
+    const firstName = typeof customerDetails?.firstName === 'string' ? customerDetails.firstName.trim() : '';
+    const lastName = typeof customerDetails?.lastName === 'string' ? customerDetails.lastName.trim() : '';
+
+    if (normalizedEmail && (normalizedEmail.length > 255 || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(normalizedEmail))) {
+      return res.status(400).json({ error: 'INVALID_CUSTOMER_EMAIL', message: 'Enter a valid customer email address' });
+    }
+    if (normalizedPhone.length > 32 || firstName.length > 128 || lastName.length > 128) {
+      return res.status(400).json({ error: 'INVALID_CUSTOMER_DETAILS', message: 'Customer contact or name is too long' });
+    }
+
+    if (customerId) {
+      const customerCheck = await query(
+        `SELECT id FROM customers WHERE id = $1 AND store_id = $2`,
+        [customerId, storeId]
+      );
+      if (customerCheck.rowCount === 0) {
+        return res.status(404).json({ error: 'CUSTOMER_NOT_FOUND', message: 'Customer was not found in this store' });
+      }
+    }
 
     const orderId = `ord-${uuidv4()}`;
     const orderNumber = `BBZ-${Date.now().toString().slice(-6)}`;
@@ -779,13 +837,22 @@ ordersRouter.post(
 
     await withTransaction(async (client) => {
       let effectiveCustomerId = customerId;
-      if (!effectiveCustomerId && customerDetails?.email) {
-        const custRes = await client.query(
-          `SELECT id FROM customers WHERE store_id = $1 AND email = $2`,
-          [storeId, customerDetails.email.toLowerCase().trim()]
+      if (!effectiveCustomerId && (normalizedEmail || normalizedPhone)) {
+        const existingCustomer = await client.query(
+          `SELECT id
+           FROM customers
+           WHERE store_id = $1
+             AND (
+               ($2 <> '' AND LOWER(email) = $2)
+               OR ($3 <> '' AND phone = $3)
+             )
+           ORDER BY CASE WHEN $2 <> '' AND LOWER(email) = $2 THEN 0 ELSE 1 END
+           LIMIT 1`,
+          [storeId, normalizedEmail, normalizedPhone]
         );
-        if (custRes.rowCount && custRes.rowCount > 0) {
-          effectiveCustomerId = custRes.rows[0].id;
+
+        if (existingCustomer.rowCount && existingCustomer.rowCount > 0) {
+          effectiveCustomerId = existingCustomer.rows[0].id;
         } else {
           effectiveCustomerId = `cust-${uuidv4()}`;
           await client.query(
@@ -794,10 +861,10 @@ ordersRouter.post(
             [
               effectiveCustomerId,
               storeId,
-              customerDetails.email.toLowerCase().trim(),
-              customerDetails.phone || null,
-              customerDetails.firstName || 'Guest',
-              customerDetails.lastName || '',
+              normalizedEmail || null,
+              normalizedPhone || null,
+              firstName || 'Guest',
+              lastName,
               JSON.stringify(shippingAddress || {})
             ]
           );
@@ -812,7 +879,8 @@ ordersRouter.post(
           `SELECT v.id, v.sku, v.price_minor, p.name as product_name, p.id as product_id
            FROM product_variants v
            JOIN products p ON p.id = v.product_id
-           WHERE v.id = $1 AND p.store_id = $2`,
+           WHERE v.id = $1 AND p.store_id = $2
+             AND p.status = 'ACTIVE' AND v.is_active = TRUE`,
           [item.variantId, storeId]
         );
 
@@ -821,8 +889,15 @@ ordersRouter.post(
         }
 
         const variant = variantRes.rows[0];
-        const qty = parseInt(item.quantity || 1, 10);
-        const lineTotal = variant.price_minor * qty;
+        const qty = Number(item.quantity ?? 1);
+        const unitPriceMinor = Number(variant.price_minor);
+        if (!Number.isSafeInteger(unitPriceMinor) || unitPriceMinor < 0) {
+          throw new Error('INVALID_VARIANT_PRICE');
+        }
+        const lineTotal = unitPriceMinor * qty;
+        if (!Number.isSafeInteger(lineTotal) || !Number.isSafeInteger(subtotalMinor + lineTotal)) {
+          throw new Error('ORDER_TOTAL_EXCEEDS_SAFE_LIMIT');
+        }
         subtotalMinor += lineTotal;
 
         orderLinesToInsert.push({
@@ -832,13 +907,13 @@ ordersRouter.post(
           variantId: variant.id,
           sku: variant.sku,
           title: variant.product_name,
-          unitPriceMinor: variant.price_minor,
+          unitPriceMinor,
           quantity: qty,
           totalMinor: lineTotal,
           snapshot: {
             title: variant.product_name,
             sku: variant.sku,
-            price: variant.price_minor
+            price: unitPriceMinor
           }
         });
       }
@@ -853,7 +928,7 @@ ordersRouter.post(
           storeId,
           orderNumber,
           effectiveCustomerId || null,
-          channel,
+          normalizedChannel,
           subtotalMinor,
           totalMinor,
           JSON.stringify(shippingAddress || {}),
@@ -906,9 +981,10 @@ ordersRouter.post(
           orderId,
           orderNumber,
           totalAmount: totalMinor,
-          customerName: [customerDetails?.firstName, customerDetails?.lastName].filter(Boolean).join(' '),
-          email: customerDetails?.email || undefined,
-          channel
+          customerName: [firstName, lastName].filter(Boolean).join(' '),
+          email: normalizedEmail || undefined,
+          phone: normalizedPhone || undefined,
+          channel: normalizedChannel
         }
       );
     });
