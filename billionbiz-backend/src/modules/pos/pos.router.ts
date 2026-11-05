@@ -8,13 +8,25 @@ import { recordAudit } from '../../core/auditAndOutbox.js';
 
 export const posRouter = Router();
 
-// GET /api/v1/pos/counters (T-029, REQ-POS-001)
-posRouter.get('/counters', requireAuth, resolveTenant, async (req: Request, res: Response) => {
+const httpError = (statusCode: number, code: string, message: string) => {
+  const error: any = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  return error;
+};
+
+const isMinorAmount = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+
+const PAYMENT_METHODS = new Set(['CASH', 'CARD', 'UPI']);
+
+// Register catalogue.
+posRouter.get('/counters', requireAuth, resolveTenant, requirePermission('pos.access'), async (req: Request, res: Response) => {
   const storeId = req.tenant!.storeId;
   const countersRes = await query(
-    `SELECT c.id, c.name, c.code, c.is_active, COALESCE(sl.name, 'Main Location') as location_name
+    `SELECT c.id, c.name, c.code, c.is_active, COALESCE(sl.name, 'Main Location') AS location_name
      FROM counters c
-     LEFT JOIN store_locations sl ON sl.id = c.location_id
+     LEFT JOIN store_locations sl ON sl.id = c.location_id AND sl.store_id = c.store_id
      WHERE c.store_id = $1 AND c.is_active = TRUE
      ORDER BY c.code ASC`,
     [storeId]
@@ -22,16 +34,20 @@ posRouter.get('/counters', requireAuth, resolveTenant, async (req: Request, res:
   res.json({ counters: countersRes.rows });
 });
 
-// POST /api/v1/pos/counters (Add POS Counter Register)
 posRouter.post('/counters', requireAuth, resolveTenant, requirePermission('pos.register.manage'), async (req: Request, res: Response) => {
   const storeId = req.tenant!.storeId;
-  const { name, code: rawCode } = req.body;
-  if (!name) {
-    return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'Counter name is required' });
+  const { name, code: rawCode } = req.body || {};
+  const counterName = typeof name === 'string' ? name.trim() : '';
+  if (!counterName || counterName.length > 128) {
+    return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'Counter name is required and must be no more than 128 characters.' });
   }
 
-  // Get or create store location
-  let locRes = await query(`SELECT id FROM store_locations WHERE store_id = $1 LIMIT 1`, [storeId]);
+  const locRes = await query(
+    `SELECT id FROM store_locations
+     WHERE store_id = $1 AND is_active = TRUE
+     ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
+    [storeId]
+  );
   let locationId = locRes.rows[0]?.id;
   if (!locationId) {
     locationId = `loc-${uuidv4()}`;
@@ -42,306 +58,443 @@ posRouter.post('/counters', requireAuth, resolveTenant, requirePermission('pos.r
     );
   }
 
-  const code = (rawCode || `POS-${Math.floor(100 + Math.random() * 900)}`).toUpperCase();
-  const counterId = `cnt-${uuidv4()}`;
+  const code = (typeof rawCode === 'string' && rawCode.trim()
+    ? rawCode.trim()
+    : `POS-${uuidv4().slice(0, 6)}`).toUpperCase();
+  if (!/^[A-Z0-9_-]{2,64}$/.test(code)) {
+    return res.status(400).json({ error: 'INVALID_COUNTER_CODE', message: 'Counter code must contain 2 to 64 letters, numbers, hyphens or underscores.' });
+  }
 
+  const counterId = `cnt-${uuidv4()}`;
   await query(
     `INSERT INTO counters (id, store_id, location_id, name, code, is_active)
      VALUES ($1, $2, $3, $4, $5, TRUE)`,
-    [counterId, storeId, locationId, name, code]
+    [counterId, storeId, locationId, counterName, code]
   );
-
-  res.status(201).json({ message: 'Counter created successfully', id: counterId, name, code });
+  res.status(201).json({ message: 'Counter created successfully', id: counterId, name: counterName, code });
 });
 
-// GET /api/v1/pos/shifts (List historical and active register shifts)
-posRouter.get('/shifts', requireAuth, resolveTenant, async (req: Request, res: Response) => {
+posRouter.get('/shifts', requireAuth, resolveTenant, requirePermission('pos.register.manage'), async (req: Request, res: Response) => {
   const storeId = req.tenant!.storeId;
   const shiftsRes = await query(
     `SELECT rs.id, rs.counter_id, rs.opened_by, rs.closed_by, rs.opening_float_minor,
             rs.closing_cash_minor, rs.expected_cash_minor, rs.variance_minor, rs.status,
             rs.opened_at, rs.closed_at,
-            c.name as counter_name, c.code as counter_code,
-            u1.full_name as opened_by_name, u2.full_name as closed_by_name
+            c.name AS counter_name, c.code AS counter_code,
+            u1.full_name AS opened_by_name, u2.full_name AS closed_by_name
      FROM register_sessions rs
      JOIN counters c ON c.id = rs.counter_id
      LEFT JOIN users u1 ON u1.id = rs.opened_by
      LEFT JOIN users u2 ON u2.id = rs.closed_by
      WHERE c.store_id = $1
-     ORDER BY rs.opened_at DESC`,
+     ORDER BY rs.opened_at DESC
+     LIMIT 500`,
     [storeId]
   );
   res.json({ shifts: shiftsRes.rows });
 });
 
-// POST /api/v1/pos/register/open (Open Register Session, T-031, REQ-POS-014)
+// A counter row lock serializes competing attempts to open the same register.
 posRouter.post('/register/open', requireAuth, resolveTenant, requirePermission('pos.register.manage'), async (req: Request, res: Response) => {
-  const { counterId, openingFloatMinor = 0 } = req.body;
-  if (!counterId) {
-    return res.status(400).json({ error: 'MISSING_DATA', message: 'Counter ID is required' });
+  const storeId = req.tenant!.storeId;
+  const { counterId, openingFloatMinor = 0 } = req.body || {};
+  if (typeof counterId !== 'string' || !counterId) {
+    return res.status(400).json({ error: 'MISSING_DATA', message: 'Counter ID is required.' });
   }
-
-  // Check if open session already exists for this counter
-  const openRes = await query(
-    `SELECT id FROM register_sessions WHERE counter_id = $1 AND status = 'OPEN'`,
-    [counterId]
-  );
-  if (openRes.rowCount && openRes.rowCount > 0) {
-    return res.status(409).json({ error: 'SESSION_ALREADY_OPEN', message: 'Counter already has an active register session' });
+  if (!isMinorAmount(openingFloatMinor)) {
+    return res.status(400).json({ error: 'INVALID_OPENING_FLOAT', message: 'Opening float must be a non-negative whole number in the smallest currency unit.' });
   }
 
   const sessionId = `ses-${uuidv4()}`;
-  await withTransaction(async (client) => {
-    await client.query(
-      `INSERT INTO register_sessions (id, counter_id, opened_by, opening_float_minor, status)
-       VALUES ($1, $2, $3, $4, 'OPEN')`,
-      [sessionId, counterId, req.auth?.userId || 'cashier', openingFloatMinor]
-    );
-
-    if (openingFloatMinor > 0) {
-      await client.query(
-        `INSERT INTO cash_movements (id, register_session_id, movement_type, amount_minor, reason, created_by)
-         VALUES ($1, $2, 'CASH_IN', $3, 'Opening Float', $4)`,
-        [`cm-${uuidv4()}`, sessionId, openingFloatMinor, req.auth?.userId || 'cashier']
+  try {
+    await withTransaction(async (client) => {
+      const counter = await client.query(
+        `SELECT id FROM counters
+         WHERE id = $1 AND store_id = $2 AND is_active = TRUE
+         FOR UPDATE`,
+        [counterId, storeId]
       );
-    }
-  });
+      if (counter.rowCount === 0) throw httpError(404, 'COUNTER_NOT_FOUND', 'Counter was not found in this store.');
 
-  res.status(201).json({
-    message: 'Register session opened successfully',
-    sessionId,
-    openingFloatMinor
-  });
+      const existing = await client.query(
+        `SELECT id FROM register_sessions WHERE counter_id = $1 AND status = 'OPEN' LIMIT 1`,
+        [counterId]
+      );
+      if (existing.rowCount > 0) throw httpError(409, 'SESSION_ALREADY_OPEN', 'This counter already has an active register session.');
+
+      await client.query(
+        `INSERT INTO register_sessions (id, counter_id, opened_by, opening_float_minor, status)
+         VALUES ($1, $2, $3, $4, 'OPEN')`,
+        [sessionId, counterId, req.auth?.userId || 'unknown', openingFloatMinor]
+      );
+      if (openingFloatMinor > 0) {
+        await client.query(
+          `INSERT INTO cash_movements (id, register_session_id, movement_type, amount_minor, reason, created_by)
+           VALUES ($1, $2, 'CASH_IN', $3, 'Opening Float', $4)`,
+          [`cm-${uuidv4()}`, sessionId, openingFloatMinor, req.auth?.userId || 'unknown']
+        );
+      }
+    });
+  } catch (error: any) {
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.code, message: error.message });
+    throw error;
+  }
+
+  res.status(201).json({ message: 'Register session opened successfully', sessionId, openingFloatMinor });
 });
 
-// GET /api/v1/pos/register/current (Current Register Session / X-Report)
-posRouter.get('/register/current', requireAuth, resolveTenant, async (req: Request, res: Response) => {
-  const counterId = req.query.counterId as string;
+posRouter.get('/register/current', requireAuth, resolveTenant, requirePermission('pos.access'), async (req: Request, res: Response) => {
+  const storeId = req.tenant!.storeId;
+  const counterId = typeof req.query.counterId === 'string' ? req.query.counterId : '';
   if (!counterId) {
-    return res.status(400).json({ error: 'MISSING_DATA', message: 'Counter ID is required' });
+    return res.status(400).json({ error: 'MISSING_DATA', message: 'Counter ID is required.' });
   }
 
   const sessionRes = await query(
-    `SELECT * FROM register_sessions WHERE counter_id = $1 AND status = 'OPEN' ORDER BY opened_at DESC LIMIT 1`,
-    [counterId]
+    `SELECT rs.*
+     FROM register_sessions rs
+     JOIN counters c ON c.id = rs.counter_id
+     WHERE rs.counter_id = $1 AND c.store_id = $2
+       AND c.is_active = TRUE AND rs.status = 'OPEN'
+     ORDER BY rs.opened_at DESC LIMIT 1`,
+    [counterId, storeId]
   );
-
   if (sessionRes.rowCount === 0) {
-    return res.json({ session: null, message: 'No active register session' });
+    return res.json({ session: null, movements: [], expectedCashMinor: 0, message: 'No active register session.' });
   }
 
   const session = sessionRes.rows[0];
-
   const movementsRes = await query(
-    `SELECT * FROM cash_movements WHERE register_session_id = $1 ORDER BY created_at ASC`,
-    [session.id]
+    `SELECT cm.*
+     FROM cash_movements cm
+     JOIN register_sessions rs ON rs.id = cm.register_session_id
+     JOIN counters c ON c.id = rs.counter_id
+     WHERE cm.register_session_id = $1 AND c.store_id = $2
+     ORDER BY cm.created_at ASC`,
+    [session.id, storeId]
   );
 
-  let cashTotal = session.opening_float_minor;
-  for (const m of movementsRes.rows) {
-    if (m.movement_type === 'CASH_IN' || m.movement_type === 'SALE') {
-      cashTotal += m.amount_minor;
-    } else if (m.movement_type === 'CASH_OUT' || m.movement_type === 'REFUND') {
-      cashTotal -= m.amount_minor;
-    }
+  let cashTotal = Number(session.opening_float_minor);
+  for (const movement of movementsRes.rows) {
+    const amount = Number(movement.amount_minor);
+    if (movement.movement_type === 'CASH_IN' || movement.movement_type === 'SALE') cashTotal += amount;
+    else if (movement.movement_type === 'CASH_OUT' || movement.movement_type === 'REFUND') cashTotal -= amount;
   }
 
-  res.json({
-    session,
-    movements: movementsRes.rows,
-    expectedCashMinor: cashTotal
-  });
+  res.json({ session, movements: movementsRes.rows, expectedCashMinor: cashTotal });
 });
 
-// POST /api/v1/pos/register/close (Close Register / Z-Report)
+// Close only a session owned by a counter in the active store. Locking the row
+// prevents two cashiers from closing the same register concurrently.
 posRouter.post('/register/close', requireAuth, resolveTenant, requirePermission('pos.register.manage'), async (req: Request, res: Response) => {
-  const { sessionId, closingCashMinor } = req.body;
-  if (!sessionId || closingCashMinor === undefined) {
-    return res.status(400).json({ error: 'MISSING_DATA', message: 'Session ID and closing cash count required' });
+  const storeId = req.tenant!.storeId;
+  const { sessionId, closingCashMinor } = req.body || {};
+  if (typeof sessionId !== 'string' || !sessionId || !isMinorAmount(closingCashMinor)) {
+    return res.status(400).json({ error: 'INVALID_CLOSE_REQUEST', message: 'Session ID and a non-negative whole-number closing cash count are required.' });
   }
 
-  const sessionRes = await query(
-    `SELECT * FROM register_sessions WHERE id = $1 AND status = 'OPEN'`,
-    [sessionId]
-  );
+  let zReport: any;
+  try {
+    await withTransaction(async (client) => {
+      const sessionRes = await client.query(
+        `SELECT rs.*
+         FROM register_sessions rs
+         JOIN counters c ON c.id = rs.counter_id
+         WHERE rs.id = $1 AND c.store_id = $2 AND rs.status = 'OPEN'
+         FOR UPDATE OF rs`,
+        [sessionId, storeId]
+      );
+      if (sessionRes.rowCount === 0) throw httpError(404, 'SESSION_NOT_FOUND', 'Open register session was not found in this store.');
 
-  if (sessionRes.rowCount === 0) {
-    return res.status(404).json({ error: 'SESSION_NOT_FOUND', message: 'Active session not found' });
+      const session = sessionRes.rows[0];
+      const movementsRes = await client.query(
+        `SELECT cm.*
+         FROM cash_movements cm
+         JOIN register_sessions rs ON rs.id = cm.register_session_id
+         JOIN counters c ON c.id = rs.counter_id
+         WHERE cm.register_session_id = $1 AND c.store_id = $2`,
+        [sessionId, storeId]
+      );
+
+      let expectedCash = Number(session.opening_float_minor);
+      for (const movement of movementsRes.rows) {
+        const amount = Number(movement.amount_minor);
+        if (movement.movement_type === 'CASH_IN' || movement.movement_type === 'SALE') expectedCash += amount;
+        else if (movement.movement_type === 'CASH_OUT' || movement.movement_type === 'REFUND') expectedCash -= amount;
+      }
+
+      const variance = closingCashMinor - expectedCash;
+      await client.query(
+        `UPDATE register_sessions
+         SET status = 'CLOSED',
+             closed_by = $1,
+             closing_cash_minor = $2,
+             expected_cash_minor = $3,
+             variance_minor = $4,
+             closed_at = NOW()
+         WHERE id = $5 AND status = 'OPEN'`,
+        [req.auth?.userId || 'unknown', closingCashMinor, expectedCash, variance, sessionId]
+      );
+
+      zReport = {
+        sessionId,
+        openedAt: session.opened_at,
+        closedAt: new Date().toISOString(),
+        openingFloatMinor: Number(session.opening_float_minor),
+        expectedCashMinor: expectedCash,
+        closingCashMinor,
+        varianceMinor: variance
+      };
+
+      await recordAudit({
+        organizationId: req.tenant?.organizationId,
+        storeId,
+        actorId: req.auth?.userId,
+        action: 'CLOSE_POS_REGISTER',
+        targetType: 'REGISTER_SESSION',
+        targetId: sessionId,
+        changes: { expectedCashMinor: expectedCash, closingCashMinor, varianceMinor: variance }
+      });
+    });
+  } catch (error: any) {
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.code, message: error.message });
+    throw error;
   }
 
-  const session = sessionRes.rows[0];
-
-  const movementsRes = await query(
-    `SELECT * FROM cash_movements WHERE register_session_id = $1`,
-    [sessionId]
-  );
-
-  let expectedCash = session.opening_float_minor;
-  for (const m of movementsRes.rows) {
-    if (m.movement_type === 'CASH_IN' || m.movement_type === 'SALE') {
-      expectedCash += m.amount_minor;
-    } else if (m.movement_type === 'CASH_OUT' || m.movement_type === 'REFUND') {
-      expectedCash -= m.amount_minor;
-    }
-  }
-
-  const closingCount = parseInt(closingCashMinor, 10);
-  const variance = closingCount - expectedCash;
-
-  await query(
-    `UPDATE register_sessions
-     SET status = 'CLOSED',
-         closed_by = $1,
-         closing_cash_minor = $2,
-         expected_cash_minor = $3,
-         variance_minor = $4,
-         closed_at = NOW()
-     WHERE id = $5`,
-    [req.auth?.userId || 'cashier', closingCount, expectedCash, variance, sessionId]
-  );
-
-  res.json({
-    message: 'Register closed successfully. Z-Report generated.',
-    zReport: {
-      sessionId,
-      openedAt: session.opened_at,
-      closedAt: new Date().toISOString(),
-      openingFloatMinor: session.opening_float_minor,
-      expectedCashMinor: expectedCash,
-      closingCashMinor: closingCount,
-      varianceMinor: variance
-    }
-  });
+  res.json({ message: 'Register closed successfully. Z-Report generated.', zReport });
 });
 
-// POST /api/v1/pos/checkout (Fast Counter Checkout, T-030, T-032, REQ-POS-007, REQ-POS-018)
-posRouter.post('/checkout', requireAuth, resolveTenant, handleIdempotency, async (req: Request, res: Response) => {
+// POS checkout uses server-side prices and inventory. Invalid or out-of-stock
+// items abort the whole transaction; no partial orders are written.
+posRouter.post('/checkout', requireAuth, resolveTenant, requirePermission('pos.checkout'), handleIdempotency, async (req: Request, res: Response) => {
   const storeId = req.tenant!.storeId;
   const {
     counterId,
     sessionId,
-    items = [], // Product items
-    appointmentBookingId, // Settling balance for existing appointment
-    paymentMethod = 'CASH', // 'CASH' | 'CARD' | 'UPI'
-    cashTenderedMinor,
-    customerPhone
-  } = req.body;
+    items = [],
+    appointmentBookingId,
+    paymentMethod = 'CASH',
+    cashTenderedMinor
+  } = req.body || {};
+
+  if (typeof counterId !== 'string' || !counterId || typeof sessionId !== 'string' || !sessionId) {
+    return res.status(400).json({ error: 'REGISTER_REQUIRED', message: 'Choose a counter with an open register session before checkout.' });
+  }
+  if (!PAYMENT_METHODS.has(paymentMethod)) {
+    return res.status(400).json({ error: 'INVALID_PAYMENT_METHOD', message: 'Payment method must be CASH, CARD or UPI.' });
+  }
+  if (!Array.isArray(items) || items.length > 100) {
+    return res.status(400).json({ error: 'INVALID_CART', message: 'Cart must contain no more than 100 line items.' });
+  }
+  if (items.some((item: any) => !item || typeof item.variantId !== 'string' || !item.variantId ||
+      !Number.isSafeInteger(Number(item.quantity)) || Number(item.quantity) < 1 || Number(item.quantity) > 999)) {
+    return res.status(400).json({ error: 'INVALID_CART_ITEM', message: 'Each cart line requires a variant and a quantity between 1 and 999.' });
+  }
+  if (items.length === 0 && !appointmentBookingId) {
+    return res.status(400).json({ error: 'EMPTY_CART', message: 'Add a product or select an appointment balance before checkout.' });
+  }
+  if (paymentMethod === 'CASH' && !isMinorAmount(cashTenderedMinor ?? 0)) {
+    return res.status(400).json({ error: 'INVALID_CASH_TENDERED', message: 'Cash received must be a non-negative whole number in the smallest currency unit.' });
+  }
 
   const orderId = `ord-pos-${uuidv4()}`;
-  const orderNumber = `POS-${Date.now().toString().slice(-6)}`;
+  const orderNumber = `POS-${Date.now().toString().slice(-6)}-${uuidv4().slice(0, 4).toUpperCase()}`;
   let totalOrderAmount = 0;
 
-  await withTransaction(async (client) => {
-    // 1. If appointmentBookingId is provided, settle appointment balance (REQ-POS-018, T-032)
-    if (appointmentBookingId) {
-      const bkgRes = await client.query(
-        `SELECT id, balance_due_minor, deposit_paid_minor, status
-         FROM bookings
-         WHERE id = $1 AND store_id = $2
-         FOR UPDATE`,
-        [appointmentBookingId, storeId]
+  try {
+    await withTransaction(async (client) => {
+      const sessionRes = await client.query(
+        `SELECT rs.id, rs.counter_id, rs.status
+         FROM register_sessions rs
+         JOIN counters c ON c.id = rs.counter_id
+         WHERE rs.id = $1 AND rs.counter_id = $2
+           AND c.store_id = $3 AND c.is_active = TRUE
+           AND rs.status = 'OPEN'
+         FOR UPDATE OF rs`,
+        [sessionId, counterId, storeId]
       );
-
-      if (bkgRes.rowCount === 0) {
-        throw new Error('APPOINTMENT_NOT_FOUND');
+      if (sessionRes.rowCount === 0) {
+        throw httpError(409, 'REGISTER_SESSION_NOT_OPEN', 'The selected counter does not have this active register session.');
       }
 
-      const bkg = bkgRes.rows[0];
-      const balanceToPay = bkg.balance_due_minor;
-      totalOrderAmount += balanceToPay;
+      if (appointmentBookingId) {
+        const bookingRes = await client.query(
+          `SELECT id, balance_due_minor, status
+           FROM bookings
+           WHERE id = $1 AND store_id = $2
+           FOR UPDATE`,
+          [appointmentBookingId, storeId]
+        );
+        if (bookingRes.rowCount === 0) throw httpError(404, 'APPOINTMENT_NOT_FOUND', 'Appointment was not found in this store.');
+        const booking = bookingRes.rows[0];
+        if (['CANCELLED', 'COMPLETED', 'NO_SHOW'].includes(booking.status)) {
+          throw httpError(409, 'APPOINTMENT_NOT_PAYABLE', 'This appointment can no longer accept a POS payment.');
+        }
+        const balance = Number(booking.balance_due_minor);
+        if (!Number.isSafeInteger(balance) || balance <= 0) {
+          throw httpError(409, 'NO_APPOINTMENT_BALANCE', 'This appointment has no outstanding balance.');
+        }
+        totalOrderAmount += balance;
 
-      // Update appointment status to COMPLETED and balance to 0
-      await client.query(
-        `UPDATE bookings
-         SET balance_due_minor = 0,
-             status = 'COMPLETED',
-             updated_at = NOW()
-         WHERE id = $1`,
-        [appointmentBookingId]
-      );
-    }
+        await client.query(
+          `UPDATE bookings
+           SET balance_due_minor = 0, status = 'COMPLETED', updated_at = NOW()
+           WHERE id = $1 AND store_id = $2`,
+          [appointmentBookingId, storeId]
+        );
+      }
 
-    // 2. Process products in cart
-    const orderLines: any[] = [];
-    for (const item of items) {
-      const varRes = await client.query(
-        `SELECT v.id, v.sku, v.price_minor, p.name as product_name, p.id as product_id
-         FROM product_variants v
-         JOIN products p ON p.id = v.product_id
-         WHERE v.id = $1 AND p.store_id = $2`,
-        [item.variantId, storeId]
-      );
+      const orderLines: Array<{
+        id: string;
+        productId: string;
+        variantId: string;
+        sku: string;
+        title: string;
+        unitPriceMinor: number;
+        quantity: number;
+        totalMinor: number;
+      }> = [];
 
-      if (varRes.rowCount && varRes.rowCount > 0) {
-        const v = varRes.rows[0];
-        const qty = parseInt(item.quantity || 1, 10);
-        const lineTotal = v.price_minor * qty;
+      for (const item of items) {
+        const quantity = Number(item.quantity);
+        const variantRes = await client.query(
+          `SELECT v.id, v.sku, v.price_minor, p.name AS product_name,
+                  p.id AS product_id, p.status, ib.id AS inventory_balance_id,
+                  ib.available AS inventory_available, il.id AS inventory_location_id
+           FROM product_variants v
+           JOIN products p ON p.id = v.product_id
+           LEFT JOIN LATERAL (
+             SELECT id
+             FROM inventory_locations
+             WHERE store_id = $2
+             ORDER BY is_default DESC, created_at ASC
+             LIMIT 1
+           ) il ON TRUE
+           LEFT JOIN inventory_balances ib
+             ON ib.variant_id = v.id AND ib.location_id = il.id
+           WHERE v.id = $1 AND p.store_id = $2 AND v.is_active = TRUE
+           FOR UPDATE OF v`,
+          [item.variantId, storeId]
+        );
+        if (variantRes.rowCount === 0 || variantRes.rows[0].status !== 'ACTIVE') {
+          throw httpError(404, 'PRODUCT_VARIANT_NOT_AVAILABLE', 'One of the selected product variants is not active in this store.');
+        }
+
+        const variant = variantRes.rows[0];
+        const unitPriceMinor = Number(variant.price_minor);
+        if (!Number.isSafeInteger(unitPriceMinor) || unitPriceMinor < 0) {
+          throw httpError(409, 'INVALID_PRODUCT_PRICE', 'A selected product has an invalid price and cannot be sold.');
+        }
+
+        const lineTotal = unitPriceMinor * quantity;
+        if (!Number.isSafeInteger(lineTotal)) {
+          throw httpError(400, 'ORDER_TOTAL_OUT_OF_RANGE', 'The cart total exceeds the supported amount.');
+        }
+
+        if (variant.inventory_balance_id) {
+          const stockUpdate = await client.query(
+            `UPDATE inventory_balances
+             SET on_hand = on_hand - $1,
+                 available = available - $1,
+                 updated_at = NOW()
+             WHERE id = $2 AND available >= $1 AND on_hand >= $1`,
+            [quantity, variant.inventory_balance_id]
+          );
+          if (stockUpdate.rowCount === 0) {
+            throw httpError(409, 'INSUFFICIENT_STOCK', `Insufficient stock for "${variant.product_name}".`);
+          }
+          await client.query(
+            `INSERT INTO inventory_movements (
+               id, variant_id, location_id, movement_type, quantity,
+               reference_type, reference_id, note
+             ) VALUES ($1, $2, $3, 'SALE', $4, 'ORDER', $5, $6)`,
+            [`im-${uuidv4()}`, variant.id, variant.inventory_location_id, -quantity, orderId, `POS sale ${orderNumber}`]
+          );
+        }
+
         totalOrderAmount += lineTotal;
+        if (!Number.isSafeInteger(totalOrderAmount)) {
+          throw httpError(400, 'ORDER_TOTAL_OUT_OF_RANGE', 'The cart total exceeds the supported amount.');
+        }
 
         orderLines.push({
           id: `line-${uuidv4()}`,
-          orderId,
-          productId: v.product_id,
-          variantId: v.id,
-          sku: v.sku,
-          title: v.product_name,
-          unitPriceMinor: v.price_minor,
-          quantity: qty,
+          productId: variant.product_id,
+          variantId: variant.id,
+          sku: variant.sku,
+          title: variant.product_name,
+          unitPriceMinor,
+          quantity,
           totalMinor: lineTotal
         });
+      }
 
-        // Decrement inventory balance immediately
+      if (totalOrderAmount <= 0) {
+        throw httpError(400, 'INVALID_ORDER_TOTAL', 'The order total must be greater than zero.');
+      }
+
+      if (paymentMethod === 'CASH' && Number(cashTenderedMinor ?? 0) < totalOrderAmount) {
+        throw httpError(400, 'INSUFFICIENT_CASH_TENDERED', 'Cash received is less than the amount due.');
+      }
+
+      const storeRes = await client.query(`SELECT currency FROM stores WHERE id = $1`, [storeId]);
+      const currency = storeRes.rows[0]?.currency || 'INR';
+
+      await client.query(
+        `INSERT INTO orders (
+           id, store_id, order_number, channel, status, payment_status,
+           fulfillment_status, currency, total_minor, subtotal_minor
+         ) VALUES ($1, $2, $3, 'POS', 'COMPLETED', 'CAPTURED', 'FULFILLED', $4, $5, $5)`,
+        [orderId, storeId, orderNumber, currency, totalOrderAmount]
+      );
+
+      for (const line of orderLines) {
         await client.query(
-          `UPDATE inventory_balances
-           SET on_hand = GREATEST(0, on_hand - $1),
-               available = GREATEST(0, available - $1),
-               updated_at = NOW()
-           WHERE variant_id = $2`,
-          [qty, v.id]
+          `INSERT INTO order_lines (
+             id, order_id, product_id, variant_id, sku, title,
+             unit_price_minor, quantity, total_minor
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [line.id, orderId, line.productId, line.variantId, line.sku, line.title, line.unitPriceMinor, line.quantity, line.totalMinor]
         );
       }
-    }
 
-    // 3. Create POS Order record
-    await client.query(
-      `INSERT INTO orders (id, store_id, order_number, channel, status, payment_status, fulfillment_status, total_minor, subtotal_minor)
-       VALUES ($1, $2, $3, 'POS', 'COMPLETED', 'CAPTURED', 'FULFILLED', $4, $4)`,
-      [orderId, storeId, orderNumber, totalOrderAmount]
-    );
-
-    for (const line of orderLines) {
+      const intentId = `pi-${uuidv4()}`;
       await client.query(
-        `INSERT INTO order_lines (id, order_id, product_id, variant_id, sku, title, unit_price_minor, quantity, total_minor)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [line.id, line.orderId, line.productId, line.variantId, line.sku, line.title, line.unitPriceMinor, line.quantity, line.totalMinor]
+        `INSERT INTO payment_intents (id, store_id, purpose, reference_id, amount_minor, status, provider)
+         VALUES ($1, $2, 'ORDER', $3, $4, 'CAPTURED', $5)`,
+        [intentId, storeId, orderId, totalOrderAmount, `POS_MANUAL_${paymentMethod}`]
       );
-    }
-
-    // 4. Create Payment Intent & Transaction
-    const intentId = `pi-${uuidv4()}`;
-    await client.query(
-      `INSERT INTO payment_intents (id, store_id, purpose, reference_id, amount_minor, status, provider)
-       VALUES ($1, $2, 'ORDER', $3, $4, 'CAPTURED', $5)`,
-      [intentId, storeId, orderId, totalOrderAmount, paymentMethod]
-    );
-
-    await client.query(
-      `INSERT INTO payment_transactions (id, payment_intent_id, payment_method, amount_minor, status)
-       VALUES ($1, $2, $3, $4, 'CAPTURED')`,
-      [`tx-${uuidv4()}`, intentId, paymentMethod, totalOrderAmount]
-    );
-
-    // 5. If cash payment and active register session, record cash movement
-    if (paymentMethod === 'CASH' && sessionId) {
       await client.query(
-        `INSERT INTO cash_movements (id, register_session_id, movement_type, amount_minor, reason, created_by)
-         VALUES ($1, $2, 'SALE', $3, $4, $5)`,
-        [`cm-${uuidv4()}`, sessionId, totalOrderAmount, `POS Sale ${orderNumber}`, req.auth?.userId || 'cashier']
+        `INSERT INTO payment_transactions (id, payment_intent_id, payment_method, amount_minor, status)
+         VALUES ($1, $2, $3, $4, 'CAPTURED')`,
+        [`tx-${uuidv4()}`, intentId, paymentMethod, totalOrderAmount]
       );
-    }
-  });
 
-  const changeDueMinor = cashTenderedMinor ? Math.max(0, parseInt(cashTenderedMinor, 10) - totalOrderAmount) : 0;
+      if (paymentMethod === 'CASH') {
+        await client.query(
+          `INSERT INTO cash_movements (id, register_session_id, movement_type, amount_minor, reason, created_by)
+           VALUES ($1, $2, 'SALE', $3, $4, $5)`,
+          [`cm-${uuidv4()}`, sessionId, totalOrderAmount, `POS Sale ${orderNumber}`, req.auth?.userId || 'unknown']
+        );
+      }
+
+      await recordAudit({
+        organizationId: req.tenant?.organizationId,
+        storeId,
+        actorId: req.auth?.userId,
+        action: 'POS_CHECKOUT',
+        targetType: 'ORDER',
+        targetId: orderId,
+        changes: { orderNumber, totalOrderAmount, paymentMethod, itemCount: orderLines.length, appointmentBookingId: appointmentBookingId || null }
+      });
+    });
+  } catch (error: any) {
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.code, message: error.message });
+    throw error;
+  }
+
+  const cashReceived = paymentMethod === 'CASH' ? Number(cashTenderedMinor ?? totalOrderAmount) : totalOrderAmount;
+  const changeDueMinor = paymentMethod === 'CASH' ? Math.max(0, cashReceived - totalOrderAmount) : 0;
 
   res.status(201).json({
     message: 'POS sale completed successfully',
@@ -350,7 +503,7 @@ posRouter.post('/checkout', requireAuth, resolveTenant, handleIdempotency, async
       orderNumber,
       totalAmountMinor: totalOrderAmount,
       paymentMethod,
-      cashTenderedMinor: cashTenderedMinor || totalOrderAmount,
+      cashTenderedMinor: cashReceived,
       changeDueMinor
     }
   });
