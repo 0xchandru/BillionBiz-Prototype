@@ -25,6 +25,9 @@ interface AuthenticatedSocket extends WebSocket {
   organizationId?: string;
   storeId?: string;
   roles?: string[];
+  permissions?: Set<string>;
+  isPlatformAdmin?: boolean;
+  isOwner?: boolean;
   channels?: Set<string>;
 }
 
@@ -33,6 +36,9 @@ interface SseClient {
   res: Response;
   organizationId: string;
   storeId?: string;
+  permissions: Set<string>;
+  isPlatformAdmin: boolean;
+  isOwner: boolean;
   channels: Set<string>;
 }
 
@@ -45,72 +51,126 @@ class RealtimeGateway {
 
     this.wss.on('connection', (ws: AuthenticatedSocket, req) => {
       ws.isAlive = true;
-      ws.channels = new Set(['*']); // Subscribe to all tenant channels by default
+      ws.channels = new Set(['*']);
 
-      // Extract token from query or auth headers
-      const url = new URL(req.url || '', 'http://localhost');
-      const token = url.searchParams.get('token') || req.headers['authorization']?.replace('Bearer ', '');
+      void (async () => {
+        const url = new URL(req.url || '', 'http://localhost');
+        const token = url.searchParams.get('token') || req.headers['authorization']?.replace('Bearer ', '');
+        if (!token) {
+          ws.send(JSON.stringify({ type: 'error', message: 'AUTHENTICATION_REQUIRED' }));
+          ws.close(4001, 'Unauthorized');
+          return;
+        }
 
-      if (!token) {
-        ws.send(JSON.stringify({ type: 'error', message: 'AUTHENTICATION_REQUIRED' }));
-        ws.close(4001, 'Unauthorized');
-        return;
-      }
+        try {
+          const decoded = jwt.verify(token, JWT_SECRET) as any;
+          if (typeof decoded.userId !== 'string' ||
+              typeof decoded.organizationId !== 'string' ||
+              typeof decoded.storeId !== 'string') {
+            ws.send(JSON.stringify({ type: 'error', message: 'TENANT_CONTEXT_REQUIRED' }));
+            ws.close(4003, 'Forbidden');
+            return;
+          }
 
-      try {
-        const decoded = jwt.verify(token, JWT_SECRET) as any;
-        ws.userId = decoded.userId;
-        ws.organizationId = decoded.organizationId;
-        ws.storeId = decoded.storeId;
-        ws.roles = decoded.roles || [];
+          const identity = await query(
+            `SELECT u.is_platform_admin, om.role AS membership_role, s.organization_id AS store_organization_id
+             FROM users u
+             LEFT JOIN organization_memberships om
+               ON om.user_id = u.id AND om.organization_id = $2
+             LEFT JOIN stores s ON s.id = $3
+             WHERE u.id = $1
+             LIMIT 1`,
+            [decoded.userId, decoded.organizationId, decoded.storeId]
+          );
+          if (identity.rowCount === 0 ||
+              identity.rows[0].store_organization_id !== decoded.organizationId ||
+              (identity.rows[0].is_platform_admin !== true && !identity.rows[0].membership_role)) {
+            ws.send(JSON.stringify({ type: 'error', message: 'TENANT_ACCESS_DENIED' }));
+            ws.close(4003, 'Forbidden');
+            return;
+          }
 
-        ws.send(
-          JSON.stringify({
+          const isPlatformAdmin = identity.rows[0].is_platform_admin === true;
+          const isOwner = identity.rows[0].membership_role === 'OWNER';
+          let permissions = new Set<string>();
+          if (isPlatformAdmin || isOwner) {
+            permissions = new Set(['*']);
+          } else {
+            const permissionRows = await query(
+              `SELECT DISTINCT p.code
+               FROM role_assignments ra
+               JOIN staff_profiles sp ON sp.id = ra.staff_profile_id
+               JOIN roles r ON r.id = ra.role_id
+               JOIN role_permissions rp ON rp.role_id = ra.role_id
+               JOIN permissions p ON p.id = rp.permission_id
+               WHERE sp.user_id = $1 AND sp.organization_id = $2
+                 AND sp.store_id = $3 AND sp.is_active = TRUE
+                 AND (ra.store_id = $3 OR ra.store_id IS NULL)
+                 AND (r.organization_id IS NULL OR r.organization_id = $2)`,
+              [decoded.userId, decoded.organizationId, decoded.storeId]
+            );
+            permissions = new Set(permissionRows.rows.map((row) => row.code));
+          }
+
+          ws.userId = decoded.userId;
+          ws.organizationId = decoded.organizationId;
+          ws.storeId = decoded.storeId;
+          ws.roles = decoded.roles || [];
+          ws.permissions = permissions;
+          ws.isPlatformAdmin = isPlatformAdmin;
+          ws.isOwner = isOwner;
+
+          ws.send(JSON.stringify({
             type: 'connection_established',
             userId: ws.userId,
             organizationId: ws.organizationId,
             storeId: ws.storeId,
             timestamp: new Date().toISOString()
-          })
-        );
-      } catch (err: any) {
-        ws.send(JSON.stringify({ type: 'error', message: 'INVALID_TOKEN' }));
-        ws.close(4003, 'Forbidden');
-        return;
-      }
+          }));
 
-      ws.on('pong', () => {
-        ws.isAlive = true;
-      });
-
-      ws.on('message', async (data) => {
-        try {
-          const msg = JSON.parse(data.toString());
-
-          if (msg.action === 'ping') {
-            ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
-          } else if (msg.action === 'subscribe') {
-            if (Array.isArray(msg.channels)) {
-              ws.channels = new Set(msg.channels);
-              ws.send(JSON.stringify({ type: 'subscribed', channels: Array.from(ws.channels) }));
+          ws.on('pong', () => { ws.isAlive = true; });
+          ws.on('message', async (data) => {
+            try {
+              const msg = JSON.parse(data.toString());
+              if (msg.action === 'ping') {
+                ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
+              } else if (msg.action === 'subscribe') {
+                if (!Array.isArray(msg.channels) || msg.channels.length > 50 ||
+                    msg.channels.some((channel: unknown) => typeof channel !== 'string' || !/^[a-z0-9._*-]{1,64}$/i.test(channel))) {
+                  ws.send(JSON.stringify({ type: 'error', message: 'INVALID_CHANNEL_SUBSCRIPTION' }));
+                  return;
+                }
+                ws.channels = new Set(msg.channels);
+                ws.send(JSON.stringify({ type: 'subscribed', channels: Array.from(ws.channels) }));
+              } else if (msg.action === 'catchup') {
+                const cursor = typeof msg.cursor === 'string'
+                  ? msg.cursor
+                  : new Date(Date.now() - 3600 * 1000).toISOString();
+                const events = (await this.fetchHistoricalEvents(ws.organizationId!, ws.storeId, cursor))
+                  .filter((event) => this.canReceiveEvent(
+                    ws.permissions || new Set(),
+                    ws.isOwner === true,
+                    ws.isPlatformAdmin === true,
+                    event
+                  ));
+                ws.send(JSON.stringify({
+                  type: 'catchup_completed',
+                  cursor,
+                  count: events.length,
+                  events
+                }));
+              } else {
+                ws.send(JSON.stringify({ type: 'error', message: 'UNKNOWN_ACTION' }));
+              }
+            } catch {
+              ws.send(JSON.stringify({ type: 'error', message: 'MALFORMED_MESSAGE' }));
             }
-          } else if (msg.action === 'catchup') {
-            // Replay missed events from outbox based on cursor
-            const cursor = msg.cursor || new Date(Date.now() - 3600 * 1000).toISOString();
-            const events = await this.fetchHistoricalEvents(ws.organizationId!, ws.storeId, cursor);
-            ws.send(
-              JSON.stringify({
-                type: 'catchup_completed',
-                cursor,
-                count: events.length,
-                events
-              })
-            );
-          }
-        } catch (err) {
-          ws.send(JSON.stringify({ type: 'error', message: 'MALFORMED_MESSAGE' }));
+          });
+        } catch {
+          ws.send(JSON.stringify({ type: 'error', message: 'INVALID_TOKEN' }));
+          ws.close(4003, 'Forbidden');
         }
-      });
+      })();
     });
 
     // Heartbeat ping interval
@@ -133,12 +193,24 @@ class RealtimeGateway {
     console.log('[Realtime Gateway] WebSocket server attached to /realtime');
   }
 
-  public registerSseClient(id: string, res: Response, organizationId: string, storeId?: string, channels?: string[]) {
+  public registerSseClient(
+    id: string,
+    res: Response,
+    organizationId: string,
+    storeId: string | undefined,
+    channels: string[] | undefined,
+    permissions: string[],
+    isPlatformAdmin: boolean,
+    isOwner: boolean
+  ) {
     const client: SseClient = {
       id,
       res,
       organizationId,
       storeId,
+      permissions: new Set(permissions),
+      isPlatformAdmin,
+      isOwner,
       channels: new Set(channels || ['*'])
     };
     this.sseClients.set(id, client);
@@ -157,9 +229,29 @@ class RealtimeGateway {
     });
   }
 
+  public canReceiveEvent(
+    permissions: Set<string>,
+    isOwner: boolean,
+    isPlatformAdmin: boolean,
+    event: { channel?: string; storeId?: string }
+  ): boolean {
+    if (isOwner || isPlatformAdmin || permissions.has('*')) return true;
+    const channel = String(event.channel || '').toLowerCase();
+    const required =
+      channel.startsWith('order') ? ['orders.view'] :
+      channel.startsWith('booking') || channel.startsWith('appointment') ? ['appointments.view'] :
+      channel.startsWith('pos') ? ['pos.access'] :
+      channel.startsWith('inventory') ? ['inventory.view', 'catalog.view'] :
+      channel.startsWith('catalog') || channel.startsWith('product') ? ['catalog.view'] :
+      channel.startsWith('team') || channel.startsWith('staff') ? ['team.view'] :
+      channel.startsWith('storefront') || channel.startsWith('page') ? ['store.editor.view'] :
+      ['org.view'];
+    return required.some((permission) => permissions.has(permission) || permissions.has('org.manage'));
+  }
+
   public async fetchHistoricalEvents(organizationId: string, storeId?: string, cursor?: string) {
     let sql = `
-      SELECT id, event_type, aggregate_type, aggregate_id, payload, created_at
+      SELECT id, organization_id, store_id, event_type, aggregate_type, aggregate_id, payload, created_at
       FROM outbox_events
       WHERE organization_id = $1
     `;
@@ -171,20 +263,33 @@ class RealtimeGateway {
     }
 
     if (cursor) {
-      params.push(cursor);
-      sql += ` AND created_at > $${params.length}`;
+      const separator = cursor.lastIndexOf('|');
+      const cursorTimestamp = separator > 0 ? cursor.slice(0, separator) : cursor;
+      const cursorId = separator > 0 ? cursor.slice(separator + 1) : '';
+      const parsed = new Date(cursorTimestamp);
+      if (Number.isFinite(parsed.getTime())) {
+        params.push(parsed.toISOString());
+        if (cursorId) {
+          params.push(cursorId);
+          sql += ` AND (created_at > $${params.length - 1}::timestamptz OR (created_at = $${params.length - 1}::timestamptz AND id > $${params.length}))`;
+        } else {
+          sql += ` AND created_at >= $${params.length}::timestamptz`;
+        }
+      }
     }
 
-    sql += ` ORDER BY created_at ASC LIMIT 100`;
-
-    const res = await query(sql, params);
-    return res.rows.map((r: any) => ({
-      id: r.id,
-      type: r.event_type,
-      aggregateType: r.aggregate_type,
-      aggregateId: r.aggregate_id,
-      payload: r.payload,
-      timestamp: r.created_at
+    sql += ` ORDER BY created_at ASC, id ASC LIMIT 500`;
+    const result = await query(sql, params);
+    return result.rows.map((row: any) => ({
+      id: row.id,
+      type: row.event_type,
+      channel: String(row.aggregate_type || 'system').toLowerCase(),
+      organizationId: row.organization_id,
+      storeId: row.store_id || undefined,
+      aggregateType: row.aggregate_type,
+      aggregateId: row.aggregate_id,
+      payload: row.payload,
+      timestamp: new Date(row.created_at).toISOString()
     }));
   }
 
@@ -203,10 +308,13 @@ class RealtimeGateway {
           authSocket.readyState === WebSocket.OPEN &&
           authSocket.organizationId === event.organizationId
         ) {
-          // If store specified, check store match or if socket has platform scope
-          if (event.storeId && authSocket.storeId && authSocket.storeId !== event.storeId) {
-            return;
-          }
+          if (event.storeId && authSocket.storeId !== event.storeId) return;
+          if (!this.canReceiveEvent(
+            authSocket.permissions || new Set(),
+            authSocket.isOwner === true,
+            authSocket.isPlatformAdmin === true,
+            event
+          )) return;
           if (
             authSocket.channels?.has('*') ||
             authSocket.channels?.has(event.channel) ||
@@ -221,9 +329,8 @@ class RealtimeGateway {
     // 2. SSE broadcast
     for (const [, client] of this.sseClients) {
       if (client.organizationId === event.organizationId) {
-        if (event.storeId && client.storeId && client.storeId !== event.storeId) {
-          continue;
-        }
+        if (event.storeId && client.storeId !== event.storeId) continue;
+        if (!this.canReceiveEvent(client.permissions, client.isOwner, client.isPlatformAdmin, event)) continue;
         if (
           client.channels.has('*') ||
           client.channels.has(event.channel) ||
@@ -254,18 +361,26 @@ realtimeRouter.get('/stream', requireAuth, resolveTenant, (req: Request, res: Re
     res,
     req.tenant!.organizationId,
     req.tenant!.storeId,
-    channels
+    channels,
+    req.auth?.permissions || [],
+    req.auth?.isPlatformAdmin === true,
+    req.auth?.role === 'OWNER'
   );
 });
 
 // GET /api/v1/realtime/catchup (Cursor-based event recovery)
 realtimeRouter.get('/catchup', requireAuth, resolveTenant, async (req: Request, res: Response) => {
   const cursor = (req.query.cursor as string) || new Date(Date.now() - 3600 * 1000).toISOString();
-  const events = await realtimeGateway.fetchHistoricalEvents(
+  const events = (await realtimeGateway.fetchHistoricalEvents(
     req.tenant!.organizationId,
     req.tenant!.storeId,
     cursor
-  );
+  )).filter((event) => realtimeGateway.canReceiveEvent(
+    new Set(req.auth?.permissions || []),
+    req.auth?.role === 'OWNER',
+    req.auth?.isPlatformAdmin === true,
+    event
+  ));
   res.json({
     cursor,
     count: events.length,
