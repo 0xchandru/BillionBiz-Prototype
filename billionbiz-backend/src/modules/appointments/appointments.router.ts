@@ -1181,44 +1181,218 @@ appointmentsRouter.patch(
   '/bookings/:id/status',
   requireAuth,
   resolveTenant,
+  requireCapability('appointments'),
   requirePermission('appointments.manage'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
+    const organizationId = req.tenant!.organizationId;
     const bookingId = req.params.id as string;
-    const { status, startTime, endTime } = req.body;
-
-    const bkg = await query(`SELECT * FROM bookings WHERE id = $1 AND store_id = $2`, [bookingId, storeId]);
-    if (bkg.rowCount === 0) {
-      return res.status(404).json({ error: 'NOT_FOUND', message: 'Booking not found' });
+    const { status, startTime, endTime } = req.body || {};
+    const allowedStatuses = new Set(['PENDING', 'CONFIRMED', 'CHECKED_IN', 'COMPLETED', 'CANCELLED', 'NO_SHOW']);
+    if (status !== undefined && (typeof status !== 'string' || !allowedStatuses.has(status))) {
+      return res.status(400).json({ error: 'INVALID_BOOKING_STATUS', message: 'The requested booking status is not supported.' });
+    }
+    if ((startTime === undefined) !== (endTime === undefined)) {
+      return res.status(400).json({ error: 'INVALID_RESCHEDULE', message: 'Both a start time and an end time are required to reschedule.' });
+    }
+    const requestedStart = startTime === undefined ? null : new Date(startTime);
+    const requestedEnd = endTime === undefined ? null : new Date(endTime);
+    if (requestedStart && requestedEnd &&
+        (!Number.isFinite(requestedStart.getTime()) || !Number.isFinite(requestedEnd.getTime()) ||
+         requestedEnd.getTime() <= requestedStart.getTime() ||
+         requestedEnd.getTime() - requestedStart.getTime() > 24 * 60 * 60 * 1000)) {
+      return res.status(400).json({ error: 'INVALID_RESCHEDULE', message: 'A valid future start/end time range is required.' });
     }
 
-    if (startTime && endTime) {
-      // Rescheduling check
-      const conflict = await query(
-        `SELECT id FROM bookings
-         WHERE id != $1 AND resource_id = $2 AND status NOT IN ('CANCELLED')
-           AND start_time < $4 AND end_time > $3`,
-        [bookingId, bkg.rows[0].resource_id, startTime, endTime]
-      );
-      if (conflict.rowCount && conflict.rowCount > 0) {
-        return res.status(409).json({ error: 'SLOT_UNAVAILABLE', message: 'Rescheduled time slot is already taken' });
-      }
+    let notFound = false;
+    try {
+      await withTransaction(async (client) => {
+        const bookingRes = await client.query(
+          `SELECT * FROM bookings WHERE id = $1 AND store_id = $2 FOR UPDATE`,
+          [bookingId, storeId]
+        );
+        if (bookingRes.rowCount === 0) {
+          notFound = true;
+          return;
+        }
+        const booking = bookingRes.rows[0];
 
-      await query(
-        `UPDATE bookings
-         SET start_time = $1, end_time = $2, status = COALESCE($3, status), updated_at = NOW()
-         WHERE id = $4 AND store_id = $5`,
-        [startTime, endTime, status, bookingId, storeId]
-      );
-    } else {
-      await query(
-        `UPDATE bookings
-         SET status = $1, updated_at = NOW()
-         WHERE id = $2 AND store_id = $3`,
-        [status, bookingId, storeId]
-      );
+        const transitions: Record<string, string[]> = {
+          PENDING: ['CONFIRMED', 'CANCELLED', 'NO_SHOW'],
+          CONFIRMED: ['CHECKED_IN', 'CANCELLED', 'NO_SHOW'],
+          CHECKED_IN: ['COMPLETED', 'CANCELLED', 'NO_SHOW'],
+          COMPLETED: [],
+          CANCELLED: [],
+          NO_SHOW: []
+        };
+        if (status && status !== booking.status && !(transitions[booking.status] || []).includes(status)) {
+          throw Object.assign(new Error(`Cannot change an appointment from ${booking.status} to ${status}.`), {
+            statusCode: 409,
+            code: 'INVALID_STATUS_TRANSITION'
+          });
+        }
+
+        let nextStart = new Date(booking.start_time);
+        let nextEnd = new Date(booking.end_time);
+        if (requestedStart && requestedEnd) {
+          if (['CANCELLED', 'COMPLETED', 'NO_SHOW'].includes(booking.status)) {
+            throw Object.assign(new Error('A cancelled, completed or no-show appointment cannot be rescheduled.'), {
+              statusCode: 409,
+              code: 'BOOKING_NOT_RESCHEDULABLE'
+            });
+          }
+
+          const resourceRes = await client.query(
+            `SELECT r.id, r.staff_profile_id, o.duration_minutes,
+                    o.buffer_before_minutes, o.buffer_after_minutes
+             FROM resources r
+             JOIN offerings o ON o.id = $1 AND o.store_id = $2 AND o.is_active = TRUE
+             JOIN offering_resources o_r ON o_r.offering_id = o.id AND o_r.resource_id = r.id
+             JOIN staff_profiles sp ON sp.id = r.staff_profile_id
+             WHERE r.id = $3 AND r.store_id = $2 AND r.is_active = TRUE
+               AND sp.store_id = $2 AND sp.is_active = TRUE
+             FOR UPDATE OF r`,
+            [booking.offering_id, storeId, booking.resource_id]
+          );
+          if (resourceRes.rowCount === 0) {
+            throw Object.assign(new Error('The assigned staff resource is no longer active for this service.'), {
+              statusCode: 409,
+              code: 'RESOURCE_NOT_AVAILABLE'
+            });
+          }
+
+          const resource = resourceRes.rows[0];
+          const [settingsRes, storeRes] = await Promise.all([
+            client.query('SELECT * FROM store_booking_settings WHERE store_id = $1', [storeId]),
+            client.query('SELECT timezone FROM stores WHERE id = $1', [storeId])
+          ]);
+          const settings = settingsRes.rows[0] || {};
+          const timeZone = settings.timezone || storeRes.rows[0]?.timezone || 'Asia/Kolkata';
+          if (!isValidTimeZone(timeZone)) {
+            throw Object.assign(new Error('The store booking timezone is invalid.'), { statusCode: 500, code: 'INVALID_STORE_TIMEZONE' });
+          }
+
+          const duration = Number(resource.duration_minutes || 30);
+          if (requestedEnd.getTime() - requestedStart.getTime() !== duration * 60000 || requestedStart.getTime() <= Date.now()) {
+            throw Object.assign(new Error('The new time must be in the future and match the service duration.'), {
+              statusCode: 400,
+              code: 'INVALID_RESCHEDULE_DURATION'
+            });
+          }
+
+          const localStart = localDateAndMinutes(requestedStart, timeZone);
+          const localEnd = localDateAndMinutes(requestedEnd, timeZone);
+          if (localStart.date !== localEnd.date) {
+            throw Object.assign(new Error('Appointments cannot cross the store local day boundary.'), {
+              statusCode: 400,
+              code: 'CROSS_DAY_BOOKING_NOT_SUPPORTED'
+            });
+          }
+
+          const minimumNotice = Number(settings.min_notice_hours ?? 2);
+          const maxAdvance = Number(settings.max_advance_days ?? 60);
+          if (requestedStart.getTime() < Date.now() + minimumNotice * 3600000) {
+            throw Object.assign(new Error('The minimum advance-notice period has not been met.'), {
+              statusCode: 409,
+              code: 'MINIMUM_NOTICE_NOT_MET'
+            });
+          }
+          const localToday = localDateAndMinutes(new Date(), timeZone).date;
+          const maxDate = new Date(localToday + 'T12:00:00Z');
+          maxDate.setUTCDate(maxDate.getUTCDate() + maxAdvance);
+          const maxLocalDate = [maxDate.getUTCFullYear(), String(maxDate.getUTCMonth() + 1).padStart(2, '0'), String(maxDate.getUTCDate()).padStart(2, '0')].join('-');
+          if (localStart.date < localToday || localStart.date > maxLocalDate) {
+            throw Object.assign(new Error('The selected date is outside the store advance-booking window.'), {
+              statusCode: 409,
+              code: 'MAXIMUM_ADVANCE_EXCEEDED'
+            });
+          }
+
+          const shiftRes = await client.query(
+            `SELECT 1 FROM staff_shifts
+             WHERE staff_profile_id = $1 AND day_of_week = $2 AND is_active = TRUE
+               AND start_time <= $3::time AND end_time >= $4::time
+             LIMIT 1`,
+            [
+              resource.staff_profile_id,
+              localStart.dayOfWeek,
+              String(Math.floor(localStart.minuteOfDay / 60)).padStart(2, '0') + ':' + String(localStart.minuteOfDay % 60).padStart(2, '0'),
+              String(Math.floor(localEnd.minuteOfDay / 60)).padStart(2, '0') + ':' + String(localEnd.minuteOfDay % 60).padStart(2, '0')
+            ]
+          );
+          if (shiftRes.rowCount === 0) {
+            throw Object.assign(new Error('The assigned staff member is not scheduled for the requested time.'), {
+              statusCode: 409,
+              code: 'STAFF_OUTSIDE_WORKING_HOURS'
+            });
+          }
+
+          const globalBuffer = Number(settings.buffer_minutes ?? 0);
+          const conflictStart = new Date(requestedStart.getTime() - (Number(resource.buffer_before_minutes || 0) + globalBuffer) * 60000);
+          const conflictEnd = new Date(requestedEnd.getTime() + (Number(resource.buffer_after_minutes || 0) + globalBuffer) * 60000);
+          const [bookingConflict, holdConflict, timeOffConflict] = await Promise.all([
+            client.query(
+              `SELECT 1 FROM bookings
+               WHERE store_id = $1 AND resource_id = $2 AND id <> $3
+                 AND status NOT IN ('CANCELLED', 'NO_SHOW')
+                 AND start_time < $5 AND end_time > $4 LIMIT 1`,
+              [storeId, booking.resource_id, bookingId, conflictStart.toISOString(), conflictEnd.toISOString()]
+            ),
+            client.query(
+              `SELECT 1 FROM booking_holds
+               WHERE store_id = $1 AND resource_id = $2 AND expires_at > NOW()
+                 AND start_time < $4 AND end_time > $3 LIMIT 1`,
+              [storeId, booking.resource_id, conflictStart.toISOString(), conflictEnd.toISOString()]
+            ),
+            client.query(
+              `SELECT 1 FROM time_off
+               WHERE staff_profile_id = $1 AND start_time < $3 AND end_time > $2 LIMIT 1`,
+              [resource.staff_profile_id, conflictStart.toISOString(), conflictEnd.toISOString()]
+            )
+          ]);
+          if ((bookingConflict.rowCount ?? 0) > 0 || (holdConflict.rowCount ?? 0) > 0 || (timeOffConflict.rowCount ?? 0) > 0) {
+            throw Object.assign(new Error('This resource is not available for the requested time.'), {
+              statusCode: 409,
+              code: 'SLOT_UNAVAILABLE'
+            });
+          }
+          nextStart = requestedStart;
+          nextEnd = requestedEnd;
+        }
+
+        if (!status && !requestedStart) {
+          throw Object.assign(new Error('Provide a booking status or a new time range.'), {
+            statusCode: 400,
+            code: 'NO_BOOKING_CHANGE'
+          });
+        }
+
+        const nextStatus = status || booking.status;
+        await client.query(
+          `UPDATE bookings
+           SET start_time = $1, end_time = $2, status = $3, updated_at = NOW()
+           WHERE id = $4 AND store_id = $5`,
+          [nextStart.toISOString(), nextEnd.toISOString(), nextStatus, bookingId, storeId]
+        );
+
+        await recordAudit({
+          organizationId,
+          storeId,
+          actorId: req.auth?.userId,
+          action: requestedStart ? 'RESCHEDULE_BOOKING' : 'UPDATE_BOOKING_STATUS',
+          targetType: 'BOOKING',
+          targetId: bookingId,
+          changes: { previousStatus: booking.status, status: nextStatus, startTime: nextStart.toISOString(), endTime: nextEnd.toISOString() }
+        });
+      });
+    } catch (error: any) {
+      if (error.statusCode) return res.status(error.statusCode).json({ error: error.code, message: error.message });
+      throw error;
     }
 
-    res.json({ message: `Booking status updated to ${status}` });
+    if (notFound) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Booking was not found in this store.' });
+    }
+    res.json({ message: 'Appointment updated successfully.' });
   }
 );
