@@ -727,7 +727,7 @@ export const AppointmentsPage: React.FC = () => {
                   </div>
                 ) : (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: '8px', maxHeight: '160px', overflowY: 'auto' }}>
-                    {availableSlots.map((s, idx) => {
+                    {availableSlots.map((s) => {
                       const isSelected = selectedSlot?.startTime === s.startTime && selectedSlot?.resourceId === s.resourceId;
                       return (
                         <button
