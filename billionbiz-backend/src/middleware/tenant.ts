@@ -206,7 +206,7 @@ export async function resolveTenant(req: Request, res: Response, next: NextFunct
 
     if (auth && !isPlatformAdmin) {
       const membership = await query(
-        `SELECT 1
+        `SELECT role
          FROM organization_memberships
          WHERE organization_id = $1 AND user_id = $2
          LIMIT 1`,
@@ -217,6 +217,34 @@ export async function resolveTenant(req: Request, res: Response, next: NextFunct
           error: 'MEMBERSHIP_ACCESS_DENIED',
           message: 'User does not hold membership in the specified organization'
         });
+      }
+
+      // Resolve the membership role and staff permissions only after the
+      // authoritative tenant/store has been selected. JWT store claims may be
+      // absent or stale, so they are never the final RBAC scope.
+      auth.organizationId = organizationId;
+      auth.storeId = storeId;
+      auth.role = membership.rows[0].role || 'MEMBER';
+
+      if (auth.role !== 'OWNER') {
+        const permissions = await query(
+          `SELECT DISTINCT p.code
+           FROM staff_profiles sp
+           JOIN role_assignments ra ON ra.staff_profile_id = sp.id
+           JOIN roles r ON r.id = ra.role_id
+           JOIN role_permissions rp ON rp.role_id = ra.role_id
+           JOIN permissions p ON p.id = rp.permission_id
+           WHERE sp.user_id = $1
+             AND sp.organization_id = $2
+             AND sp.store_id = $3
+             AND sp.is_active = TRUE
+             AND (ra.store_id = $3 OR ra.store_id IS NULL)
+             AND (r.organization_id IS NULL OR r.organization_id = $2)`,
+          [auth.userId, organizationId, storeId]
+        );
+        auth.permissions = permissions.rows.map((row) => row.code);
+      } else {
+        auth.permissions = [];
       }
     }
 
