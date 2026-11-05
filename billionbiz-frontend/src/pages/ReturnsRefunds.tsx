@@ -16,88 +16,117 @@ export const ReturnsRefundsPage: FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   // Form State
   const [formOrderNumber, setFormOrderNumber] = useState('');
-  const [formCustomerName, setFormCustomerName] = useState('');
   const [formReason, setFormReason] = useState('DAMAGED_ITEM');
   const [formAmount, setFormAmount] = useState('');
 
-  const fetchReturns = () => {
+  const fetchReturns = async () => {
     setLoading(true);
-    api.getReturns()
-      .then((res) => {
-        setReturnsList(res.returns || []);
-      })
-      .catch((err) => {
-        console.error('Failed to load returns', err);
-      })
-      .finally(() => {
-        setLoading(false);
-      });
+    setLoadError(null);
+    try {
+      const res = await api.getReturns();
+      setReturnsList(res.returns || []);
+    } catch (err: any) {
+      setLoadError(err.message || 'Return requests could not be loaded.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    fetchReturns();
+    void fetchReturns();
   }, []);
 
   const handleApproveReturn = async (id: string) => {
+    setActionError(null);
+    setNotice(null);
     try {
       await api.approveReturn(id);
-      fetchReturns();
+      setNotice('Return request approved. No payment has been sent.');
+      await fetchReturns();
     } catch (err: any) {
-      alert(err.message || 'Failed to approve return');
+      setActionError(err.message || 'Failed to approve return.');
     }
   };
 
   const handleRejectReturn = async (id: string) => {
     const reason = window.prompt('Please specify the reason for return rejection:');
-    if (!reason) return;
+    if (!reason?.trim()) return;
+    setActionError(null);
+    setNotice(null);
     try {
-      await api.rejectReturn(id, reason);
-      fetchReturns();
+      await api.rejectReturn(id, reason.trim());
+      setNotice('Return request rejected.');
+      await fetchReturns();
     } catch (err: any) {
-      alert(err.message || 'Failed to reject return');
+      setActionError(err.message || 'Failed to reject return.');
     }
   };
 
-  const handleProcessRefund = async (id: string) => {
-    if (!window.confirm('Confirm settlement of payment refund to original source?')) return;
-    try {
-      await api.refundReturn(id);
-      fetchReturns();
-    } catch (err: any) {
-      alert(err.message || 'Failed to process refund');
-    }
-  };
-
-  const handleCreateReturn = (e: FormEvent) => {
+  const handleCreateReturn = async (e: FormEvent) => {
     e.preventDefault();
-    if (!formOrderNumber.trim() || !formAmount.trim()) {
-      alert('Order number and refund amount are required.');
+    const orderNumber = formOrderNumber.trim().toUpperCase();
+    const amount = Number(formAmount);
+    const amountMinor = Math.round(amount * 100);
+
+    if (!orderNumber) {
+      setActionError('Enter an order number.');
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0 || !Number.isSafeInteger(amountMinor)) {
+      setActionError('Enter a valid refund request amount greater than zero.');
       return;
     }
 
     setIsSubmitting(true);
-    const newReturn = {
-      id: `ret-${Date.now()}`,
-      order_number: formOrderNumber.trim().toUpperCase(),
-      customer_name: formCustomerName.trim() || 'Valued Customer',
-      reason: formReason,
-      refund_amount_minor: Math.round(parseFloat(formAmount) * 100),
-      status: 'PENDING',
-      created_at: new Date().toISOString()
-    };
+    setActionError(null);
+    setNotice(null);
+    try {
+      const orderResult = await api.getOrders({ search: orderNumber });
+      const order = (orderResult.orders || []).find(
+        (item: any) => String(item.order_number || '').toUpperCase() === orderNumber
+      );
+      if (!order) {
+        throw new Error('Order number was not found in this store. Check the number and try again.');
+      }
+      if (amountMinor > Number(order.total_minor)) {
+        throw new Error('Requested refund cannot exceed the order total.');
+      }
 
-    setTimeout(() => {
-      setReturnsList((prev) => [newReturn, ...prev]);
-      setIsSubmitting(false);
+      const idempotencyKey = typeof window !== 'undefined' && window.crypto?.randomUUID
+        ? window.crypto.randomUUID()
+        : `return-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const result = await api.createReturn({
+        orderId: order.id,
+        reason: formReason,
+        refundAmountMinor: amountMinor,
+        items: [],
+        restockDisposition: 'RESTOCK'
+      }, idempotencyKey);
+
       setShowAddModal(false);
       setFormOrderNumber('');
-      setFormCustomerName('');
       setFormAmount('');
-    }, 300);
+      setFormReason('DAMAGED_ITEM');
+      setActiveTab('pending');
+      setNotice(`Return request ${result.returnNumber} was saved for order ${order.order_number}. It is awaiting review; no refund has been processed.`);
+      await fetchReturns();
+    } catch (err: any) {
+      setActionError(err.message || 'The return request could not be saved.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
+
+  const isPendingReturn = (status: string | undefined) =>
+    status === 'REQUESTED' || status === 'PENDING' || !status;
+  const isRefundSettled = (item: any) =>
+    item.status === 'REFUNDED' || (item.status === 'COMPLETED' && item.refund_status === 'PROCESSED');
 
   const filteredReturns = returnsList.filter((r) => {
     const matchesSearch =
@@ -106,16 +135,16 @@ export const ReturnsRefundsPage: FC = () => {
       r.reason?.toLowerCase().includes(searchQuery.toLowerCase());
     if (!matchesSearch) return false;
 
-    if (activeTab === 'pending') return r.status === 'PENDING' || !r.status;
+    if (activeTab === 'pending') return isPendingReturn(r.status);
     if (activeTab === 'approved') return r.status === 'APPROVED';
-    if (activeTab === 'refunded') return r.status === 'REFUNDED';
+    if (activeTab === 'refunded') return isRefundSettled(r);
     if (activeTab === 'rejected') return r.status === 'REJECTED';
     return true;
   });
 
-  const countPending = returnsList.filter((r) => r.status === 'PENDING' || !r.status).length;
+  const countPending = returnsList.filter((r) => isPendingReturn(r.status)).length;
   const countApproved = returnsList.filter((r) => r.status === 'APPROVED').length;
-  const countRefunded = returnsList.filter((r) => r.status === 'REFUNDED').length;
+  const countRefunded = returnsList.filter((r) => isRefundSettled(r)).length;
   const countRejected = returnsList.filter((r) => r.status === 'REJECTED').length;
 
   return (
@@ -128,12 +157,12 @@ export const ReturnsRefundsPage: FC = () => {
             Returns & Customer Refunds
           </h1>
           <p style={{ fontSize: '14px', color: '#64748b', margin: 0 }}>
-            Inspect return requests, authorize replacements, and process monetary refunds.
+            Review and approve requests. Refund settlement is recorded only after the original payment provider confirms it.
           </p>
         </div>
 
         <button
-          onClick={() => setShowAddModal(true)}
+          onClick={() => { setActionError(null); setNotice(null); setShowAddModal(true); }}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -153,6 +182,9 @@ export const ReturnsRefundsPage: FC = () => {
           New Return Request
         </button>
       </div>
+
+      {notice && <div role="status" style={{ marginBottom: '16px', padding: '12px 14px', border: '1px solid #bfdbfe', borderRadius: '9px', background: '#eff6ff', color: '#1e40af', fontSize: '13px' }}>{notice}</div>}
+      {actionError && !showAddModal && <div role="alert" style={{ marginBottom: '16px', padding: '12px 14px', border: '1px solid #fecaca', borderRadius: '9px', background: '#fef2f2', color: '#b91c1c', fontSize: '13px' }}>{actionError}</div>}
 
       {/* Metric Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
@@ -265,6 +297,11 @@ export const ReturnsRefundsPage: FC = () => {
         <div style={{ background: '#ffffff', padding: '24px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
           <TableSkeleton rows={4} columns={6} />
         </div>
+      ) : loadError ? (
+        <div role="alert" style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: '12px', padding: '24px', color: '#991b1b' }}>
+          <p style={{ margin: '0 0 12px', fontSize: '13px' }}>{loadError}</p>
+          <button type="button" onClick={() => void fetchReturns()} style={{ minHeight: '40px', padding: '0 14px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>Retry</button>
+        </div>
       ) : filteredReturns.length === 0 ? (
         <EmptyState
           icon={RotateCcw}
@@ -275,7 +312,7 @@ export const ReturnsRefundsPage: FC = () => {
               : 'Customer returns, RMA replacements, and refund claims will be organized here.'
           }
           actionLabel="Record Return Request"
-          onAction={() => setShowAddModal(true)}
+          onAction={() => { setActionError(null); setNotice(null); setShowAddModal(true); }}
         />
       ) : (
         <div style={{ background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
@@ -335,7 +372,7 @@ export const ReturnsRefundsPage: FC = () => {
                   </td>
                   <td style={{ padding: '14px 18px', textAlign: 'right' }}>
                     <div style={{ display: 'inline-flex', gap: '8px' }}>
-                      {(ret.status === 'PENDING' || !ret.status) && (
+                      {isPendingReturn(ret.status) && (
                         <>
                           <button
                             onClick={() => handleApproveReturn(ret.id)}
@@ -386,8 +423,11 @@ export const ReturnsRefundsPage: FC = () => {
                           Process Refund
                         </button>
                       )}
-                      {ret.status === 'REFUNDED' && (
-                        <span style={{ fontSize: '12px', color: '#15803d', fontWeight: 600 }}>Refund Settled</span>
+                      {isRefundSettled(ret) && (
+                        <span style={{ fontSize: '12px', color: '#15803d', fontWeight: 600 }}>Provider confirmed</span>
+                      )}
+                      {ret.status === 'APPROVED' && (
+                        <span title="No refund API is connected to the payment provider" style={{ fontSize: '11px', color: '#92400e', fontWeight: 600 }}>Refund integration unavailable</span>
                       )}
                     </div>
                   </td>
@@ -398,122 +438,56 @@ export const ReturnsRefundsPage: FC = () => {
         </div>
       )}
 
-      {/* Add Return Modal */}
+      {/* Create Return Modal */}
       {showAddModal && (
         <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.5)',
-            backdropFilter: 'blur(3px)',
-            zIndex: 1000,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '20px'
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !isSubmitting) setShowAddModal(false);
           }}
+          style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(15, 23, 42, 0.56)', backdropFilter: 'blur(3px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}
         >
-          <div
-            style={{
-              backgroundColor: '#ffffff',
-              borderRadius: '16px',
-              maxWidth: '500px',
-              width: '100%',
-              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
-              overflow: 'hidden'
-            }}
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="return-modal-title"
+            style={{ backgroundColor: '#ffffff', borderRadius: '16px', maxWidth: '520px', width: '100%', maxHeight: 'calc(100dvh - 32px)', overflowY: 'auto', boxShadow: '0 24px 70px rgba(15, 23, 42, 0.24)' }}
           >
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>
-                Record Customer Return
-              </h2>
-              <button
-                onClick={() => setShowAddModal(false)}
-                style={{ background: 'none', border: 'none', fontSize: '20px', color: '#94a3b8', cursor: 'pointer' }}
-              >
-                ✕
-              </button>
+            <div style={{ padding: '20px 22px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+              <div>
+                <h2 id="return-modal-title" style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>Record return request</h2>
+                <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#64748b' }}>The order is looked up from your store records.</p>
+              </div>
+              <button type="button" disabled={isSubmitting} onClick={() => setShowAddModal(false)} aria-label="Close return dialog" style={{ width: '40px', height: '40px', border: '1px solid #e2e8f0', borderRadius: '9px', background: '#fff', color: '#64748b', cursor: 'pointer', fontSize: '18px' }}>×</button>
             </div>
 
-            <form onSubmit={handleCreateReturn} style={{ padding: '24px' }}>
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>
-                  Order Number *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. BBZ-1001"
-                  value={formOrderNumber}
-                  onChange={(e) => setFormOrderNumber(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none' }}
-                />
+            <form onSubmit={handleCreateReturn} style={{ padding: '22px' }}>
+              <label htmlFor="return-order-number" style={{ display: 'block', fontSize: '12px', fontWeight: 650, color: '#475569', marginBottom: '6px' }}>Order number *</label>
+              <input id="return-order-number" type="text" required maxLength={64} placeholder="e.g. BBZ-1001" value={formOrderNumber} onChange={(event) => setFormOrderNumber(event.target.value)} style={{ width: '100%', minHeight: '42px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', marginBottom: '16px' }} />
+
+              <label htmlFor="return-reason" style={{ display: 'block', fontSize: '12px', fontWeight: 650, color: '#475569', marginBottom: '6px' }}>Reason for return *</label>
+              <select id="return-reason" required value={formReason} onChange={(event) => setFormReason(event.target.value)} style={{ width: '100%', minHeight: '42px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', background: '#fff', marginBottom: '16px' }}>
+                <option value="DAMAGED_ITEM">Damaged on arrival</option>
+                <option value="WRONG_SIZE">Wrong size / fit</option>
+                <option value="DEFECTIVE">Product defective</option>
+                <option value="BUYER_REMORSE">Changed mind</option>
+              </select>
+
+              <label htmlFor="return-amount" style={{ display: 'block', fontSize: '12px', fontWeight: 650, color: '#475569', marginBottom: '6px' }}>Requested refund amount (₹) *</label>
+              <input id="return-amount" type="number" min="0.01" step="0.01" required placeholder="e.g. 1500.00" value={formAmount} onChange={(event) => setFormAmount(event.target.value)} style={{ width: '100%', minHeight: '42px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', marginBottom: '14px' }} />
+
+              {actionError && <div role="alert" style={{ padding: '10px 12px', marginBottom: '14px', borderRadius: '8px', background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: '12px' }}>{actionError}</div>}
+
+              <div style={{ padding: '11px 12px', marginBottom: '18px', borderRadius: '8px', background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1e40af', fontSize: '11px', lineHeight: 1.5 }}>
+                This records a request only. Approval does not transfer money. Your platform does not yet have a verified refund-provider API, so the original payment must be refunded through the provider.
               </div>
 
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>
-                  Customer Name
-                </label>
-                <input
-                  type="text"
-                  placeholder="Customer Name"
-                  value={formCustomerName}
-                  onChange={(e) => setFormCustomerName(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none' }}
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '24px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>
-                    Reason for Return
-                  </label>
-                  <select
-                    value={formReason}
-                    onChange={(e) => setFormReason(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none', backgroundColor: '#fff' }}
-                  >
-                    <option value="DAMAGED_ITEM">Damaged on Arrival</option>
-                    <option value="WRONG_SIZE">Wrong Size / Fit</option>
-                    <option value="DEFECTIVE">Product Defective</option>
-                    <option value="BUYER_REMORSE">Changed Mind</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>
-                    Refund Amount (₹) *
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    step="0.01"
-                    required
-                    placeholder="e.g. 1500"
-                    value={formAmount}
-                    onChange={(e) => setFormAmount(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  style={{ padding: '9px 16px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px', fontWeight: 600, color: '#475569', cursor: 'pointer' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  style={{ padding: '9px 20px', borderRadius: '8px', border: 'none', background: '#0d9488', fontSize: '13px', fontWeight: 600, color: '#fff', cursor: 'pointer' }}
-                >
-                  {isSubmitting ? 'Recording...' : 'Record Return'}
-                </button>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', flexWrap: 'wrap' }}>
+                <button type="button" disabled={isSubmitting} onClick={() => setShowAddModal(false)} style={{ minHeight: '42px', padding: '0 16px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px', fontWeight: 600, color: '#475569', cursor: 'pointer' }}>Cancel</button>
+                <button type="submit" disabled={isSubmitting} style={{ minHeight: '42px', padding: '0 18px', borderRadius: '8px', border: 'none', background: '#0d9488', fontSize: '13px', fontWeight: 650, color: '#fff', cursor: isSubmitting ? 'wait' : 'pointer', opacity: isSubmitting ? 0.65 : 1 }}>{isSubmitting ? 'Saving request…' : 'Create request'}</button>
               </div>
             </form>
-          </div>
+          </section>
         </div>
       )}
     </div>
