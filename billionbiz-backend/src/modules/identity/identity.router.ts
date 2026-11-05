@@ -1083,6 +1083,14 @@ identityRouter.post('/google', async (req: Request, res: Response) => {
       );
     }
 
+    const currentGoogleUser = await query(
+      `SELECT id, email, full_name, mfa_enabled FROM users WHERE id = $1`,
+      [userId]
+    );
+    if (currentGoogleUser.rows[0]?.mfa_enabled) {
+      return respondWithMfaChallenge(res, currentGoogleUser.rows[0]);
+    }
+
     const token = generateToken({
       userId,
       email: cleanEmail,
@@ -1162,7 +1170,7 @@ identityRouter.post('/pin-login', async (req: Request, res: Response) => {
 
   // Find staff profiles in this org with matching PIN
   const staffRes = await query(
-    `SELECT sp.id, sp.display_name, sp.pin_hash, sp.user_id, u.email
+    `SELECT sp.id, sp.display_name, sp.pin_hash, sp.user_id, u.email, u.mfa_enabled
      FROM staff_profiles sp
      LEFT JOIN users u ON u.id = sp.user_id
      WHERE sp.organization_id = $1 AND sp.is_active = TRUE AND sp.pin_hash IS NOT NULL`,
@@ -1180,6 +1188,13 @@ identityRouter.post('/pin-login', async (req: Request, res: Response) => {
 
   if (!matchedStaff) {
     return res.status(401).json({ error: 'INVALID_PIN', message: 'Invalid staff PIN for this counter' });
+  }
+  if (matchedStaff.mfa_enabled === true && matchedStaff.user_id) {
+    return respondWithMfaChallenge(res, {
+      id: matchedStaff.user_id,
+      email: matchedStaff.email,
+      full_name: matchedStaff.display_name
+    });
   }
 
   const token = generateToken({
