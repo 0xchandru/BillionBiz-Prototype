@@ -1444,6 +1444,9 @@ identityRouter.post('/otp/verify', async (req: Request, res: Response) => {
     }
 
     const user = userRes.rows[0];
+    if (user.mfa_enabled) {
+      return respondWithMfaChallenge(res, user);
+    }
     const orgsRes = await query(
       `SELECT o.id as organization_id, o.name as organization_name, om.role,
               s.id as store_id, s.name as store_name, s.slug as store_slug
@@ -1547,6 +1550,10 @@ identityRouter.post('/login-unified', async (req: Request, res: Response) => {
     }
   } else {
     return res.status(400).json({ error: 'MISSING_AUTH_FACTOR', message: 'Password or OTP code must be provided' });
+  }
+
+  if (user.mfa_enabled) {
+    return respondWithMfaChallenge(res, user);
   }
 
   // Fetch memberships
