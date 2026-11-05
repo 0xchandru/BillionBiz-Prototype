@@ -11,6 +11,22 @@ import { TableSkeleton } from '../components/common/SkeletonLoader';
 import { EmptyState } from '../components/common/EmptyState';
 import { ErrorState } from '../components/common/ErrorState';
 
+type ManualOrderLine = {
+  variantId: string;
+  quantity: number;
+  title: string;
+  sku: string;
+  unitPriceMinor: number;
+  stockAvailable: number;
+};
+
+const createIdempotencyKey = () => {
+  if (typeof window !== 'undefined' && window.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+  return `manual-order-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+};
+
 const formatCurrency = (minor: number) => {
   return '₹' + (minor / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
@@ -33,19 +49,28 @@ export const OrdersPage: React.FC = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newOrderCustomer, setNewOrderCustomer] = useState('');
   const [newOrderEmail, setNewOrderEmail] = useState('');
-  const [newOrderItemTitle, setNewOrderItemTitle] = useState('');
+  const [newOrderPhone, setNewOrderPhone] = useState('');
+  const [catalogProducts, setCatalogProducts] = useState<any[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [selectedVariantId, setSelectedVariantId] = useState('');
   const [newOrderQty, setNewOrderQty] = useState(1);
-  const [newOrderAmount, setNewOrderAmount] = useState('');
-  const [newOrderPayment, setNewOrderPayment] = useState('CAPTURED');
+  const [manualOrderLines, setManualOrderLines] = useState<ManualOrderLine[]>([]);
+  const [createOrderError, setCreateOrderError] = useState<string | null>(null);
+  const [createdOrderNotice, setCreatedOrderNotice] = useState<string | null>(null);
+  const [createOrderKey, setCreateOrderKey] = useState('');
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
 
-  const loadOrders = async () => {
+  const loadOrders = async (overrides: { search?: string; status?: string } = {}) => {
     try {
       setLoadingOrders(true);
       setOrderError(null);
+      const effectiveSearch = overrides.search !== undefined ? overrides.search : search;
+      const effectiveStatus = overrides.status !== undefined ? overrides.status : statusFilter;
       const res = await api.getOrders({
-        search: search || undefined,
-        status: statusFilter || undefined
+        search: effectiveSearch || undefined,
+        status: effectiveStatus || undefined
       });
       setOrders(res.orders || []);
     } catch (err: any) {
@@ -108,53 +133,161 @@ export const OrdersPage: React.FC = () => {
     }
   };
 
-  const handleCreateOrder = (e: React.FormEvent) => {
+  const resetCreateOrderForm = () => {
+    setNewOrderCustomer('');
+    setNewOrderEmail('');
+    setNewOrderPhone('');
+    setCatalogProducts([]);
+    setCatalogSearch('');
+    setSelectedVariantId('');
+    setNewOrderQty(1);
+    setManualOrderLines([]);
+    setCatalogError(null);
+    setCreateOrderError(null);
+    setCreateOrderKey('');
+  };
+
+  const openCreateOrderModal = async () => {
+    resetCreateOrderForm();
+    setCreatedOrderNotice(null);
+    setCreateOrderKey(createIdempotencyKey());
+    setShowCreateModal(true);
+    setCatalogLoading(true);
+    try {
+      const res = await api.getProducts({ status: 'ACTIVE', limit: 100, offset: 0 });
+      const products = res.products || [];
+      setCatalogProducts(products);
+      const firstVariant = products.find((product: any) => Array.isArray(product.variants) && product.variants.length > 0)?.variants?.[0];
+      setSelectedVariantId(firstVariant?.id || '');
+      if (products.length === 0) {
+        setCatalogError('No active products are available. Add or activate a product before creating a manual order.');
+      }
+    } catch (err: any) {
+      setCatalogError(err.message || 'Could not load the product catalogue. Try again.');
+    } finally {
+      setCatalogLoading(false);
+    }
+  };
+
+  const handleCatalogSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newOrderCustomer.trim() || !newOrderAmount.trim()) {
-      alert('Customer name and order amount are required.');
+    setCatalogLoading(true);
+    setCatalogError(null);
+    try {
+      const res = await api.getProducts({
+        status: 'ACTIVE',
+        search: catalogSearch.trim() || undefined,
+        limit: 100,
+        offset: 0
+      });
+      setCatalogProducts(res.products || []);
+      const variants = (res.products || []).flatMap((product: any) => product.variants || []);
+      if (!variants.some((variant: any) => variant.id === selectedVariantId)) {
+        setSelectedVariantId(variants[0]?.id || '');
+      }
+      if ((res.products || []).length === 0) {
+        setCatalogError('No active products matched this search. Try another name or SKU.');
+      }
+    } catch (err: any) {
+      setCatalogError(err.message || 'Could not search the product catalogue.');
+    } finally {
+      setCatalogLoading(false);
+    }
+  };
+
+  const selectedCatalogVariant = catalogProducts
+    .flatMap((product: any) => (product.variants || []).map((variant: any) => ({ product, variant })))
+    .find(({ variant }: any) => variant.id === selectedVariantId);
+
+  const manualOrderSubtotal = manualOrderLines.reduce(
+    (total, line) => total + line.unitPriceMinor * line.quantity,
+    0
+  );
+
+  const handleAddManualOrderLine = () => {
+    if (!selectedCatalogVariant) {
+      setCreateOrderError('Select an active product variant first.');
       return;
     }
 
-    setIsCreatingOrder(true);
-    const amountMinor = Math.round(parseFloat(newOrderAmount) * 100);
-    const orderNumber = `BBZ-${Math.floor(1000 + Math.random() * 9000)}`;
-
-    const newOrder = {
-      id: `ord-${Date.now()}`,
-      order_number: orderNumber,
-      customer_name: newOrderCustomer.trim(),
-      customer_email: newOrderEmail.trim(),
-      channel: 'MANUAL',
-      status: 'PROCESSING',
-      payment_status: newOrderPayment,
-      fulfillment_status: 'UNFULFILLED',
-      currency: 'INR',
-      subtotal_minor: amountMinor,
-      total_minor: amountMinor,
-      items_count: newOrderQty,
-      lines: [
-        {
-          id: `line-${Date.now()}`,
-          title: newOrderItemTitle.trim() || 'General Merchandise',
-          quantity: newOrderQty,
-          unit_price_minor: Math.round(amountMinor / newOrderQty),
-          total_minor: amountMinor
-        }
-      ],
-      created_at: new Date().toISOString()
+    const { product, variant } = selectedCatalogVariant;
+    const line: ManualOrderLine = {
+      variantId: variant.id,
+      quantity: Math.max(1, Math.min(9999, Math.floor(newOrderQty))),
+      title: product.name,
+      sku: variant.sku || 'No SKU',
+      unitPriceMinor: Number(variant.price_minor) || 0,
+      stockAvailable: Number(variant.stock_available) || 0
     };
 
-    setTimeout(() => {
-      setOrders((prev) => [newOrder, ...prev]);
-      setIsCreatingOrder(false);
+    setManualOrderLines((previous) => {
+      const existing = previous.find((item) => item.variantId === line.variantId);
+      if (!existing) return [...previous, line];
+      return previous.map((item) => item.variantId === line.variantId
+        ? { ...item, quantity: Math.min(9999, item.quantity + line.quantity) }
+        : item
+      );
+    });
+    setNewOrderQty(1);
+    setCreateOrderError(null);
+  };
+
+  const handleCreateOrder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const customerName = newOrderCustomer.trim();
+    const customerEmail = newOrderEmail.trim().toLowerCase();
+    const customerPhone = newOrderPhone.trim();
+
+    if (!customerName) {
+      setCreateOrderError('Enter the customer name.');
+      return;
+    }
+    if (!customerEmail && !customerPhone) {
+      setCreateOrderError('Enter at least one customer contact: email or phone number.');
+      return;
+    }
+    if (manualOrderLines.length === 0) {
+      setCreateOrderError('Add at least one product to this order.');
+      return;
+    }
+    if (!Number.isSafeInteger(manualOrderSubtotal) || manualOrderSubtotal < 0) {
+      setCreateOrderError('The selected order total is outside the supported amount range.');
+      return;
+    }
+
+    const nameParts = customerName.split(/\\s+/);
+    const firstName = nameParts.shift() || 'Guest';
+    const lastName = nameParts.join(' ');
+    setIsCreatingOrder(true);
+    setCreateOrderError(null);
+
+    try {
+      const result = await api.createOrder({
+        channel: 'MANUAL',
+        customerDetails: {
+          firstName,
+          lastName,
+          ...(customerEmail ? { email: customerEmail } : {}),
+          ...(customerPhone ? { phone: customerPhone } : {})
+        },
+        items: manualOrderLines.map((line) => ({
+          variantId: line.variantId,
+          quantity: line.quantity
+        }))
+      }, createOrderKey || createIdempotencyKey());
+
       setShowCreateModal(false);
-      // Reset form
-      setNewOrderCustomer('');
-      setNewOrderEmail('');
-      setNewOrderItemTitle('');
-      setNewOrderQty(1);
-      setNewOrderAmount('');
-    }, 300);
+      resetCreateOrderForm();
+      setActiveTab('all');
+      setStatusFilter('');
+      setSearch('');
+      setCreatedOrderNotice(`Order ${result.orderNumber} was saved successfully. Payment is pending.`);
+      await loadOrders({ search: '', status: '' });
+    } catch (err: any) {
+      setCreateOrderError(err.message || 'The order could not be saved. Check the details and try again.');
+    } finally {
+      setIsCreatingOrder(false);
+    }
   };
 
   const filteredOrders = orders.filter((o) => {
@@ -208,7 +341,7 @@ export const OrdersPage: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setShowCreateModal(true)}
+            onClick={openCreateOrderModal}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -229,6 +362,13 @@ export const OrdersPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {createdOrderNotice && (
+        <div role="status" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '12px 16px', marginBottom: '18px', border: '1px solid #bbf7d0', borderRadius: '10px', background: '#f0fdf4', color: '#166534', fontSize: '13px' }}>
+          <span>{createdOrderNotice}</span>
+          <button type="button" onClick={() => setCreatedOrderNotice(null)} aria-label="Dismiss order confirmation" style={{ border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: '18px' }}>×</button>
+        </div>
+      )}
 
       {/* Metrics Row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
@@ -701,107 +841,153 @@ export const OrdersPage: React.FC = () => {
         </div>
       )}
 
-      {/* Create Order Modal */}
+      {/* Create Manual Order Modal */}
       {showCreateModal && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(15, 23, 42, 0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div style={{ background: '#ffffff', borderRadius: '16px', maxWidth: '520px', width: '100%', overflow: 'hidden' }}>
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>Create Direct Order</h2>
-              <button onClick={() => setShowCreateModal(false)} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#94a3b8', cursor: 'pointer' }}>✕</button>
+        <div
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !isCreatingOrder) setShowCreateModal(false);
+          }}
+          style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(15, 23, 42, 0.58)', backdropFilter: 'blur(3px)', zIndex: 1200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px' }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-order-title"
+            style={{ background: '#ffffff', borderRadius: '16px', maxWidth: '720px', width: '100%', maxHeight: 'calc(100dvh - 24px)', overflow: 'hidden', boxShadow: '0 24px 70px rgba(15, 23, 42, 0.28)', display: 'flex', flexDirection: 'column' }}
+          >
+            <div style={{ padding: '18px 22px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+              <div>
+                <h2 id="create-order-title" style={{ margin: 0, fontSize: '18px', fontWeight: 750, color: '#0f172a' }}>Create manual order</h2>
+                <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#64748b' }}>Add real catalogue products and customer details.</p>
+              </div>
+              <button type="button" disabled={isCreatingOrder} onClick={() => setShowCreateModal(false)} aria-label="Close create order dialog" style={{ width: '40px', height: '40px', borderRadius: '10px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', cursor: 'pointer', fontSize: '20px' }}>×</button>
             </div>
 
-            <form onSubmit={handleCreateOrder} style={{ padding: '24px' }}>
-              <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Customer Name *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Priya Sharma"
-                  value={newOrderCustomer}
-                  onChange={(e) => setNewOrderCustomer(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
-                />
-              </div>
-
-              <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Customer Email</label>
-                <input
-                  type="email"
-                  placeholder="priya@example.com"
-                  value={newOrderEmail}
-                  onChange={(e) => setNewOrderEmail(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '12px', marginBottom: '14px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Item Title</label>
-                  <input
-                    type="text"
-                    placeholder="Merchandise Item"
-                    value={newOrderItemTitle}
-                    onChange={(e) => setNewOrderItemTitle(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
-                  />
+            <form onSubmit={handleCreateOrder} style={{ padding: '20px 22px', overflowY: 'auto' }}>
+              <div style={{ marginBottom: '22px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                  <h3 style={{ margin: 0, color: '#0f172a', fontSize: '13px', fontWeight: 700 }}>Customer details</h3>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>Email or phone required</span>
                 </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Quantity</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={newOrderQty}
-                    onChange={(e) => setNewOrderQty(parseInt(e.target.value, 10) || 1)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
-                  />
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: '12px' }}>
+                  <label style={{ display: 'grid', gap: '6px', color: '#475569', fontSize: '12px', fontWeight: 600 }}>
+                    Customer name *
+                    <input type="text" required maxLength={257} autoComplete="name" placeholder="e.g. Priya Sharma" value={newOrderCustomer} onChange={(event) => setNewOrderCustomer(event.target.value)} style={{ width: '100%', minHeight: '42px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', color: '#0f172a' }} />
+                  </label>
+                  <label style={{ display: 'grid', gap: '6px', color: '#475569', fontSize: '12px', fontWeight: 600 }}>
+                    Email address
+                    <input type="email" maxLength={255} autoComplete="email" placeholder="priya@example.com" value={newOrderEmail} onChange={(event) => setNewOrderEmail(event.target.value)} style={{ width: '100%', minHeight: '42px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', color: '#0f172a' }} />
+                  </label>
+                  <label style={{ display: 'grid', gap: '6px', color: '#475569', fontSize: '12px', fontWeight: 600 }}>
+                    Phone number
+                    <input type="tel" maxLength={32} autoComplete="tel" placeholder="+91 98765 43210" value={newOrderPhone} onChange={(event) => setNewOrderPhone(event.target.value)} style={{ width: '100%', minHeight: '42px', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', color: '#0f172a' }} />
+                  </label>
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '24px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Total Amount (₹) *</label>
-                  <input
-                    type="number"
-                    min="1"
-                    step="0.01"
-                    required
-                    placeholder="1250"
-                    value={newOrderAmount}
-                    onChange={(e) => setNewOrderAmount(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
-                  />
+              <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '18px', marginBottom: '18px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '12px' }}>
+                  <h3 style={{ margin: 0, color: '#0f172a', fontSize: '13px', fontWeight: 700 }}>Products</h3>
+                  <span style={{ color: '#64748b', fontSize: '11px' }}>Prices are verified by the server</span>
                 </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Payment Status</label>
-                  <select
-                    value={newOrderPayment}
-                    onChange={(e) => setNewOrderPayment(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', backgroundColor: '#fff' }}
-                  >
-                    <option value="CAPTURED">Paid (Captured)</option>
-                    <option value="PENDING">Pending Payment</option>
-                  </select>
+
+                <form onSubmit={handleCatalogSearch} style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                  <input type="search" value={catalogSearch} onChange={(event) => setCatalogSearch(event.target.value)} placeholder="Search products or SKU..." aria-label="Search products or SKU" style={{ flex: 1, minWidth: 0, minHeight: '42px', padding: '9px 12px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px' }} />
+                  <button type="submit" disabled={catalogLoading} style={{ padding: '0 14px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', color: '#334155', fontSize: '12px', fontWeight: 650, cursor: catalogLoading ? 'wait' : 'pointer' }}>Search</button>
+                </form>
+
+                {catalogLoading ? (
+                  <div role="status" style={{ padding: '18px', textAlign: 'center', border: '1px dashed #cbd5e1', borderRadius: '10px', color: '#64748b', fontSize: '13px' }}>Loading active products…</div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 100px auto', alignItems: 'end', gap: '10px' }}>
+                    <label style={{ display: 'grid', gap: '6px', minWidth: 0, color: '#475569', fontSize: '12px', fontWeight: 600 }}>
+                      Product / variant
+                      <select value={selectedVariantId} onChange={(event) => setSelectedVariantId(event.target.value)} disabled={!catalogProducts.some((product: any) => product.variants?.length)} style={{ minWidth: 0, width: '100%', minHeight: '42px', padding: '8px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', color: '#0f172a', fontSize: '12px' }}>
+                        <option value="">Select a product variant</option>
+                        {catalogProducts.map((product: any) => (
+                          <optgroup key={product.id} label={product.name}>
+                            {(product.variants || []).map((variant: any) => {
+                              const optionLabel = variant.option_values && typeof variant.option_values === 'object'
+                                ? Object.entries(variant.option_values).map(([key, value]) => key + ': ' + String(value)).join(', ')
+                                : '';
+                              return (
+                                <option key={variant.id} value={variant.id}>
+                                  {(optionLabel ? optionLabel + ' · ' : '') + (variant.sku || 'No SKU') + ' · ' + formatCurrency(Number(variant.price_minor) || 0)}
+                                </option>
+                              );
+                            })}
+                          </optgroup>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={{ display: 'grid', gap: '6px', color: '#475569', fontSize: '12px', fontWeight: 600 }}>
+                      Quantity
+                      <input type="number" min="1" max="9999" step="1" value={newOrderQty} onChange={(event) => setNewOrderQty(Math.max(1, Math.min(9999, Number(event.target.value) || 1)))} style={{ minHeight: '42px', width: '100%', padding: '9px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }} />
+                    </label>
+                    <button type="button" onClick={handleAddManualOrderLine} disabled={!selectedCatalogVariant || catalogLoading} style={{ minHeight: '42px', padding: '0 14px', border: 0, borderRadius: '8px', background: '#0d9488', color: '#fff', fontSize: '12px', fontWeight: 700, cursor: selectedCatalogVariant ? 'pointer' : 'not-allowed', whiteSpace: 'nowrap' }}>Add item</button>
+                  </div>
+                )}
+
+                {selectedCatalogVariant && !catalogLoading && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: '8px', marginTop: '10px', color: '#64748b', fontSize: '11px' }}>
+                    <span>{selectedCatalogVariant.product.name} · {selectedCatalogVariant.variant.sku || 'No SKU'}</span>
+                    <span>Available stock: <strong style={{ color: Number(selectedCatalogVariant.variant.stock_available) > 0 ? '#15803d' : '#b45309' }}>{Number(selectedCatalogVariant.variant.stock_available) || 0}</strong></span>
+                  </div>
+                )}
+
+                {catalogError && (
+                  <div role="alert" style={{ marginTop: '10px', padding: '10px 12px', borderRadius: '8px', background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', fontSize: '12px' }}>{catalogError}</div>
+                )}
+              </div>
+
+              <div style={{ border: '1px solid #e2e8f0', borderRadius: '10px', overflow: 'hidden', marginBottom: '18px' }}>
+                <div style={{ padding: '11px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                  <strong style={{ color: '#334155', fontSize: '12px' }}>Order items</strong>
+                  <span style={{ color: '#64748b', fontSize: '11px' }}>{manualOrderLines.length} line item(s)</span>
+                </div>
+                {manualOrderLines.length === 0 ? (
+                  <div style={{ padding: '22px 14px', textAlign: 'center', color: '#64748b', fontSize: '12px' }}>No products added yet. Select a product variant above.</div>
+                ) : (
+                  <div>
+                    {manualOrderLines.map((line) => (
+                      <div key={line.variantId} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', alignItems: 'center', gap: '12px', padding: '12px 14px', borderBottom: '1px solid #f1f5f9' }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ color: '#0f172a', fontSize: '12px', fontWeight: 650, overflowWrap: 'anywhere' }}>{line.title}</div>
+                          <div style={{ color: '#64748b', fontSize: '10px', marginTop: '3px' }}>{line.sku} · {formatCurrency(line.unitPriceMinor)} each</div>
+                          {line.stockAvailable < line.quantity && <div style={{ color: '#b45309', fontSize: '10px', marginTop: '3px' }}>Quantity exceeds currently available stock ({line.stockAvailable}). Inventory is not reserved by this action.</div>}
+                        </div>
+                        <div style={{ color: '#334155', fontSize: '12px', whiteSpace: 'nowrap' }}>× {line.quantity}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <strong style={{ color: '#0f172a', fontSize: '12px', whiteSpace: 'nowrap' }}>{formatCurrency(line.unitPriceMinor * line.quantity)}</strong>
+                          <button type="button" onClick={() => setManualOrderLines((previous) => previous.filter((item) => item.variantId !== line.variantId))} aria-label={'Remove ' + line.title} style={{ border: 0, background: 'transparent', color: '#dc2626', cursor: 'pointer', fontSize: '12px', fontWeight: 700 }}>Remove</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px', background: '#f8fafc' }}>
+                  <span style={{ fontSize: '12px', color: '#64748b' }}>Estimated catalogue subtotal</span>
+                  <strong style={{ color: '#0f172a', fontSize: '16px' }}>{formatCurrency(manualOrderSubtotal)}</strong>
                 </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  style={{ padding: '9px 16px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isCreatingOrder}
-                  style={{ padding: '9px 20px', borderRadius: '8px', border: 'none', background: '#0d9488', fontSize: '13px', fontWeight: 600, color: '#fff', cursor: 'pointer' }}
-                >
-                  {isCreatingOrder ? 'Creating...' : 'Create Order'}
+              <div style={{ padding: '11px 13px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '9px', color: '#1e40af', fontSize: '11px', lineHeight: 1.5, marginBottom: '16px' }}>
+                This creates an open order with payment pending. It does not collect payment or reserve inventory. Product prices are recalculated from the active catalogue when saved.
+              </div>
+
+              {createOrderError && (
+                <div role="alert" style={{ padding: '10px 12px', marginBottom: '16px', borderRadius: '8px', background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: '12px' }}>{createOrderError}</div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', flexWrap: 'wrap', paddingTop: '4px' }}>
+                <button type="button" disabled={isCreatingOrder} onClick={() => setShowCreateModal(false)} style={{ minHeight: '42px', padding: '0 16px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', color: '#475569', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                <button type="submit" disabled={isCreatingOrder || catalogLoading || manualOrderLines.length === 0} style={{ minHeight: '42px', padding: '0 20px', borderRadius: '8px', border: 'none', background: '#0d9488', color: '#fff', fontSize: '13px', fontWeight: 700, cursor: isCreatingOrder ? 'wait' : 'pointer', opacity: isCreatingOrder || catalogLoading || manualOrderLines.length === 0 ? 0.65 : 1 }}>
+                  {isCreatingOrder ? 'Saving order…' : 'Create order'}
                 </button>
               </div>
             </form>
-          </div>
+          </section>
         </div>
       )}
     </div>
