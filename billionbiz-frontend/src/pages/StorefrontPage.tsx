@@ -8,7 +8,7 @@ interface StorefrontPageProps {
   slug?: string;
 }
 
-export const StorefrontPage: React.FC<StorefrontPageProps> = ({ slug = 'shoum' }) => {
+export const StorefrontPage: React.FC<StorefrontPageProps> = ({ slug = '' }) => {
   const accessStorageKey = `billionbiz_storefront_access:${slug}`;
   const [accessToken, setAccessToken] = useState<string | null>(() =>
     typeof window !== 'undefined' ? sessionStorage.getItem(accessStorageKey) : null
@@ -19,6 +19,12 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ slug = 'shoum' }
 
   const loadStore = useCallback(async (showLoading = false, tokenOverride?: string | null): Promise<boolean> => {
     const tokenToUse = tokenOverride === undefined ? accessToken : tokenOverride;
+    if (!slug) {
+      setNotFound(true);
+      setStoreData(null);
+      setLoading(false);
+      return false;
+    }
     try {
       if (showLoading) setLoading(true);
       setNotFound(false);
