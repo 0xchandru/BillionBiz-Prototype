@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { parseSubdomain, getPortalUrl, isLocalOrPreview } from '../../utils/subdomain';
 import { useAuthStore } from '../../store/authStore';
@@ -8,71 +8,83 @@ import AppLayout from '../layout/AppLayout';
 import ProtectedRoute from '../layout/ProtectedRoute';
 import AnimatedLoader from '../common/AnimatedLoader';
 // 404 Not Found Page
-import NotFoundPage from '../../pages/NotFoundPage';
+const NotFoundPage = lazy(() => import('../../pages/NotFoundPage'));
 
 // Marketing App (Root Domain / www)
-import LandingPage from '../../pages/LandingPage';
+const LandingPage = lazy(() => import('../../pages/LandingPage'));
 
 // Auth Pages
-import LoginPage from '../../pages/auth/LoginPage';
-import RegisterPage from '../../pages/auth/RegisterPage';
-import ForgotPasswordPage from '../../pages/auth/ForgotPasswordPage';
-import ResetPasswordPage from '../../pages/auth/ResetPasswordPage';
-import VerifyEmailPage from '../../pages/auth/VerifyEmailPage';
+const LoginPage = lazy(() => import('../../pages/auth/LoginPage'));
+const RegisterPage = lazy(() => import('../../pages/auth/RegisterPage'));
+const ForgotPasswordPage = lazy(() => import('../../pages/auth/ForgotPasswordPage'));
+const ResetPasswordPage = lazy(() => import('../../pages/auth/ResetPasswordPage'));
+const VerifyEmailPage = lazy(() => import('../../pages/auth/VerifyEmailPage'));
 
 // Merchant Admin App
-import Dashboard from '../../pages/Dashboard';
-import Pages from '../../pages/Pages';
-import OrdersPage from '../../pages/Orders';
-import InvoicesPage from '../../pages/Invoices';
-import AbandonedCartsPage from '../../pages/AbandonedCarts';
-import ReturnsRefundsPage from '../../pages/ReturnsRefunds';
-import ShipmentsPage from '../../pages/Shipments';
-import WarehousesPage from '../../pages/Warehouses';
-import QuotesPage from '../../pages/Quotes';
+const Dashboard = lazy(() => import('../../pages/Dashboard'));
+const Pages = lazy(() => import('../../pages/Pages'));
+const OrdersPage = lazy(() => import('../../pages/Orders'));
+const InvoicesPage = lazy(() => import('../../pages/Invoices'));
+const AbandonedCartsPage = lazy(() => import('../../pages/AbandonedCarts'));
+const ReturnsRefundsPage = lazy(() => import('../../pages/ReturnsRefunds'));
+const ShipmentsPage = lazy(() => import('../../pages/Shipments'));
+const WarehousesPage = lazy(() => import('../../pages/Warehouses'));
+const QuotesPage = lazy(() => import('../../pages/Quotes'));
 
-import AppointmentsPage from '../../pages/Appointments';
-import OfferingsPage from '../../pages/Offerings';
-import StaffPage from '../../pages/Staff';
-import WorkingHoursPage from '../../pages/WorkingHours';
-import BookingSettingsPage from '../../pages/BookingSettings';
-import ResourcesPage from '../../pages/Resources';
+const AppointmentsPage = lazy(() => import('../../pages/Appointments'));
+const OfferingsPage = lazy(() => import('../../pages/Offerings'));
+const StaffPage = lazy(() => import('../../pages/Staff'));
+const WorkingHoursPage = lazy(() => import('../../pages/WorkingHours'));
+const BookingSettingsPage = lazy(() => import('../../pages/BookingSettings'));
+const ResourcesPage = lazy(() => import('../../pages/Resources'));
 
-import ProductsPage from '../../pages/Products';
-import CategoriesPage from '../../pages/Categories';
-import InventoryPage from '../../pages/Inventory';
-import PriceListsPage from '../../pages/PriceLists';
+const ProductsPage = lazy(() => import('../../pages/Products'));
+const CategoriesPage = lazy(() => import('../../pages/Categories'));
+const InventoryPage = lazy(() => import('../../pages/Inventory'));
+const PriceListsPage = lazy(() => import('../../pages/PriceLists'));
 
-import PeoplePage from '../../pages/People';
-import CustomerTicketsPage from '../../pages/CustomerTickets';
+const PeoplePage = lazy(() => import('../../pages/People'));
+const CustomerTicketsPage = lazy(() => import('../../pages/CustomerTickets'));
 
-import TeamPage from '../../pages/Team';
-import RolesPermissionsPage from '../../pages/RolesPermissions';
-import ResponsibilitiesPage from '../../pages/Responsibilities';
+const TeamPage = lazy(() => import('../../pages/Team'));
+const RolesPermissionsPage = lazy(() => import('../../pages/RolesPermissions'));
+const ResponsibilitiesPage = lazy(() => import('../../pages/Responsibilities'));
 
-import POSCountersPage from '../../pages/POSCounters';
-import POSShiftsPage from '../../pages/POSShifts';
+const POSCountersPage = lazy(() => import('../../pages/POSCounters'));
+const POSShiftsPage = lazy(() => import('../../pages/POSShifts'));
 
-import StoreNavigationPage from '../../pages/StoreNavigation';
+const StoreNavigationPage = lazy(() => import('../../pages/StoreNavigation'));
 import ExtensionsPage from '../../pages/Extensions';
-import GeneralSettingsPage from '../../pages/GeneralSettings';
-import AccountSettingsPage from '../../pages/AccountSettings';
-import SecuritySettingsPage from '../../pages/SecuritySettings';
-import PreferencesSettingsPage from '../../pages/PreferencesSettings';
-import PaymentsSettingsPage from '../../pages/PaymentsSettings';
-import FulfillmentSettingsPage from '../../pages/FulfillmentSettings';
-import NotificationsSettingsPage from '../../pages/NotificationsSettings';
-import IntegrationsSettingsPage from '../../pages/IntegrationsSettings';
-import ThemeStyles from '../../pages/ThemeStyles';
-import OnlineStoreOverview from '../../pages/OnlineStoreOverview';
-import EditorLayout from '../../pages/editor/EditorLayout';
+const GeneralSettingsPage = lazy(() => import('../../pages/GeneralSettings'));
+const AccountSettingsPage = lazy(() => import('../../pages/AccountSettings'));
+const SecuritySettingsPage = lazy(() => import('../../pages/SecuritySettings'));
+const PreferencesSettingsPage = lazy(() => import('../../pages/PreferencesSettings'));
+const PaymentsSettingsPage = lazy(() => import('../../pages/PaymentsSettings'));
+const FulfillmentSettingsPage = lazy(() => import('../../pages/FulfillmentSettings'));
+const NotificationsSettingsPage = lazy(() => import('../../pages/NotificationsSettings'));
+const IntegrationsSettingsPage = lazy(() => import('../../pages/IntegrationsSettings'));
+const ThemeStyles = lazy(() => import('../../pages/ThemeStyles'));
+const OnlineStoreOverview = lazy(() => import('../../pages/OnlineStoreOverview'));
+const EditorLayout = lazy(() => import('../../pages/editor/EditorLayout'));
 
 // Dedicated Subdomain Portals
-import StaffPortalPage from '../../pages/StaffPortalPage';
-import OpsPortalPage from '../../pages/OpsPortalPage';
-import POSPage from '../../pages/POS';
-import StorefrontPage from '../../pages/StorefrontPage';
-import { CustomerPortalPage } from '../../pages/CustomerPortalPage';
+const StaffPortalPage = lazy(() => import('../../pages/StaffPortalPage'));
+const OpsPortalPage = lazy(() => import('../../pages/OpsPortalPage'));
+const POSPage = lazy(() => import('../../pages/POS'));
+const StorefrontPage = lazy(() => import('../../pages/StorefrontPage'));
+const CustomerPortalPage = lazy(() => import('../../pages/CustomerPortalPage').then((module) => ({ default: module.CustomerPortalPage })));
+
+const RouteLoadingFallback: React.FC = () => (
+  <div className="route-loading-shell" role="status" aria-live="polite" aria-label="Loading page">
+    <div className="route-loading-topbar" />
+    <div className="route-loading-content">
+      <div className="route-loading-title" />
+      <div className="route-loading-subtitle" />
+      <div className="route-loading-cards"><span /><span /><span /></div>
+      <div className="route-loading-panel" />
+    </div>
+  </div>
+);
 
 /**
  * Animated redirect component for cross-origin domain hops
@@ -90,6 +102,7 @@ const ExternalRedirect: React.FC<{ to: string }> = ({ to }) => {
  * Reused for both local/preview and production admin subdomain
  */
 const renderAdminRoutes = (): React.ReactElement => (
+  <Suspense fallback={<RouteLoadingFallback />}>
   <Route element={<ProtectedRoute />}>
     <Route element={<AppLayout />}>
       <Route path="/dashboard" element={<Dashboard />} />
@@ -176,6 +189,7 @@ const renderAdminRoutes = (): React.ReactElement => (
     {/* Embedded POS Preview in Admin */}
     <Route path="/pos" element={<Navigate to="/pos-counters" replace />} />
   </Route>
+  </Suspense>
 );
 
 /**
