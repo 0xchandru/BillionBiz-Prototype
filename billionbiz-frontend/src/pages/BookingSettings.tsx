@@ -23,6 +23,7 @@ export const BookingSettingsPage: FC = () => {
   const [cancellationPolicy, setCancellationPolicy] = useState('24 hours advance notice required for full refund.');
   const [reschedulingPolicy, setReschedulingPolicy] = useState('Permitted up to 12 hours prior to scheduled start.');
   const [depositRequired, setDepositRequired] = useState(false);
+  const [timezone, setTimezone] = useState('Asia/Kolkata');
 
   const fetchSettings = () => {
     setLoading(true);
@@ -38,6 +39,7 @@ export const BookingSettingsPage: FC = () => {
           setCancellationPolicy(s.cancellation_policy || '24 hours advance notice required for full refund.');
           setReschedulingPolicy(s.rescheduling_policy || 'Permitted up to 12 hours prior to scheduled start.');
           setDepositRequired(Boolean(s.deposit_required));
+          setTimezone(s.timezone || 'Asia/Kolkata');
         }
       })
       .catch((err) => {
@@ -64,7 +66,8 @@ export const BookingSettingsPage: FC = () => {
         bufferMinutes,
         cancellationPolicy,
         reschedulingPolicy,
-        depositRequired
+        depositRequired,
+        timezone
       });
 
       setSaveSuccess(true);
@@ -155,6 +158,31 @@ export const BookingSettingsPage: FC = () => {
                 </select>
                 <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#64748b' }}>
                   Automatic instantly holds the slot and sends the calendar invitation.
+                </p>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
+                  Store Booking Timezone
+                </label>
+                <select
+                  value={timezone}
+                  onChange={(e) => setTimezone(e.target.value)}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none', background: '#fff' }}
+                >
+                  {[
+                    'Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Asia/Tokyo',
+                    'Europe/London', 'Europe/Paris', 'America/New_York',
+                    'America/Los_Angeles', 'Australia/Sydney', 'UTC'
+                  ].map((zone) => <option key={zone} value={zone}>{zone}</option>)}
+                  {![
+                    'Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Asia/Tokyo',
+                    'Europe/London', 'Europe/Paris', 'America/New_York',
+                    'America/Los_Angeles', 'Australia/Sydney', 'UTC'
+                  ].includes(timezone) && <option value={timezone}>{timezone}</option>}
+                </select>
+                <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#64748b' }}>
+                  Booking dates, staff shifts, minimum notice and availability are calculated using this IANA timezone.
                 </p>
               </div>
 
