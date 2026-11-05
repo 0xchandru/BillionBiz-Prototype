@@ -407,21 +407,7 @@ export const ReturnsRefundsPage: FC = () => {
                         </>
                       )}
                       {ret.status === 'APPROVED' && (
-                        <button
-                          onClick={() => handleProcessRefund(ret.id)}
-                          style={{
-                            padding: '5px 12px',
-                            borderRadius: '6px',
-                            border: '1px solid #0d9488',
-                            background: '#f0fdfa',
-                            color: '#0d9488',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            cursor: 'pointer'
-                          }}
-                        >
-                          Process Refund
-                        </button>
+                        <span title="No refund API is connected to the payment provider" style={{ fontSize: '11px', color: '#92400e', fontWeight: 600 }}>Refund integration unavailable</span>
                       )}
                       {isRefundSettled(ret) && (
                         <span style={{ fontSize: '12px', color: '#15803d', fontWeight: 600 }}>Provider confirmed</span>
