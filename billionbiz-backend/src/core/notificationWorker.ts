@@ -126,9 +126,20 @@ export async function sendEmail(
     }
   }
 
-  // Console mode for development & test suites
-  console.log(`[OutboxWorker] Email dispatched to ${message.to}: ${message.subject}`);
-  return { success: true, id: `console-${uuidv4()}` };
+  // Console transport is a development preview, never a production delivery
+  // provider. Do not report a successful send when no external provider exists.
+  if (env.NODE_ENV === 'development' && env.EMAIL_PROVIDER === 'console') {
+    console.info('[OutboxWorker] Console email preview enabled; no external email was delivered.');
+    return { success: true, id: `console-${uuidv4()}` };
+  }
+
+  return {
+    success: false,
+    error: {
+      code: 'EMAIL_PROVIDER_NOT_CONFIGURED',
+      message: 'A working SMTP or Resend provider must be configured before email can be delivered.'
+    }
+  };
 }
 
 export interface EmailMessage {
