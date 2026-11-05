@@ -28,6 +28,15 @@ const syncIntervalMs = Number(process.env.BILLIONBIZ_STORE_PROJECT_SYNC_MS || 10
 let syncTimer: NodeJS.Timeout | undefined;
 let syncInProgress = false;
 
+export function isStoreProjectManagerEnabled(): boolean {
+  const mode = (process.env.BILLIONBIZ_STORE_PROJECT_MODE || '').trim().toLowerCase();
+  if (mode === 'disabled' || process.env.NODE_ENV === 'test') return false;
+  if (mode === 'local') return true;
+  // npm run dev does not set NODE_ENV in many environments. Enable previews
+  // for non-production runs by default while keeping production opt-in explicit.
+  return process.env.NODE_ENV !== 'production' || process.env.BILLIONBIZ_ENABLE_LOCAL_STORE_PROJECTS === 'true';
+}
+
 export function getStoreProjectPort(slug: string): number {
   let hash = 2166136261;
   for (const character of slug) {
@@ -135,7 +144,7 @@ async function startProject(store: StoreRow, projectDir: string, port: number): 
 }
 
 export async function syncStoreProjects(): Promise<void> {
-  if (syncInProgress || process.env.NODE_ENV !== 'development') return;
+  if (syncInProgress || !isStoreProjectManagerEnabled()) return;
   syncInProgress = true;
   try {
     const result = await pool.query<StoreRow>(
@@ -184,7 +193,7 @@ export async function syncStoreProjects(): Promise<void> {
 }
 
 export function startStoreProjectManager(): void {
-  if (process.env.NODE_ENV !== 'development' || syncTimer) return;
+  if (!isStoreProjectManagerEnabled() || syncTimer) return;
   void syncStoreProjects();
   syncTimer = setInterval(() => void syncStoreProjects(), syncIntervalMs);
   syncTimer.unref();

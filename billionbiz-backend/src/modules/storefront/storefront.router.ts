@@ -10,7 +10,7 @@ import { handleIdempotency } from '../../middleware/idempotency.js';
 import { recordAudit, enqueueOutbox, publishOutboxEvent, broadcastCommittedOutboxEvent } from '../../core/auditAndOutbox.js';
 import { realtimeGateway } from '../../core/realtimeGateway.js';
 import { provisionDefaultStorefront } from './storefrontProvisioner.js';
-import { getStoreProjectPort, syncStoreProjects } from './storeProjectManager.js';
+import { getStoreProjectPort, isStoreProjectManagerEnabled, syncStoreProjects } from './storeProjectManager.js';
 import { PLATFORM_MAIN_DOMAIN } from '../../core/subdomains.js';
 import { env } from '../../core/env.js';
 import { resolveCname } from 'node:dns/promises';
@@ -1889,6 +1889,12 @@ storefrontRouter.get('/provisioning/status', requireAuth, resolveTenant, async (
 });
 
 storefrontRouter.post('/provisioning/retry', requireAuth, resolveTenant, requirePermission('store.editor.edit'), async (req: Request, res: Response) => {
+  if (!isStoreProjectManagerEnabled()) {
+    return res.status(503).json({
+      error: 'LOCAL_PREVIEW_RUNTIME_DISABLED',
+      message: 'Local store previews are disabled for this backend runtime. Enable BILLIONBIZ_STORE_PROJECT_MODE=local for preview workers, or configure production deployment credentials for live publishing.'
+    });
+  }
   const storeId = req.tenant!.storeId;
   await query(`UPDATE storefront_provisioning SET status = 'PENDING', last_error = NULL, updated_at = NOW() WHERE store_id = $1`, [storeId]);
   await syncStoreProjects();
