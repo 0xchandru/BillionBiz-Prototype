@@ -275,7 +275,8 @@ class RealtimeGateway {
       const cursorId = separator > 0 ? cursor.slice(separator + 1) : '';
       const parsed = new Date(cursorTimestamp);
       if (Number.isFinite(parsed.getTime())) {
-        params.push(parsed.toISOString());
+        // Preserve PostgreSQL's microsecond precision for stable tuple cursors.
+        params.push(cursorTimestamp);
         if (cursorId) {
           params.push(cursorId);
           sql += ` AND (created_at > $${params.length - 1}::timestamptz OR (created_at = $${params.length - 1}::timestamptz AND id > $${params.length}))`;
