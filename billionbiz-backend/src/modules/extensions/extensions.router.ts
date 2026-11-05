@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { query, withTransaction } from '../../db/pool.js';
 import { requireAuth, requirePermission } from '../../middleware/auth.js';
+import { env } from '../../core/env.js';
 import { resolveTenant } from '../../middleware/tenant.js';
 import { recordAudit } from '../../core/auditAndOutbox.js';
 import { 
@@ -463,38 +464,93 @@ extensionsRouter.post('/razorpay/verify-payment', requireAuth, resolveTenant, as
 
 // POST /api/v1/extensions/razorpay/webhook (Raw Webhook HMAC Inbox, T-022, SEC-026)
 extensionsRouter.post('/razorpay/webhook', async (req: Request, res: Response) => {
-  const signature = req.headers['x-razorpay-signature'] as string;
-  const webhookSecret = 'sandbox_webhook_secret';
-  const rawBody = JSON.stringify(req.body);
+  // The test-only secret exists exclusively for integration tests. Production
+  // and development environments must provide a real provider webhook secret.
+  const webhookSecret = env.NODE_ENV === 'test'
+    ? 'billionbiz-test-razorpay-webhook-secret'
+    : env.RAZORPAY_WEBHOOK_SECRET;
+  if (!webhookSecret) {
+    return res.status(503).json({
+      error: 'RAZORPAY_WEBHOOK_NOT_CONFIGURED',
+      message: 'Configure RAZORPAY_WEBHOOK_SECRET in the backend environment before enabling Razorpay webhooks.'
+    });
+  }
 
-  if (signature) {
-    const expected = crypto.createHmac('sha256', webhookSecret).update(rawBody).digest('hex');
-    if (expected !== signature && signature !== 'test_sandbox_signature') {
-      return res.status(400).json({ error: 'INVALID_SIGNATURE', message: 'Webhook signature verification failed' });
-    }
+  const signatureHeader = req.headers['x-razorpay-signature'];
+  if (typeof signatureHeader !== 'string' || !/^[a-fA-F0-9]{64}$/.test(signatureHeader)) {
+    return res.status(401).json({
+      error: 'INVALID_WEBHOOK_SIGNATURE',
+      message: 'A valid X-Razorpay-Signature header is required.'
+    });
+  }
+
+  const rawBody = Buffer.isBuffer((req as any).rawBody)
+    ? (req as any).rawBody as Buffer
+    : Buffer.alloc(0);
+  if (rawBody.length === 0) {
+    return res.status(400).json({
+      error: 'WEBHOOK_RAW_BODY_REQUIRED',
+      message: 'The exact request body is unavailable for signature verification.'
+    });
+  }
+
+  const expectedSignature = crypto
+    .createHmac('sha256', webhookSecret)
+    .update(rawBody)
+    .digest();
+  const providedSignature = Buffer.from(signatureHeader, 'hex');
+  if (
+    expectedSignature.length !== providedSignature.length ||
+    !crypto.timingSafeEqual(expectedSignature, providedSignature)
+  ) {
+    return res.status(401).json({
+      error: 'INVALID_WEBHOOK_SIGNATURE',
+      message: 'Webhook signature verification failed.'
+    });
   }
 
   const event = req.body;
-  const eventId = event?.event_id || event?.id || `evt-${uuidv4()}`;
-  const eventType = event?.event || 'payment.captured';
+  const eventType = typeof event?.event === 'string' ? event.event.trim() : '';
+  const headerEventId = req.headers['x-razorpay-event-id'];
+  const eventId = typeof headerEventId === 'string'
+    ? headerEventId.trim()
+    : typeof event?.event_id === 'string'
+      ? event.event_id.trim()
+      : typeof event?.id === 'string'
+        ? event.id.trim()
+        : '';
 
-  // Deduplicate duplicate webhook deliveries
-  const existing = await query(
-    `SELECT id, processing_status FROM provider_webhook_inbox WHERE provider = 'RAZORPAY' AND event_id = $1`,
-    [eventId]
-  );
-
-  if (existing.rowCount && existing.rowCount > 0) {
-    return res.status(200).json({ status: 'ALREADY_PROCESSED', eventId });
+  if (!event || typeof event !== 'object' || Array.isArray(event) || !eventType || eventType.length > 128) {
+    return res.status(400).json({
+      error: 'INVALID_WEBHOOK_EVENT',
+      message: 'A valid Razorpay event payload and event type are required.'
+    });
+  }
+  if (!eventId || eventId.length > 128) {
+    return res.status(400).json({
+      error: 'MISSING_WEBHOOK_EVENT_ID',
+      message: 'A stable Razorpay event ID is required for safe duplicate detection.'
+    });
   }
 
-  await query(
-    `INSERT INTO provider_webhook_inbox (id, provider, event_id, event_type, raw_payload, signature, is_verified, processing_status, processed_at)
-     VALUES ($1, 'RAZORPAY', $2, $3, $4, $5, TRUE, 'PROCESSED', NOW())`,
-    [`inbox-${uuidv4()}`, eventId, eventType, rawBody, signature || null]
+  const insert = await query(
+    `INSERT INTO provider_webhook_inbox (
+       id, provider, event_id, event_type, raw_payload, signature,
+       is_verified, processing_status, processed_at
+     )
+     VALUES ($1, 'RAZORPAY', $2, $3, $4, $5, TRUE, 'RECEIVED', NULL)
+     ON CONFLICT (provider, event_id) DO NOTHING
+     RETURNING id`,
+    [`inbox-${uuidv4()}`, eventId, eventType, rawBody.toString('utf8'), signatureHeader]
   );
 
-  res.status(200).json({ status: 'ACKNOWLEDGED', eventId });
+  if (insert.rowCount === 0) {
+    return res.status(200).json({ status: 'ALREADY_RECEIVED', eventId });
+  }
+
+  // This endpoint authenticates and durably receives events. It does not mark
+  // payment state as settled; a separate reconciliation processor must do that.
+  return res.status(200).json({ status: 'ACKNOWLEDGED', eventId });
 });
 
 // POST /api/v1/extensions/shiprocket/create-shipment (T-023, REQ-EXT-007)
