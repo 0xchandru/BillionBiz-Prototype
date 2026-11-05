@@ -561,68 +561,166 @@ appointmentsRouter.get(
   requirePermission('appointments.view'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
-    const { offeringId, date } = req.query; // date: YYYY-MM-DD
-
-    if (!offeringId || !date) {
-      return res.status(400).json({ error: 'MISSING_PARAMS', message: 'offeringId and date (YYYY-MM-DD) are required' });
+    const offeringId = typeof req.query.offeringId === 'string' ? req.query.offeringId : '';
+    const dateValue = typeof req.query.date === 'string' ? req.query.date : '';
+    const parsedDate = parseDateOnly(dateValue);
+    if (!offeringId || !parsedDate) {
+      return res.status(400).json({ error: 'INVALID_AVAILABILITY_REQUEST', message: 'A valid offeringId and date in YYYY-MM-DD format are required.' });
     }
 
-    const targetDate = new Date(date as string);
-    const dayOfWeek = targetDate.getDay();
+    const [offeringRes, bookingSettingsRes, storeRes] = await Promise.all([
+      query(
+        `SELECT id, name, duration_minutes, buffer_before_minutes, buffer_after_minutes
+         FROM offerings
+         WHERE id = $1 AND store_id = $2 AND is_active = TRUE`,
+        [offeringId, storeId]
+      ),
+      query(`SELECT * FROM store_booking_settings WHERE store_id = $1`, [storeId]),
+      query(`SELECT timezone FROM stores WHERE id = $1`, [storeId])
+    ]);
 
-    const offRes = await query(
-      `SELECT o.*, r.id as resource_id, r.name as resource_name
+    if (offeringRes.rowCount === 0) {
+      return res.status(404).json({ error: 'OFFERING_NOT_FOUND', message: 'Active service offering was not found in this store.' });
+    }
+
+    const offering = offeringRes.rows[0];
+    const settings = bookingSettingsRes.rows[0] || {};
+    const timeZone = settings.timezone || storeRes.rows[0]?.timezone || 'Asia/Kolkata';
+    if (!isValidTimeZone(timeZone)) {
+      return res.status(500).json({ error: 'INVALID_STORE_TIMEZONE', message: 'The store booking timezone is not valid. Update the store booking settings.' });
+    }
+
+    const interval = Number(settings.slot_interval_minutes || 30);
+    const minNoticeHours = Number(settings.min_notice_hours ?? 2);
+    const maxAdvanceDays = Number(settings.max_advance_days ?? 60);
+    const globalBuffer = Number(settings.buffer_minutes ?? 0);
+    const duration = Number(offering.duration_minutes || 30);
+    const bufferBefore = Number(offering.buffer_before_minutes || 0) + globalBuffer;
+    const bufferAfter = Number(offering.buffer_after_minutes || 0) + globalBuffer;
+
+    if (!Number.isInteger(interval) || interval < 5 || interval > 180 ||
+        !Number.isInteger(duration) || duration < 5 || duration > 1440 ||
+        !Number.isInteger(minNoticeHours) || minNoticeHours < 0 ||
+        !Number.isInteger(maxAdvanceDays) || maxAdvanceDays < 1) {
+      return res.status(500).json({ error: 'INVALID_BOOKING_SETTINGS', message: 'Booking interval, duration or notice settings are invalid.' });
+    }
+
+    const todayLocal = new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date());
+    const latestDate = new Date(`${todayLocal}T12:00:00Z`);
+    latestDate.setUTCDate(latestDate.getUTCDate() + maxAdvanceDays);
+    const latestLocalDate = [
+      latestDate.getUTCFullYear(),
+      String(latestDate.getUTCMonth() + 1).padStart(2, '0'),
+      String(latestDate.getUTCDate()).padStart(2, '0')
+    ].join('-');
+    if (dateValue < todayLocal || dateValue > latestLocalDate) {
+      return res.json({ date: dateValue, offeringId, timezone: timeZone, resources: [], slots: [] });
+    }
+
+    // A bookable resource must be explicitly assigned to the service, active,
+    // linked to an active staff profile, and have working hours for this day.
+    const resourcesRes = await query(
+      `SELECT DISTINCT r.id, r.name, r.staff_profile_id, sp.capacity,
+              s.start_time::text AS start_time, s.end_time::text AS end_time
        FROM offerings o
-       LEFT JOIN offering_resources o_r ON o_r.offering_id = o.id
-       LEFT JOIN resources r ON r.id = o_r.resource_id
-       WHERE o.id = $1 AND o.store_id = $2`,
-      [offeringId, storeId]
+       JOIN offering_resources o_r ON o_r.offering_id = o.id
+       JOIN resources r ON r.id = o_r.resource_id
+       JOIN staff_profiles sp ON sp.id = r.staff_profile_id
+       JOIN staff_shifts s ON s.staff_profile_id = sp.id
+       WHERE o.id = $1 AND o.store_id = $2
+         AND r.store_id = $2 AND r.is_active = TRUE
+         AND sp.store_id = $2 AND sp.is_active = TRUE
+         AND s.day_of_week = $3 AND s.is_active = TRUE
+       ORDER BY r.name ASC, s.start_time ASC`,
+      [offeringId, storeId, parsedDate.dayOfWeek]
     );
 
-    if (offRes.rowCount === 0) {
-      return res.status(404).json({ error: 'OFFERING_NOT_FOUND', message: 'Offering not found' });
-    }
+    const nowMs = Date.now();
+    const earliestStartMs = nowMs + minNoticeHours * 60 * 60 * 1000;
+    const slots: Array<{
+      timeLabel: string;
+      startTime: string;
+      endTime: string;
+      isAvailable: boolean;
+      resourceId: string;
+      resourceName: string;
+    }> = [];
+    const seen = new Set<string>();
 
-    const offering = offRes.rows[0];
-    const resourceId = offering.resource_id || 'res-stylist-shoum-01';
-    const duration = offering.duration_minutes || 30;
+    for (const resource of resourcesRes.rows) {
+      const shiftStart = minutesFromTime(resource.start_time);
+      const shiftEnd = minutesFromTime(resource.end_time);
+      if (shiftStart === null || shiftEnd === null || shiftEnd <= shiftStart) continue;
 
-    // Standard business hours 09:00 - 19:00 IST
-    const slots: any[] = [];
-    for (let hour = 9; hour < 19; hour++) {
-      for (let min of [0, 30]) {
-        const startH = hour.toString().padStart(2, '0');
-        const startM = min.toString().padStart(2, '0');
-        const endMin = min + duration;
-        const endHour = hour + Math.floor(endMin / 60);
-        const endM = (endMin % 60).toString().padStart(2, '0');
-        const endH = endHour.toString().padStart(2, '0');
-
-        const startTime = `${date}T${startH}:${startM}:00.000Z`;
-        const endTime = `${date}T${endH}:${endM}:00.000Z`;
-
-        // Check conflicts
-        const conflict = await query(
-          `SELECT id FROM bookings
-           WHERE store_id = $1 AND status NOT IN ('CANCELLED')
-             AND start_time < $3 AND end_time > $2`,
-          [storeId, startTime, endTime]
+      for (let startMinute = shiftStart; startMinute + duration + bufferAfter <= shiftEnd; startMinute += interval) {
+        const endMinute = startMinute + duration;
+        const startHour = Math.floor(startMinute / 60);
+        const startMin = startMinute % 60;
+        const endHour = Math.floor(endMinute / 60);
+        const endMin = endMinute % 60;
+        const startLocalDateTime = localDateTimeToUtc(
+          parsedDate.year, parsedDate.month, parsedDate.day, startHour, startMin, timeZone
         );
+        const endLocalDateTime = localDateTimeToUtc(
+          parsedDate.year, parsedDate.month, parsedDate.day, endHour, endMin, timeZone
+        );
+        const conflictStart = new Date(startLocalDateTime.getTime() - bufferBefore * 60 * 1000);
+        const conflictEnd = new Date(endLocalDateTime.getTime() + bufferAfter * 60 * 1000);
+        const slotKey = `${resource.id}:${startLocalDateTime.toISOString()}`;
+        if (seen.has(slotKey)) continue;
+        seen.add(slotKey);
+
+        let isAvailable = startLocalDateTime.getTime() >= earliestStartMs;
+        if (isAvailable) {
+          const [bookingConflict, holdConflict, timeOffConflict] = await Promise.all([
+            query(
+              `SELECT 1
+               FROM bookings
+               WHERE store_id = $1 AND resource_id = $2
+                 AND status NOT IN ('CANCELLED', 'NO_SHOW')
+                 AND start_time < $4 AND end_time > $3
+               LIMIT 1`,
+              [storeId, resource.id, conflictStart.toISOString(), conflictEnd.toISOString()]
+            ),
+            query(
+              `SELECT 1
+               FROM booking_holds
+               WHERE store_id = $1 AND resource_id = $2
+                 AND expires_at > NOW()
+                 AND start_time < $4 AND end_time > $3
+               LIMIT 1`,
+              [storeId, resource.id, conflictStart.toISOString(), conflictEnd.toISOString()]
+            ),
+            query(
+              `SELECT 1
+               FROM time_off
+               WHERE staff_profile_id = $1
+                 AND start_time < $3 AND end_time > $2
+               LIMIT 1`,
+              [resource.staff_profile_id, conflictStart.toISOString(), conflictEnd.toISOString()]
+            )
+          ]);
+          isAvailable = bookingConflict.rowCount === 0 &&
+            holdConflict.rowCount === 0 &&
+            timeOffConflict.rowCount === 0;
+        }
 
         slots.push({
-          timeLabel: `${startH}:${startM} - ${endH}:${endM}`,
-          startTime,
-          endTime,
-          isAvailable: conflict.rowCount === 0,
-          resourceId
+          timeLabel: `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')} - ${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`,
+          startTime: startLocalDateTime.toISOString(),
+          endTime: endLocalDateTime.toISOString(),
+          isAvailable,
+          resourceId: resource.id,
+          resourceName: resource.name
         });
       }
     }
 
     res.json({
-      date,
+      date: dateValue,
       offeringId,
-      resource: { id: resourceId, name: offering.resource_name || 'Assigned Stylist' },
+      timezone: timeZone,
+      resources: resourcesRes.rows.map((resource: any) => ({ id: resource.id, name: resource.name })),
       slots
     });
   }
