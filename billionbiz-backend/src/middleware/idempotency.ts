@@ -181,7 +181,7 @@ export async function handleIdempotency(req: Request, res: Response, next: NextF
       return res;
     };
 
-    res.once('close', () => {
+    res.once?.('close', () => {
       if (responseFinalized || res.writableEnded) return;
       query(
         `DELETE FROM idempotency_records
