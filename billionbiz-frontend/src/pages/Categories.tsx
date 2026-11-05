@@ -16,28 +16,31 @@ export const CategoriesPage: FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [editingCategory, setEditingCategory] = useState<any | null>(null);
+  const [deletingCategoryId, setDeletingCategoryId] = useState<string | null>(null);
 
   // Form State
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [description, setDescription] = useState('');
 
-  const fetchCategories = () => {
+  const fetchCategories = async () => {
     setLoading(true);
-    api.getCategories()
-      .then((res) => {
-        setCategories(res.categories || []);
-      })
-      .catch((err) => {
-        console.error('Failed to load categories', err);
-      })
-      .finally(() => {
-        setLoading(false);
-      });
+    setLoadError(null);
+    try {
+      const res = await api.getCategories();
+      setCategories(res.categories || []);
+    } catch (err: any) {
+      setLoadError(err.message || 'Categories could not be loaded.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    fetchCategories();
+    void fetchCategories();
   }, []);
 
   const handleNameChange = (val: string) => {
@@ -45,36 +48,87 @@ export const CategoriesPage: FC = () => {
     setSlug(val.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''));
   };
 
-  const handleCreateCategory = async (e: FormEvent) => {
+  const openCreateModal = () => {
+    setEditingCategory(null);
+    setName('');
+    setSlug('');
+    setDescription('');
+    setActionError(null);
+    setShowAddModal(true);
+  };
+
+  const openEditModal = (category: any) => {
+    setEditingCategory(category);
+    setName(category.name || '');
+    setSlug(category.slug || '');
+    setDescription(category.description || '');
+    setActionError(null);
+    setShowAddModal(true);
+  };
+
+  const closeCategoryModal = () => {
+    if (isSubmitting) return;
+    setShowAddModal(false);
+    setEditingCategory(null);
+    setActionError(null);
+  };
+
+  const handleSaveCategory = async (e: FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) {
-      alert('Category name is required.');
+    const normalizedName = name.trim();
+    const normalizedSlug = (slug.trim() || normalizedName)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '');
+
+    if (!normalizedName) {
+      setActionError('Category name is required.');
+      return;
+    }
+    if (!normalizedSlug) {
+      setActionError('Enter a valid category URL slug.');
       return;
     }
 
     setIsSubmitting(true);
-    const newCat = {
-      id: `cat-${Date.now()}`,
-      name: name.trim(),
-      slug: slug.trim() || name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-      description: description.trim(),
-      is_active: true,
-      products_count: 0,
-      created_at: new Date().toISOString()
-    };
+    setActionError(null);
+    try {
+      const payload = { name: normalizedName, slug: normalizedSlug, description: description.trim() };
+      if (editingCategory) {
+        await api.updateCategory(editingCategory.id, payload);
+      } else {
+        await api.createCategory(payload);
+      }
 
-    setTimeout(() => {
-      setCategories((prev) => [newCat, ...prev]);
-      setIsSubmitting(false);
       setShowAddModal(false);
+      setEditingCategory(null);
       setName('');
       setSlug('');
       setDescription('');
-    }, 300);
+      await fetchCategories();
+    } catch (err: any) {
+      setActionError(err.message || 'The category could not be saved.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleDelete = (id: string) => {
-    setCategories((prev) => prev.filter((c) => c.id !== id));
+  const handleDelete = async (category: any) => {
+    const confirmed = window.confirm(
+      `Archive “${category.name}”? Categories linked to products or child categories cannot be archived.`
+    );
+    if (!confirmed) return;
+
+    setDeletingCategoryId(category.id);
+    setActionError(null);
+    try {
+      await api.deleteCategory(category.id);
+      await fetchCategories();
+    } catch (err: any) {
+      setActionError(err.message || 'The category could not be archived.');
+    } finally {
+      setDeletingCategoryId(null);
+    }
   };
 
   const filteredCategories = categories.filter((c) => {
@@ -85,7 +139,7 @@ export const CategoriesPage: FC = () => {
   });
 
   return (
-    <div style={{ padding: '28px 32px', maxWidth: '1440px', margin: '0 auto', fontFamily: 'Inter, -apple-system, sans-serif' }}>
+    <div style={{ padding: 'clamp(16px, 2.2vw, 32px)', width: '100%', maxWidth: '1440px', margin: '0 auto', minWidth: 0, fontFamily: 'Inter, -apple-system, sans-serif' }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
         <div>
@@ -99,7 +153,7 @@ export const CategoriesPage: FC = () => {
         </div>
 
         <button
-          onClick={() => setShowAddModal(true)}
+          onClick={openCreateModal}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -129,6 +183,7 @@ export const CategoriesPage: FC = () => {
             placeholder="Search category name or slug..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            aria-label="Search categories by name or URL slug"
             style={{
               width: '100%',
               padding: '9px 12px 9px 36px',
@@ -143,7 +198,15 @@ export const CategoriesPage: FC = () => {
       </div>
 
       {/* Grid */}
-      {loading ? (
+      {actionError && !showAddModal && (
+        <div role="alert" style={{ marginBottom: '16px', padding: '12px 14px', borderRadius: '9px', background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', fontSize: '13px' }}>{actionError}</div>
+      )}
+      {loadError ? (
+        <div role="alert" style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: '12px', padding: '24px', color: '#991b1b' }}>
+          <p style={{ margin: '0 0 12px', fontSize: '13px' }}>{loadError}</p>
+          <button type="button" onClick={() => void fetchCategories()} style={{ minHeight: '40px', padding: '0 14px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', color: '#334155', cursor: 'pointer', fontWeight: 600 }}>Retry</button>
+        </div>
+      ) : loading ? (
         <div style={{ background: '#ffffff', padding: '24px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
           <TableSkeleton rows={4} columns={4} />
         </div>
@@ -160,7 +223,7 @@ export const CategoriesPage: FC = () => {
           onAction={() => setShowAddModal(true)}
         />
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 320px), 1fr))', gap: '20px' }}>
           {filteredCategories.map((cat) => (
             <div
               key={cat.id}
@@ -177,15 +240,29 @@ export const CategoriesPage: FC = () => {
             >
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#0f172a', overflowWrap: 'anywhere' }}>
                     {cat.name}
                   </h3>
+                  <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
                   <button
-                    onClick={() => handleDelete(cat.id)}
+                    type="button"
+                    onClick={() => openEditModal(cat)}
+                    aria-label={`Edit ${cat.name}`}
+                    title="Edit category"
+                    style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '6px', borderRadius: '6px' }}
+                  >
+                    <span aria-hidden="true">✎</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={deletingCategoryId === cat.id}
+                    onClick={() => void handleDelete(cat)}
+                    aria-label={`Archive ${cat.name}`}
                     style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '4px' }}
                   >
                     <Trash2 size={16} />
                   </button>
+                  </div>
                 </div>
 
                 <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '10px' }}>
@@ -211,19 +288,20 @@ export const CategoriesPage: FC = () => {
       {/* Add Modal */}
       {showAddModal && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(15, 23, 42, 0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div style={{ background: '#ffffff', borderRadius: '16px', maxWidth: '440px', width: '100%', overflow: 'hidden' }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="category-modal-title" onKeyDown={(event) => { if (event.key === 'Escape') closeCategoryModal(); }} style={{ background: '#ffffff', borderRadius: '16px', maxWidth: '480px', width: '100%', maxHeight: 'calc(100dvh - 40px)', overflowY: 'auto', boxShadow: '0 24px 70px rgba(15, 23, 42, 0.24)' }}>
             <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>Add Product Category</h2>
-              <button onClick={() => setShowAddModal(false)} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#94a3b8', cursor: 'pointer' }}>✕</button>
+              <h2 id="category-modal-title" style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>{editingCategory ? 'Edit Product Category' : 'Add Product Category'}</h2>
+              <button type="button" onClick={closeCategoryModal} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#94a3b8', cursor: 'pointer' }}>✕</button>
             </div>
 
-            <form onSubmit={handleCreateCategory} style={{ padding: '24px' }}>
+            <form onSubmit={handleSaveCategory} style={{ padding: '24px' }}>
               <div style={{ marginBottom: '14px' }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Category Name *</label>
                 <input
                   type="text"
                   required
                   placeholder="e.g. Footwear & Shoes"
+                  maxLength={255}
                   value={name}
                   onChange={(e) => handleNameChange(e.target.value)}
                   style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
@@ -235,6 +313,7 @@ export const CategoriesPage: FC = () => {
                 <input
                   type="text"
                   placeholder="footwear-shoes"
+                  maxLength={255}
                   value={slug}
                   onChange={(e) => setSlug(e.target.value)}
                   style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
@@ -244,7 +323,8 @@ export const CategoriesPage: FC = () => {
               <div style={{ marginBottom: '24px' }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Description</label>
                 <textarea
-                  rows={2}
+                  rows={3}
+                  maxLength={2000}
                   placeholder="Summary for storefront SEO..."
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
@@ -255,7 +335,7 @@ export const CategoriesPage: FC = () => {
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
+                  onClick={closeCategoryModal}
                   style={{ padding: '9px 16px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px', cursor: 'pointer' }}
                 >
                   Cancel
@@ -265,7 +345,7 @@ export const CategoriesPage: FC = () => {
                   disabled={isSubmitting}
                   style={{ padding: '9px 20px', borderRadius: '8px', border: 'none', background: '#0d9488', fontSize: '13px', fontWeight: 600, color: '#fff', cursor: 'pointer' }}
                 >
-                  {isSubmitting ? 'Saving...' : 'Save Category'}
+                  {isSubmitting ? 'Saving...' : editingCategory ? 'Save Changes' : 'Create Category'}
                 </button>
               </div>
             </form>
