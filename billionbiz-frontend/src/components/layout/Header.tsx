@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import type { FC } from 'react';
 import { 
-  Search, Bell, ChevronDown, 
+  Menu, Search, Bell, ChevronDown, 
   LogOut, Store, Shield, User
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
@@ -10,7 +10,11 @@ import ProfileModal from './ProfileModal';
 import logoDarkBg from '../../assets/logo-dark-bg.png';
 import styles from './Header.module.css';
 
-const Header: FC = () => {
+interface HeaderProps {
+  onMenuClick: () => void;
+}
+
+const Header: FC<HeaderProps> = ({ onMenuClick }) => {
   const { user, role, logout } = useAuthStore();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -78,6 +82,15 @@ const Header: FC = () => {
     <header className={styles.header}>
       {/* LEFT: BillionBiz Brand Logo */}
       <div className={styles.left}>
+        <button
+          type="button"
+          className={styles.mobileMenuBtn}
+          onClick={onMenuClick}
+          aria-label="Open navigation menu"
+          aria-controls="merchant-navigation"
+        >
+          <Menu size={20} aria-hidden="true" />
+        </button>
         <a href="/dashboard" className={styles.logoLink} title="BillionBiz Dashboard">
           <img 
             src={logoDarkBg} 
