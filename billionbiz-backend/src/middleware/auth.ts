@@ -31,7 +31,15 @@ declare global {
 }
 
 export function generateToken(payload: AuthContext, expiresIn = '7d'): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: expiresIn as any });
+  // Callers may refresh a session from req.auth, which originates from a
+  // verified JWT and therefore contains the previous token's timing claims.
+  // jsonwebtoken rejects payload.exp when expiresIn is also supplied.
+  const { exp: _exp, iat: _iat, nbf: _nbf, ...claims } = payload as AuthContext & {
+    exp?: number;
+    iat?: number;
+    nbf?: number;
+  };
+  return jwt.sign(claims, JWT_SECRET, { expiresIn: expiresIn as any });
 }
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
