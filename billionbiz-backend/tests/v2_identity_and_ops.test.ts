@@ -81,6 +81,7 @@ describe('V2 Identity, First-Store Provisioning & Outbox Services', () => {
   const testPassword = 'Password123!';
   let verifyToken = '';
   let storeId = '';
+  let userId = '';
 
   it('T-045: registers merchant and atomically provisions draft store shell with onboarding checklist', async () => {
     const res = await makeRequest('POST', '/api/v1/auth/register', {
@@ -107,6 +108,7 @@ describe('V2 Identity, First-Store Provisioning & Outbox Services', () => {
     authToken = res.body.token;
     verifyToken = res.body.verificationTokenPreview;
     storeId = res.body.store.id;
+    userId = res.body.user.id;
   });
 
   it('T-046: verifies email address with cryptographic token and completes checklist item', async () => {
@@ -164,13 +166,14 @@ describe('V2 Identity, First-Store Provisioning & Outbox Services', () => {
     expect(enrollRes.body.otpauthUrl).toContain('period=30');
     expect(enrollRes.body.recoveryCodes).toHaveLength(8);
 
+    const code = generateTotp(enrollRes.body.secret);
+    const wrongCode = code === '000000' ? '000001' : '000000';
     const invalidCode = await makeRequest('POST', '/api/v1/auth/mfa/verify', {
-      body: { code: '123456' }
+      body: { code: wrongCode }
     });
     expect(invalidCode.status).toBe(401);
     expect(invalidCode.body.error).toBe('INVALID_MFA_CODE');
 
-    const code = generateTotp(enrollRes.body.secret);
     const verifyRes = await makeRequest('POST', '/api/v1/auth/mfa/verify', {
       body: { code }
     });
@@ -187,7 +190,7 @@ describe('V2 Identity, First-Store Provisioning & Outbox Services', () => {
     const stored = await query(
       `SELECT mfa_secret, mfa_enabled, mfa_recovery_codes, mfa_last_counter
        FROM users WHERE id = $1`,
-      [authToken ? (await query(`SELECT id FROM users WHERE email = $1`, [testEmail])).rows[0].id : '']
+      [userId]
     );
     expect(stored.rows[0].mfa_secret).toMatch(/^v1\./);
     expect(stored.rows[0].mfa_enabled).toBe(true);
