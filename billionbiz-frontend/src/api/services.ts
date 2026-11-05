@@ -238,14 +238,20 @@ export const api = {
     }),
 
   enrollMfa: () =>
-    apiClient<{ secret: string; otpauthUrl: string }>('/auth/mfa/enroll', {
+    apiClient<{ secret: string; otpauthUrl: string; recoveryCodes: string[]; message: string }>('/auth/mfa/enroll', {
       method: 'POST'
     }),
 
-  verifyMfa: (token: string) =>
-    apiClient<{ message: string; mfaEnabled: boolean }>('/auth/mfa/verify', {
+  verifyMfa: (code: string) =>
+    apiClient<{ message: string; mfaEnabled: boolean; recoveryCodeConsumed?: boolean }>('/auth/mfa/verify', {
       method: 'POST',
-      body: JSON.stringify({ token })
+      body: JSON.stringify({ code })
+    }),
+
+  verifyMfaRecoveryCode: (recoveryCode: string) =>
+    apiClient<{ message: string; mfaEnabled: boolean; recoveryCodeConsumed: boolean }>('/auth/mfa/verify', {
+      method: 'POST',
+      body: JSON.stringify({ recoveryCode })
     }),
 
   getOnboardingChecklist: () =>
