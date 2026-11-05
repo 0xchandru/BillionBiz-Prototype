@@ -1,14 +1,40 @@
 import { useState, useEffect, useRef } from 'react';
-import type { FC } from 'react';
+import type { FC, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { 
   Menu, Search, Bell, ChevronDown, 
   LogOut, Store, Shield, User
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
+import { navSections } from './Sidebar';
 import { api } from '../../api/services';
 import ProfileModal from './ProfileModal';
 import logoDarkBg from '../../assets/logo-dark-bg.png';
 import styles from './Header.module.css';
+
+type QuickFindItem = {
+  id: string;
+  label: string;
+  path: string;
+  group: string;
+};
+
+const quickFindItems: QuickFindItem[] = [
+  { id: 'dashboard', label: 'Dashboard', path: '/dashboard', group: 'Workspace' },
+  ...navSections.flatMap((section) => {
+    if (section.items?.length) {
+      return section.items.map((item) => ({
+        id: item.id,
+        label: item.label,
+        path: item.path,
+        group: section.label,
+      }));
+    }
+    return section.path
+      ? [{ id: section.id, label: section.label, path: section.path, group: 'Workspace' }]
+      : [];
+  }),
+];
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -20,12 +46,16 @@ const Header: FC<HeaderProps> = ({ onMenuClick }) => {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
   const profileRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchWrapperRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
 
   // Close popovers on click outside
   useEffect(() => {
@@ -35,6 +65,9 @@ const Header: FC<HeaderProps> = ({ onMenuClick }) => {
       }
       if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
         setIsNotificationsOpen(false);
+      }
+      if (searchWrapperRef.current && !searchWrapperRef.current.contains(e.target as Node)) {
+        setIsSearchOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -77,6 +110,35 @@ const Header: FC<HeaderProps> = ({ onMenuClick }) => {
   const displayName = user?.fullName || 'Chandru';
   const roleDisplay = role === 'OWNER' ? 'Super Admin' : (role || 'Super Admin');
   const userInitial = displayName.charAt(0).toUpperCase() || 'C';
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const searchResults = normalizedQuery
+    ? quickFindItems.filter((item) =>
+        `${item.label} ${item.group} ${item.path}`.toLowerCase().includes(normalizedQuery)
+      ).slice(0, 8)
+    : [];
+
+  const openQuickFindResult = (path: string) => {
+    navigate(path);
+    setSearchQuery('');
+    setIsSearchOpen(false);
+    setActiveSearchIndex(0);
+  };
+
+  const handleQuickFindKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'ArrowDown' && searchResults.length > 0) {
+      event.preventDefault();
+      setActiveSearchIndex((current) => Math.min(current + 1, searchResults.length - 1));
+    } else if (event.key === 'ArrowUp' && searchResults.length > 0) {
+      event.preventDefault();
+      setActiveSearchIndex((current) => Math.max(current - 1, 0));
+    } else if (event.key === 'Enter' && searchResults.length > 0) {
+      event.preventDefault();
+      openQuickFindResult(searchResults[activeSearchIndex]?.path || searchResults[0].path);
+    } else if (event.key === 'Escape') {
+      setIsSearchOpen(false);
+      setSearchQuery('');
+    }
+  };
 
   return (
     <header className={styles.header}>
@@ -101,19 +163,52 @@ const Header: FC<HeaderProps> = ({ onMenuClick }) => {
       </div>
 
       {/* CENTER: Rounded Quick Find Search Pill with ⌘K Badge */}
-      <div className={styles.center}>
+      <div className={styles.center} ref={searchWrapperRef}>
         <div className={styles.searchBar} onClick={() => searchInputRef.current?.focus()}>
           <Search size={15} className={styles.searchIcon} />
           <input
             ref={searchInputRef}
             type="text"
-            placeholder="Quick find..."
+            placeholder="Find a page..."
             className={styles.searchInput}
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onFocus={() => setIsSearchOpen(true)}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setActiveSearchIndex(0);
+              setIsSearchOpen(true);
+            }}
+            onKeyDown={handleQuickFindKeyDown}
+            aria-label="Find a page"
+            aria-controls="quick-find-results"
+            aria-expanded={isSearchOpen && normalizedQuery.length > 0}
+            aria-autocomplete="list"
           />
           <kbd className={styles.kbdBadge}>⌘K</kbd>
         </div>
+        {isSearchOpen && normalizedQuery.length > 0 && (
+          <div id="quick-find-results" className={styles.searchResults} role="region" aria-label="Page search results">
+            {searchResults.length > 0 ? (
+              searchResults.map((item, index) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`${styles.searchResult} ${activeSearchIndex === index ? styles.searchResultActive : ''}`}
+                  onMouseEnter={() => setActiveSearchIndex(index)}
+                  onClick={() => openQuickFindResult(item.path)}
+                >
+                  <span className={styles.searchResultText}>
+                    <span className={styles.searchResultLabel}>{item.label}</span>
+                    <span className={styles.searchResultGroup}>{item.group}</span>
+                  </span>
+                  <kbd className={styles.searchResultPath}>{item.path}</kbd>
+                </button>
+              ))
+            ) : (
+              <div className={styles.searchNoResults}>No matching pages. Try another page name.</div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* RIGHT: Topbar Controls */}
