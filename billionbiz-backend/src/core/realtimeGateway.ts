@@ -146,16 +146,18 @@ class RealtimeGateway {
                 const cursor = typeof msg.cursor === 'string'
                   ? msg.cursor
                   : new Date(Date.now() - 3600 * 1000).toISOString();
-                const events = (await this.fetchHistoricalEvents(ws.organizationId!, ws.storeId, cursor))
-                  .filter((event) => this.canReceiveEvent(
-                    ws.permissions || new Set(),
-                    ws.isOwner === true,
-                    ws.isPlatformAdmin === true,
-                    event
-                  ));
+                const page = await this.fetchHistoricalEvents(ws.organizationId!, ws.storeId, cursor);
+                const events = page.events.filter((event) => this.canReceiveEvent(
+                  ws.permissions || new Set(),
+                  ws.isOwner === true,
+                  ws.isPlatformAdmin === true,
+                  event
+                ));
                 ws.send(JSON.stringify({
                   type: 'catchup_completed',
                   cursor,
+                  nextCursor: page.nextCursor,
+                  hasMore: page.hasMore,
                   count: events.length,
                   events
                 }));
@@ -249,9 +251,14 @@ class RealtimeGateway {
     return required.some((permission) => permissions.has(permission) || permissions.has('org.manage'));
   }
 
-  public async fetchHistoricalEvents(organizationId: string, storeId?: string, cursor?: string) {
+  public async fetchHistoricalEvents(organizationId: string, storeId?: string, cursor?: string): Promise<{
+    events: Array<RealtimeEvent & { cursor: string }>;
+    hasMore: boolean;
+    nextCursor: string | null;
+  }> {
     let sql = `
-      SELECT id, organization_id, store_id, event_type, aggregate_type, aggregate_id, payload, created_at
+      SELECT id, organization_id, store_id, event_type, aggregate_type, aggregate_id, payload, created_at,
+             to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_timestamp
       FROM outbox_events
       WHERE organization_id = $1
     `;
@@ -278,9 +285,11 @@ class RealtimeGateway {
       }
     }
 
-    sql += ` ORDER BY created_at ASC, id ASC LIMIT 500`;
+    sql += ` ORDER BY created_at ASC, id ASC LIMIT 501`;
     const result = await query(sql, params);
-    return result.rows.map((row: any) => ({
+    const hasMore = result.rows.length > 500;
+    const pageRows = result.rows.slice(0, 500);
+    const events = pageRows.map((row: any) => ({
       id: row.id,
       type: row.event_type,
       channel: String(row.aggregate_type || 'system').toLowerCase(),
@@ -289,8 +298,14 @@ class RealtimeGateway {
       aggregateType: row.aggregate_type,
       aggregateId: row.aggregate_id,
       payload: row.payload,
-      timestamp: new Date(row.created_at).toISOString()
+      timestamp: new Date(row.created_at).toISOString(),
+      cursor: `${row.cursor_timestamp}|${row.id}`
     }));
+    return {
+      events,
+      hasMore,
+      nextCursor: events.length > 0 ? events[events.length - 1].cursor : null
+    };
   }
 
   public broadcast(event: RealtimeEvent) {
@@ -371,11 +386,12 @@ realtimeRouter.get('/stream', requireAuth, resolveTenant, (req: Request, res: Re
 // GET /api/v1/realtime/catchup (Cursor-based event recovery)
 realtimeRouter.get('/catchup', requireAuth, resolveTenant, async (req: Request, res: Response) => {
   const cursor = (req.query.cursor as string) || new Date(Date.now() - 3600 * 1000).toISOString();
-  const events = (await realtimeGateway.fetchHistoricalEvents(
+  const page = await realtimeGateway.fetchHistoricalEvents(
     req.tenant!.organizationId,
     req.tenant!.storeId,
     cursor
-  )).filter((event) => realtimeGateway.canReceiveEvent(
+  );
+  const events = page.events.filter((event) => realtimeGateway.canReceiveEvent(
     new Set(req.auth?.permissions || []),
     req.auth?.role === 'OWNER',
     req.auth?.isPlatformAdmin === true,
@@ -383,6 +399,8 @@ realtimeRouter.get('/catchup', requireAuth, resolveTenant, async (req: Request, 
   ));
   res.json({
     cursor,
+    nextCursor: page.nextCursor,
+    hasMore: page.hasMore,
     count: events.length,
     events
   });
