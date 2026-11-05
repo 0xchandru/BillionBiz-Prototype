@@ -47,6 +47,7 @@ const envSchema = z.object({
   API_BASE_URL: z.string().default('https://api.chandraprakash.codes/api/v1'),
   EMAIL_PROVIDER: z.enum(['console', 'smtp', 'resend', 'sendgrid']).default('console'),
   RESEND_API_KEY: z.string().optional(),
+  RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().optional().default(587),
   SMTP_USER: z.string().optional(),
