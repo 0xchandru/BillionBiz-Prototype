@@ -92,6 +92,7 @@ const Header: FC<HeaderProps> = ({ onMenuClick }) => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        if (!window.matchMedia('(min-width: 769px)').matches) return;
         e.preventDefault();
         searchInputRef.current?.focus();
       }
