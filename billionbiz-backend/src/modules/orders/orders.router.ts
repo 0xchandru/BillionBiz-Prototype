@@ -894,7 +894,7 @@ ordersRouter.post(
       throw error;
     }
 
-    return res.status(201).json({
+    return res.status(200).json({
       message: 'Order handed to carrier successfully',
       fulfillmentId,
       orderId,
