@@ -711,10 +711,12 @@ identityRouter.post('/mfa/verify', requireAuth, async (req: Request, res: Respon
     if (consumed.rowCount === 0) {
       return registerFailedAttempt();
     }
+    const sessionToken = generateToken({ ...req.auth!, mfaVerified: true });
     return res.json({
       message: 'Recovery code accepted. This recovery code has been consumed and cannot be used again.',
       mfaEnabled: true,
-      recoveryCodeConsumed: true
+      recoveryCodeConsumed: true,
+      token: sessionToken
     });
   }
 
@@ -759,7 +761,84 @@ identityRouter.post('/mfa/verify', requireAuth, async (req: Request, res: Respon
     });
   }
 
-  return res.json({ message: 'MFA successfully enabled', mfaEnabled: true });
+  const sessionToken = generateToken({ ...req.auth!, mfaVerified: true });
+  return res.json({ message: 'MFA successfully enabled', mfaEnabled: true, token: sessionToken });
+});
+
+// POST /api/v1/auth/mfa/challenge/verify
+identityRouter.post('/mfa/challenge/verify', async (req: Request, res: Response) => {
+  const challengeToken = typeof req.body?.challengeToken === 'string' ? req.body.challengeToken.trim() : '';
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  const recoveryCode = typeof req.body?.recoveryCode === 'string' ? req.body.recoveryCode.trim() : '';
+
+  if (!challengeToken || (!code && !recoveryCode) || (code && recoveryCode)) {
+    return res.status(400).json({ error: 'INVALID_MFA_CHALLENGE_INPUT', message: 'Submit the login challenge and either an authenticator code or a recovery code.' });
+  }
+
+  const verified = await verifyMfaLoginChallenge(challengeToken, code, recoveryCode);
+  if (!verified.ok) {
+    if (verified.retryAfterSeconds) res.setHeader('Retry-After', String(verified.retryAfterSeconds));
+    return res.status(verified.status).json({ error: verified.error, message: verified.message, retryAfterSeconds: verified.retryAfterSeconds });
+  }
+
+  const userRes = await query(
+    `SELECT id, email, full_name, is_platform_admin, email_verified, mfa_enabled
+     FROM users WHERE id = $1 AND mfa_enabled = TRUE`,
+    [verified.userId]
+  );
+  if (userRes.rowCount === 0) {
+    return res.status(401).json({ error: 'MFA_ACCOUNT_UNAVAILABLE', message: 'The account could not complete MFA login. Sign in again.' });
+  }
+  const user = userRes.rows[0];
+
+  const orgsRes = await query(
+    `SELECT o.id AS organization_id, o.name AS organization_name, om.role,
+            s.id AS store_id, s.name AS store_name, s.slug AS store_slug
+     FROM organization_memberships om
+     JOIN organizations o ON o.id = om.organization_id
+     LEFT JOIN stores s ON s.organization_id = o.id
+     WHERE om.user_id = $1`,
+    [user.id]
+  );
+  const primaryOrg = orgsRes.rows[0]?.organization_id;
+  const primaryStore = orgsRes.rows[0]?.store_id;
+  const role = orgsRes.rows[0]?.role || 'OWNER';
+
+  const token = generateToken({
+    userId: user.id,
+    email: user.email,
+    fullName: user.full_name,
+    isPlatformAdmin: user.is_platform_admin,
+    organizationId: primaryOrg,
+    storeId: primaryStore,
+    role,
+    mfaVerified: true
+  });
+
+  await recordAudit({
+    organizationId: primaryOrg,
+    storeId: primaryStore,
+    actorId: user.id,
+    action: 'USER_LOGIN_MFA',
+    targetType: 'USER',
+    targetId: user.id,
+    ipAddress: req.ip
+  });
+
+  const portalDestination = resolvePortalDestination(role, user.is_platform_admin);
+  return res.json({
+    token,
+    user: {
+      id: user.id,
+      email: user.email,
+      fullName: user.full_name,
+      isPlatformAdmin: user.is_platform_admin,
+      emailVerified: user.email_verified,
+      mfaEnabled: true
+    },
+    organizations: orgsRes.rows,
+    portalDestination
+  });
 });
 
 // POST /api/v1/auth/google (Google OIDC - T-046)
