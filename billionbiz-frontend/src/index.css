@@ -20,6 +20,23 @@
 
   --color-border: #e2e8f0;
 
+  /* Shared semantic UI tokens */
+  --color-surface-raised: #ffffff;
+  --color-surface-subtle: #f8fafc;
+  --color-border-strong: #cbd5e1;
+  --color-focus-ring: #2563eb;
+  --color-overlay: rgba(15, 23, 42, 0.48);
+  --color-text-inverse: #ffffff;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius-sm: 6px;
+  --radius-xl: 16px;
+  --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.12);
+
   /* Status Colors */
   --color-success: #16a34a;
   --color-success-bg: #dcfce7;
@@ -64,6 +81,32 @@ body {
   background-color: var(--color-bg-body);
   color: var(--color-text-main);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  line-height: 1.5;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+:where(a, button, input, select, textarea, [role='button'], [tabindex]):focus-visible {
+  outline: 3px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+}
+
+::selection {
+  color: #ffffff;
+  background: var(--color-primary);
 }
 
 a {
@@ -99,4 +142,15 @@ button {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
