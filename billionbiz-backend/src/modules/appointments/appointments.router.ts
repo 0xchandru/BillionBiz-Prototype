@@ -286,56 +286,38 @@ appointmentsRouter.get(
   requirePermission('appointments.view'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
-
     const staffRes = await query(
       `SELECT sp.id, sp.display_name, sp.email, sp.phone, sp.avatar_url,
               sp.is_active, sp.capacity, sp.assigned_services, sp.responsibilities,
-              r.id as resource_id, r.name as resource_name
+              r.id AS resource_id, r.name AS resource_name
        FROM staff_profiles sp
-       LEFT JOIN resources r ON r.staff_profile_id = sp.id
+       LEFT JOIN resources r
+         ON r.staff_profile_id = sp.id
+        AND r.store_id = sp.store_id
+        AND r.is_active = TRUE
        WHERE sp.store_id = $1
+         AND sp.is_active = TRUE
+         AND sp.responsibilities @> '["APPOINTMENT_STAFF"]'::jsonb
        ORDER BY sp.display_name ASC`,
       [storeId]
     );
-
     res.json({ staff: staffRes.rows });
   }
 );
 
+// Appointment staff identities are managed in Team. This route is retained
+// for older clients but deliberately refuses to create duplicate profiles.
 appointmentsRouter.post(
   '/staff',
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
   requirePermission('team.manage'),
-  async (req: Request, res: Response) => {
-    const storeId = req.tenant!.storeId;
-    const orgId = req.tenant!.organizationId;
-    const { displayName, email, phone, avatarUrl, assignedServices = [], capacity = 1, responsibilities = ['APPOINTMENT_STAFF'] } = req.body;
-
-    if (!displayName) {
-      return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'Staff display name is required' });
-    }
-
-    const staffId = `stf-${uuidv4()}`;
-    const resourceId = `res-${uuidv4()}`;
-
-    await withTransaction(async (client) => {
-      await client.query(
-        `INSERT INTO staff_profiles (id, organization_id, store_id, display_name, email, phone, avatar_url, assigned_services, capacity, responsibilities, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE)`,
-        [staffId, orgId, storeId, displayName, email || null, phone || null, avatarUrl || null, JSON.stringify(assignedServices), capacity, JSON.stringify(responsibilities)]
-      );
-
-      // Create linked booking resource
-      await client.query(
-        `INSERT INTO resources (id, store_id, name, type, staff_profile_id, is_active)
-         VALUES ($1, $2, $3, 'PERSON', $4, TRUE)`,
-        [resourceId, storeId, displayName, staffId]
-      );
+  async (_req: Request, res: Response) => {
+    res.status(409).json({
+      error: 'TEAM_PROFILE_REQUIRED',
+      message: 'Create or update this person in Team and assign the Appointment Staff responsibility. Appointment staff share the same team profile and login.'
     });
-
-    res.status(201).json({ message: 'Staff member added successfully', staffId, resourceId });
   }
 );
 
@@ -345,37 +327,11 @@ appointmentsRouter.put(
   resolveTenant,
   requireCapability('appointments'),
   requirePermission('team.manage'),
-  async (req: Request, res: Response) => {
-    const storeId = req.tenant!.storeId;
-    const staffId = req.params.id as string;
-    const { displayName, email, phone, avatarUrl, assignedServices, capacity, responsibilities, isActive } = req.body;
-
-    await query(
-      `UPDATE staff_profiles
-       SET display_name = COALESCE($1, display_name),
-           email = COALESCE($2, email),
-           phone = COALESCE($3, phone),
-           avatar_url = COALESCE($4, avatar_url),
-           assigned_services = COALESCE($5, assigned_services),
-           capacity = COALESCE($6, capacity),
-           responsibilities = COALESCE($7, responsibilities),
-           is_active = COALESCE($8, is_active)
-       WHERE id = $9 AND store_id = $10`,
-      [
-        displayName,
-        email,
-        phone,
-        avatarUrl,
-        assignedServices ? JSON.stringify(assignedServices) : null,
-        capacity,
-        responsibilities ? JSON.stringify(responsibilities) : null,
-        isActive,
-        staffId,
-        storeId
-      ]
-    );
-
-    res.json({ message: 'Staff profile updated successfully' });
+  async (_req: Request, res: Response) => {
+    res.status(409).json({
+      error: 'TEAM_PROFILE_REQUIRED',
+      message: 'Update staff identity and responsibilities in Team. Appointment schedules are managed in Working Hours.'
+    });
   }
 );
 
