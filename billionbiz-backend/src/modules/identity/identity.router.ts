@@ -17,6 +17,93 @@ import {
 
 export const identityRouter = Router();
 
+const OTP_MAX_ATTEMPTS = 5;
+
+type OtpCheckResult =
+  | { ok: true }
+  | { ok: false; status: number; error: string; message: string };
+
+function hashOtp(code: string): string {
+  return crypto.createHmac('sha256', env.JWT_SECRET).update(code).digest('hex');
+}
+
+function constantTimeStringEqual(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+async function consumeOtp(identifier: string, otpType: string, suppliedCode: string): Promise<OtpCheckResult> {
+  if (!/^\d{6}$/.test(suppliedCode)) {
+    return { ok: false, status: 400, error: 'INVALID_OTP', message: 'Enter the 6-digit verification code' };
+  }
+
+  const result = await query(
+    \`SELECT id, code, expires_at, attempts
+     FROM verification_otps
+     WHERE identifier = $1 AND type = $2 AND is_used = FALSE
+     ORDER BY created_at DESC
+     LIMIT 1\`,
+    [identifier, otpType]
+  );
+
+  if (result.rowCount === 0) {
+    return { ok: false, status: 400, error: 'INVALID_OTP', message: 'Invalid or already used verification code' };
+  }
+
+  const record = result.rows[0];
+  if (new Date() > new Date(record.expires_at)) {
+    await query(
+      \`UPDATE verification_otps SET is_used = TRUE WHERE id = $1 AND is_used = FALSE\`,
+      [record.id]
+    );
+    return { ok: false, status: 400, error: 'EXPIRED_OTP', message: 'Verification code has expired. Please request a new code.' };
+  }
+
+  const attempts = Number(record.attempts || 0);
+  if (attempts >= OTP_MAX_ATTEMPTS) {
+    await query(
+      \`UPDATE verification_otps SET is_used = TRUE WHERE id = $1 AND is_used = FALSE\`,
+      [record.id]
+    );
+    return { ok: false, status: 429, error: 'OTP_ATTEMPTS_EXCEEDED', message: 'Too many incorrect attempts. Request a new verification code.' };
+  }
+
+  // Store an HMAC digest at rest. A still-valid legacy plaintext OTP is
+  // accepted only during the short deployment window.
+  const valid = constantTimeStringEqual(String(record.code), hashOtp(suppliedCode)) ||
+    constantTimeStringEqual(String(record.code), suppliedCode);
+
+  if (!valid) {
+    const updated = await query(
+      \`UPDATE verification_otps
+       SET attempts = attempts + 1,
+           is_used = CASE WHEN attempts + 1 >= $2 THEN TRUE ELSE is_used END
+       WHERE id = $1 AND is_used = FALSE AND attempts < $2
+       RETURNING attempts\`,
+      [record.id, OTP_MAX_ATTEMPTS]
+    );
+    const nextAttempts = Number(updated.rows[0]?.attempts || attempts + 1);
+    if (nextAttempts >= OTP_MAX_ATTEMPTS) {
+      return { ok: false, status: 429, error: 'OTP_ATTEMPTS_EXCEEDED', message: 'Too many incorrect attempts. Request a new verification code.' };
+    }
+    return { ok: false, status: 400, error: 'INVALID_OTP', message: 'Invalid verification code' };
+  }
+
+  const consumed = await query(
+    \`UPDATE verification_otps SET is_used = TRUE
+     WHERE id = $1 AND is_used = FALSE AND attempts < $2
+     RETURNING id\`,
+    [record.id, OTP_MAX_ATTEMPTS]
+  );
+  if (consumed.rowCount === 0) {
+    return { ok: false, status: 409, error: 'OTP_ALREADY_USED', message: 'This verification code has already been used. Request a new code.' };
+  }
+
+  return { ok: true };
+}
+
+
 /**
  * Resolves the role-aware target operational portal shell (T-047)
  */
@@ -1008,7 +1095,16 @@ identityRouter.post('/otp/send', async (req: Request, res: Response) => {
   }
 
   const { isEmail, value } = normalizeIdentifier(identifier);
-  const otpType = (type || 'REGISTER').toUpperCase();
+  const otpType = typeof type === 'string' ? type.trim().toUpperCase() : 'REGISTER';
+  if (!['REGISTER', 'LOGIN', 'RECOVERY'].includes(otpType)) {
+    return res.status(400).json({ error: 'INVALID_OTP_TYPE', message: 'Unsupported verification flow' });
+  }
+  if (!isEmail) {
+    return res.status(503).json({
+      error: 'SMS_PROVIDER_NOT_CONFIGURED',
+      message: 'Mobile OTP delivery is not configured for this platform yet. Use email verification or configure a supported SMS provider.'
+    });
+  }
 
   // Validate format strictly
   if (isEmail) {
@@ -1054,7 +1150,8 @@ identityRouter.post('/otp/send', async (req: Request, res: Response) => {
   }
 
   // Generate 6-digit cryptographic code
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const code = crypto.randomInt(100000, 1000000).toString();
+  const codeHash = hashOtp(code);
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
   // Invalidate previous unused OTPs for this identifier
@@ -1067,10 +1164,10 @@ identityRouter.post('/otp/send', async (req: Request, res: Response) => {
   await query(
     `INSERT INTO verification_otps (id, identifier, code, type, expires_at)
      VALUES ($1, $2, $3, $4, $5)`,
-    [`otp-${uuidv4()}`, value, code, otpType, expiresAt]
+    [`otp-${uuidv4()}`, value, codeHash, otpType, expiresAt]
   );
 
-  console.log(`[AUTH OTP] Dispatched ${otpType} verification code [${code}] to ${isEmail ? 'email' : 'mobile'} (${value})`);
+  // Do not log OTPs or full recipient identifiers.
 
   // Production Real-Time Email Dispatch via Resend
   if (isEmail) {
@@ -1112,47 +1209,44 @@ identityRouter.post('/otp/send', async (req: Request, res: Response) => {
       });
 
       if (!emailResult.success) {
-        console.error(`[AUTH OTP] Resend delivery error for ${value}:`, emailResult.error);
-        const isQuota = emailResult.error?.name === 'daily_quota_exceeded' || 
-                        String(emailResult.error?.message || '').toLowerCase().includes('quota');
-        if (isQuota) {
-          console.warn(`[AUTH OTP] Resend daily quota reached. Dispatched code to database vault: [${code}]`);
-          return res.json({
-            success: true,
-            quotaReached: true,
-            message: `Verification code generated. Resend daily quota reached; verification code for development/preview is ${code}`,
-            channel: 'EMAIL',
-            identifier: value,
-            previewCode: code,
-            expiresInSeconds: 600
-          });
-        }
-        if (process.env.NODE_ENV !== 'test') {
-          return res.status(502).json({
-            error: 'EMAIL_DELIVERY_FAILED',
-            message: emailResult.error?.message || 'Unable to deliver verification email. Please verify your email address or try again.'
-          });
-        }
-      }
-    } catch (sendErr: any) {
-      console.error(`[AUTH OTP] Exception while sending email via Resend to ${value}:`, sendErr.message);
-      if (process.env.NODE_ENV !== 'test') {
-        return res.status(502).json({
-          error: 'EMAIL_DELIVERY_FAILED',
-          message: sendErr.message || 'Unable to deliver verification email.'
+        const isQuota = emailResult.error?.name === 'daily_quota_exceeded' ||
+          String(emailResult.error?.message || '').toLowerCase().includes('quota');
+        await query(
+          `UPDATE verification_otps SET is_used = TRUE
+           WHERE identifier = $1 AND type = $2 AND is_used = FALSE`,
+          [value, otpType]
+        );
+        return res.status(isQuota ? 503 : 502).json({
+          error: isQuota ? 'EMAIL_PROVIDER_QUOTA_EXCEEDED' : 'EMAIL_DELIVERY_FAILED',
+          message: isQuota
+            ? 'Email delivery is temporarily unavailable because the provider quota has been reached. Try again after the provider limit resets.'
+            : 'Unable to deliver the verification email. Check the configured email provider and try again.'
         });
       }
+    } catch (sendErr: any) {
+      console.error('[AUTH OTP] Email delivery failed:', sendErr.message);
+      await query(
+        `UPDATE verification_otps SET is_used = TRUE
+         WHERE identifier = $1 AND type = $2 AND is_used = FALSE`,
+        [value, otpType]
+      );
+      return res.status(502).json({
+        error: 'EMAIL_DELIVERY_FAILED',
+        message: 'Unable to deliver the verification email. Please try again.'
+      });
+
     }
   }
 
   res.json({
     success: true,
-    message: isEmail ? `Verification code sent to your email (${value})` : `Verification code sent to your mobile phone (${value})`,
-    channel: isEmail ? 'EMAIL' : 'SMS',
+    message: 'Verification code sent to your email',
+    channel: 'EMAIL',
     identifier: value,
-    expiresInSeconds: 600
-  });
-});
+    expiresInSeconds: 600,
+    ...(process.env.NODE_ENV === 'test' ? { testCode: code } : {}),
+    ...(env.NODE_ENV === 'development' && env.EMAIL_PROVIDER === 'console' ? { devOtpPreview: code } : {})
+  });;
 
 // POST /api/v1/auth/otp/verify (Verify OTP Code)
 identityRouter.post('/otp/verify', async (req: Request, res: Response) => {
