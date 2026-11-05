@@ -63,6 +63,12 @@ npm run dev
 ```
 Frontend runs on `http://localhost:5173`.
 
+### 3. Local Store Projects
+
+In development, the backend discovers active stores and provisions an independent React + TypeScript project for each one under `billionbiz-backend/store-projects/`. It starts a dedicated Vite server per store and restarts a project if its server exits. The editor preview stays inside the admin editor; the **Live Store** link opens the separate project at `http://<store-slug>.localhost:<port>`.
+
+Projects use the shared storefront renderer and backend APIs, while each project has its own generated configuration, port, and server process. Configure `BILLIONBIZ_FRONTEND_ROOT` or `BILLIONBIZ_STORE_PROJECTS_DIR` when the frontend or generated projects live outside their default paths. This local server manager runs only when `NODE_ENV=development`.
+
 ---
 
 ## Verification & Testing

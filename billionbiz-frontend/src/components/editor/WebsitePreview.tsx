@@ -26,6 +26,7 @@ export const WebsitePreview: React.FC<WebsitePreviewProps> = ({
   const selectedPageId = useLandingEditorStore((s) => s.selectedPageId);
 
   const { theme, settings, pages } = useSiteStore();
+  const isLoadingEditorData = useSiteStore((s) => s.isLoading);
   const authStoreSlug = useAuthStore((s) => s.storeSlug);
   const localSlug = typeof window !== 'undefined' ? localStorage.getItem('billionbiz_store_slug') : null;
   const storeSlug = authStoreSlug || localSlug || '';
@@ -127,7 +128,7 @@ export const WebsitePreview: React.FC<WebsitePreviewProps> = ({
   const effectiveCategories = serverData?.categories || [];
   const effectiveOfferings = serverData?.offerings || [];
 
-  if (isLoadingServerData) {
+  if (isLoadingServerData || isLoadingEditorData) {
     return (
       <div className="website-preview-loading" role="status" aria-live="polite">
         <div className="website-preview-skeleton-bar" />

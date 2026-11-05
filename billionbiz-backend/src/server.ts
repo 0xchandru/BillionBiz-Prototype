@@ -17,6 +17,7 @@ import { notificationsRouter } from './modules/notifications/notifications.route
 import { realtimeRouter, realtimeGateway } from './core/realtimeGateway.js';
 import { isReservedSubdomain, PLATFORM_MAIN_DOMAIN } from './core/subdomains.js';
 import { pool } from './db/pool.js';
+import { startStoreProjectManager, stopStoreProjectManager } from './modules/storefront/storeProjectManager.js';
 
 export const app = express();
 export const server = http.createServer(app);
@@ -253,5 +254,12 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 if (process.env.NODE_ENV !== 'test') {
   server.listen(PORT, () => {
     console.log(`[BillionBiz Platform Server] Running on http://localhost:${PORT}`);
+    startStoreProjectManager();
   });
+  const shutdown = () => {
+    stopStoreProjectManager();
+    server.close(() => process.exit(0));
+  };
+  process.once('SIGINT', shutdown);
+  process.once('SIGTERM', shutdown);
 }

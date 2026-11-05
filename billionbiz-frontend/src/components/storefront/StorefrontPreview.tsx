@@ -21,11 +21,27 @@ interface StorefrontPreviewProps {
   className?: string;
 }
 
+const PreviewSkeleton: React.FC = () => (
+  <div className="w-full animate-pulse space-y-6" role="status" aria-label="Loading storefront preview">
+    <div className="h-12 rounded-lg bg-slate-200 dark:bg-slate-800" />
+    <div className="h-72 rounded-2xl bg-slate-200 dark:bg-slate-800" />
+    <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      {Array.from({ length: 4 }, (_, index) => (
+        <div key={index} className="space-y-3">
+          <div className="aspect-[4/5] rounded-xl bg-slate-200 dark:bg-slate-800" />
+          <div className="h-3 w-3/4 rounded bg-slate-200 dark:bg-slate-800" />
+          <div className="h-3 w-1/2 rounded bg-slate-200 dark:bg-slate-800" />
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
 export const StorefrontPreview: React.FC<StorefrontPreviewProps> = ({
   initialPath = '/',
   className = ''
 }) => {
-  const storeSlug = useAuthStore((s) => s.storeSlug) || (typeof window !== 'undefined' ? localStorage.getItem('billionbiz_store_slug') : null) || 'chandru';
+  const storeSlug = useAuthStore((s) => s.storeSlug) || (typeof window !== 'undefined' ? localStorage.getItem('billionbiz_store_slug') : null);
   const siteStore = useSiteStore();
   const selectedPageId = useLandingEditorStore((s) => s.selectedPageId);
 
@@ -36,6 +52,7 @@ export const StorefrontPreview: React.FC<StorefrontPreviewProps> = ({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [serverData, setServerData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Sync active preview path whenever user selects a page in the left sidebar
   useEffect(() => {
@@ -50,19 +67,25 @@ export const StorefrontPreview: React.FC<StorefrontPreviewProps> = ({
 
   // Fetch real authoritative tenant data from backend
   const fetchTenantData = async () => {
+    setLoading(true);
     try {
       setIsRefreshing(true);
+      setLoadError(null);
+      if (!storeSlug) {
+        throw new Error('Your store workspace is not available yet. Refresh after your store has loaded.');
+      }
       let res: any;
       try {
         res = await apiClient<any>('/storefront/render');
       } catch {
-        res = await apiClient<any>(`/storefront/by-slug/${storeSlug}`);
+        res = await apiClient<any>(`/storefront/by-slug/${encodeURIComponent(storeSlug)}`);
       }
-      if (res && res.store) {
-        setServerData(res);
-      }
+      if (!res?.store) throw new Error('The server did not return a storefront for this workspace.');
+      setServerData(res);
     } catch (err) {
       console.warn('[StorefrontPreview] Failed to fetch live tenant data:', err);
+      setServerData(null);
+      setLoadError(err instanceof Error ? err.message : 'Could not load this storefront. Please try again.');
     } finally {
       setIsRefreshing(false);
       setLoading(false);
@@ -147,7 +170,7 @@ export const StorefrontPreview: React.FC<StorefrontPreviewProps> = ({
 
   const effectiveSlug = serverData?.store?.slug || storeSlug;
   const pathSuffix = activePath === '/' ? '' : activePath;
-  const liveStorefrontUrl = getStoreUrl(effectiveSlug, pathSuffix);
+  const liveStorefrontUrl = effectiveSlug ? getStoreUrl(effectiveSlug, pathSuffix) : undefined;
 
   return (
     <div className={`flex flex-col h-full bg-slate-100 dark:bg-slate-950 ${className}`}>
@@ -278,24 +301,41 @@ export const StorefrontPreview: React.FC<StorefrontPreviewProps> = ({
           </button>
 
           {/* Open in New Tab */}
-          <a
-            href={liveStorefrontUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Open Live Storefront"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition border border-indigo-200 dark:border-indigo-800/50"
-          >
-            <span>Live Store</span>
-            <ExternalLink size={12} />
-          </a>
+          {liveStorefrontUrl ? (
+            <a
+              href={liveStorefrontUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open Live Storefront"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition border border-indigo-200 dark:border-indigo-800/50"
+            >
+              <span>Live Store</span>
+              <ExternalLink size={12} />
+            </a>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 border border-slate-200 dark:border-slate-700" aria-disabled="true">
+              Live Store <ExternalLink size={12} />
+            </span>
+          )}
         </div>
       </div>
 
       {/* Shared responsive preview viewport used by every storefront preview surface. */}
       {loading ? (
-        <div className="flex-1 flex items-center justify-center text-slate-400 gap-2 text-xs">
-          <RefreshCw size={16} className="animate-spin text-indigo-600" />
-          <span>Loading preview environment...</span>
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+          <div className="mx-auto w-full max-w-5xl rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-800 dark:bg-slate-900">
+            <PreviewSkeleton />
+          </div>
+        </div>
+      ) : loadError || !serverData?.store ? (
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="max-w-md rounded-2xl border border-rose-200 bg-white p-6 text-center shadow-sm dark:border-rose-900 dark:bg-slate-900">
+            <p className="font-semibold text-slate-900 dark:text-white">Store preview unavailable</p>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{loadError || 'The server did not return a storefront for this workspace.'}</p>
+            <button type="button" onClick={fetchTenantData} className="mt-4 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200">
+              Try again
+            </button>
+          </div>
         </div>
       ) : (
         <StorefrontPreviewViewport
@@ -307,7 +347,7 @@ export const StorefrontPreview: React.FC<StorefrontPreviewProps> = ({
           frameClassName="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl overflow-hidden shrink-0"
         >
           <StorefrontRenderer
-            store={serverData?.store || { name: 'Demo Store', slug: storeSlug }}
+            store={serverData.store}
             brand={effectiveBrand}
             themeTokens={effectiveTheme}
             settings={effectiveSettings}

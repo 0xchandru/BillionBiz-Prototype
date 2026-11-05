@@ -344,7 +344,7 @@ export const useOnlineStore = create<OnlineStoreState>()(
       markSaved: () => set({ hasUnsavedChanges: false }),
       markUnsaved: () => set({ hasUnsavedChanges: true }),
       settings: getInitialSettings(),
-      isLoading: false,
+      isLoading: true,
 
       resetOnlineStore: () => {
         set({
@@ -1130,6 +1130,9 @@ export const useOnlineStore = create<OnlineStoreState>()(
         return {
           ...currentState,
           ...persistedState,
+          // Persisted editor drafts are only a cache. Keep the preview behind
+          // its skeleton until the active tenant's data is fetched.
+          isLoading: true,
           settings: storedSettings,
           pages: storedPages,
           lastPublishedSnapshots: storedSnapshots,

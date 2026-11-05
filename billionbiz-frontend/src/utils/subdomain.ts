@@ -49,6 +49,7 @@ export function isLocalOrPreview(): boolean {
   return (
     hostname === 'localhost' ||
     hostname === '127.0.0.1' ||
+    hostname.endsWith('.localhost') ||
     hostname.endsWith('.local') ||
     hostname.endsWith('.vercel.app') ||
     hostname.endsWith('.ngrok-free.app') ||
@@ -194,7 +195,13 @@ export function getStoreUrl(slug: string, path = ''): string {
   const isLocal = isLocalOrPreview();
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   if (isLocal) {
-    return `/store/${slug}${cleanPath === '/' ? '' : cleanPath}`;
+    let hash = 2166136261;
+    for (const character of slug) {
+      hash ^= character.charCodeAt(0);
+      hash = Math.imul(hash, 16777619);
+    }
+    const port = 20_000 + ((hash >>> 0) % 20_000);
+    return `http://${slug}.localhost:${port}${cleanPath === '/' ? '' : cleanPath}`;
   }
   const rootDomain = import.meta.env.VITE_ROOT_DOMAIN || 'chandraprakash.codes';
   return `https://${slug}.${rootDomain}${cleanPath}`;
