@@ -367,11 +367,11 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(staff)
     }),
-  getWorkingHours: () => apiClient<{ workingHours: any[] }>('/appointments/working-hours'),
-  updateWorkingHours: (workingHours: any[]) =>
+  getWorkingHours: () => apiClient<{ shifts: any[]; timezone: string }>('/appointments/working-hours'),
+  updateWorkingHours: (shifts: any[]) =>
     apiClient<any>('/appointments/working-hours', {
       method: 'PUT',
-      body: JSON.stringify({ workingHours })
+      body: JSON.stringify({ shifts })
     }),
   getBookingSettings: () => apiClient<{ settings: any }>('/appointments/settings'),
   updateBookingSettings: (settings: any) =>
@@ -385,6 +385,10 @@ export const api = {
     apiClient<{ holdToken: string; expiresAt: string }>('/appointments/holds', {
       method: 'POST',
       body: JSON.stringify(payload)
+    }),
+  releaseBookingHold: (holdToken: string) =>
+    apiClient<any>(`/appointments/holds/${encodeURIComponent(holdToken)}`, {
+      method: 'DELETE'
     }),
   createBooking: (payload: any) =>
     apiClient<{ message: string; bookingId: string; bookingNumber: string }>('/appointments/bookings', {
@@ -437,7 +441,7 @@ export const api = {
   // Team
   getTeamMembers: () => apiClient<{ members: any[] }>('/team/members'),
   createTeamMember: (member: any) =>
-    apiClient<{ message: string; staffId: string }>('/team/members', {
+    apiClient<{ message: string; staffId?: string; staff?: { id: string; displayName: string } }>('/team/members', {
       method: 'POST',
       body: JSON.stringify(member)
     }),
@@ -451,15 +455,31 @@ export const api = {
       method: 'DELETE'
     }),
   getRoles: () => apiClient<{ roles: any[] }>('/team/roles'),
+  createCustomRole: (payload: { name: string; code?: string; description?: string; permissionCodes: string[] }) =>
+    apiClient<{ message: string; id: string; name: string; code: string }>('/team/roles', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  updateCustomRole: (id: string, payload: { name?: string; description?: string; permissionCodes?: string[] }) =>
+    apiClient<any>(`/team/roles/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
+  deleteCustomRole: (id: string) =>
+    apiClient<any>(`/team/roles/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   getResponsibilities: () => apiClient<{ responsibilities: any[] }>('/team/responsibilities'),
   getPermissions: () => apiClient<{ permissions: any[] }>('/team/permissions'),
 
   // Storefront & Publishing
   getPages: () => apiClient<{ pages: any[] }>('/storefront/pages'),
-  savePageDraft: (pageId: string, sections: any[], pageProps?: any) =>
-    apiClient(`/storefront/pages/${pageId}/draft`, {
+  savePageDraft: (pageId: string, sections: any[], pageProps?: any, expectedVersion?: number) =>
+    apiClient<{ message: string; pageId: string; version: number }>(`/storefront/pages/${encodeURIComponent(pageId)}/draft`, {
       method: 'PATCH',
-      body: JSON.stringify({ sections, pageProps })
+      body: JSON.stringify({
+        sections,
+        pageProps,
+        ...(expectedVersion !== undefined ? { expectedVersion } : {})
+      })
     }),
   publishStore: (notes?: string) =>
     apiClient<{ message: string; releaseId: string; releaseNumber: number }>('/storefront/publish', {
@@ -526,12 +546,6 @@ export const api = {
       method: 'DELETE'
     }),
 
-  // Roles & Responsibilities
-  createCustomRole: (payload: { name: string; code?: string; description?: string; permissionCodes?: string[] }) =>
-    apiClient<any>('/team/roles', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    }),
   processRefund: (payload: { orderId: string; amountMinor: number; reason?: string }) =>
     apiClient<any>('/orders/refunds', {
       method: 'POST',

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ThemeTokenProvider } from './ThemeTokenProvider';
 import { StoreLayout } from './StoreLayout';
 import { HomePageView } from './pages/HomePageView';
@@ -11,9 +11,10 @@ import { AccountPageView } from './pages/AccountPageView';
 import { BookingPageView } from './pages/BookingPageView';
 import { PolicyPageView } from './pages/PolicyPageView';
 import { ContactPageView } from './pages/ContactPageView';
-import { System404View } from './pages/System404View';
 import { PasswordGateView } from './pages/PasswordGateView';
+import { System404View } from './pages/System404View';
 import { Hammer } from 'lucide-react';
+import { sanitizeHtml } from '../../utils/sanitizeHtml';
 
 export interface StorefrontRendererProps {
   store?: {
@@ -21,8 +22,10 @@ export interface StorefrontRendererProps {
     name?: string;
     slug?: string;
     primary_domain?: string;
+    currency?: string;
   };
   brand?: {
+    name?: string;
     brand_name?: string;
     tagline?: string;
     logo_url?: string;
@@ -44,6 +47,8 @@ export interface StorefrontRendererProps {
   offerings?: any[];
   onNavigate?: (path: string) => void;
   previewMode?: boolean;
+  useEditorChrome?: boolean;
+  device?: 'desktop' | 'tablet' | 'mobile';
 }
 
 export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
@@ -57,14 +62,81 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
   categories = [],
   offerings = [],
   onNavigate,
-  previewMode = false
+  previewMode = false,
+  useEditorChrome = false,
+  device
 }) => {
-  const [internalPath, setInternalPath] = useState<string>(currentPath);
-  const [isPasswordUnlocked, setIsPasswordUnlocked] = useState<boolean>(() => {
-    return typeof window !== 'undefined' && sessionStorage.getItem('storefront_password_unlocked') === 'true';
-  });
+  const [runtimeDevice, setRuntimeDevice] = useState<'desktop' | 'tablet' | 'mobile'>(device || 'desktop');
 
+  useEffect(() => {
+    if (device) {
+      setRuntimeDevice(device);
+      return;
+    }
+    const updateDevice = () => {
+      const width = window.innerWidth;
+      setRuntimeDevice(width <= 600 ? 'mobile' : width <= 900 ? 'tablet' : 'desktop');
+    };
+    updateDevice();
+    window.addEventListener('resize', updateDevice);
+    return () => window.removeEventListener('resize', updateDevice);
+  }, [device]);
+  const [internalPath, setInternalPath] = useState<string>(currentPath);
   const activePath = previewMode ? (currentPath || internalPath) : (window.location.pathname || currentPath || '/');
+  const brandDisplayName = brand?.brand_name || brand?.name || store?.name || 'Online Store';
+
+  const seoDefaults = (settings as any)?.seoDefaults || (settings as any)?.seo_defaults || {};
+  const normalizedActivePath = activePath.replace(/\/+$/, '') || '/';
+  const activePageMetadata = pages.find((page: any) =>
+    (page.path || '/') === normalizedActivePath
+  ) || pages.find((page: any) => page.slug && `/${page.slug}` === normalizedActivePath);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const pageName = activePageMetadata?.name || (normalizedActivePath === '/' ? 'Home' : normalizedActivePath.split('/').filter(Boolean).pop() || 'Page');
+    const template = String(seoDefaults.titleTemplate || '{page} · {store}');
+    const generatedTitle = template
+      .replace(/\{page\}/g, pageName)
+      .replace(/\{store\}/g, brandDisplayName);
+    const title = activePageMetadata?.seo_title || activePageMetadata?.seoTitle || generatedTitle;
+    const description = activePageMetadata?.seo_description ||
+      activePageMetadata?.seoDescription ||
+      seoDefaults.metaDescription ||
+      brand?.tagline ||
+      '';
+    const allowIndexing = seoDefaults.allowIndexing !== false;
+
+    document.title = title;
+
+    const setMeta = (selector: string, attribute: string, value: string) => {
+      let element = document.head.querySelector(selector) as HTMLMetaElement | null;
+      if (!element) {
+        element = document.createElement('meta');
+        if (selector.startsWith('meta[name=')) element.name = selector.slice(11, -2);
+        else if (selector.startsWith('meta[property=')) element.setAttribute('property', selector.slice(14, -2));
+        document.head.appendChild(element);
+      }
+      element.setAttribute(attribute, value);
+    };
+
+    setMeta('meta[name="description"]', 'content', description);
+    setMeta('meta[name="robots"]', 'content', allowIndexing ? 'index,follow' : 'noindex,nofollow');
+    setMeta('meta[property="og:title"]', 'content', title);
+    setMeta('meta[property="og:description"]', 'content', description);
+    setMeta('meta[property="og:image"]', 'content', activePageMetadata?.social_image || activePageMetadata?.socialImage || seoDefaults.socialImage || '');
+
+    const canonicalBase = String(seoDefaults.canonicalBase || '').trim().replace(/\/+$/, '');
+    const pageCanonical = activePageMetadata?.canonical_url || activePageMetadata?.canonicalUrl;
+    const canonicalUrl = pageCanonical || (canonicalBase ? `${canonicalBase}${normalizedActivePath === '/' ? '' : normalizedActivePath}` : `${window.location.origin}${normalizedActivePath}`);
+    let canonicalLink = document.head.querySelector('link[rel="canonical"]') as HTMLLinkElement | null;
+    if (!canonicalLink) {
+      canonicalLink = document.createElement('link');
+      canonicalLink.rel = 'canonical';
+      document.head.appendChild(canonicalLink);
+    }
+    canonicalLink.href = canonicalUrl;
+  }, [activePageMetadata, normalizedActivePath, seoDefaults.titleTemplate, seoDefaults.metaDescription, seoDefaults.allowIndexing, seoDefaults.socialImage, seoDefaults.canonicalBase, brandDisplayName, brand?.tagline]);
 
   const handleNavigate = (path: string) => {
     if (onNavigate) {
@@ -77,10 +149,19 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
     }
   };
 
-  const brandDisplayName = brand?.brand_name || store?.name || 'Online Store';
+  const homePageForChrome = pages.find((page: any) => page.path === '/' || page.id === 'landing-page');
+  const headerSectionForChrome = homePageForChrome?.sections?.find((section: any) => section.type === 'Header');
+  const footerSectionForChrome = homePageForChrome?.sections?.find((section: any) =>
+    ['Footer', 'FooterMain'].includes(section.type)
+  );
+  const headerEditorProps = headerSectionForChrome?.props || {};
+  const footerEditorConfig = footerSectionForChrome?.props?._footerEditor || {};
+  const publishedFooterTree = Array.isArray(footerEditorConfig.tree) ? footerEditorConfig.tree : undefined;
+  const publishedFooterRows = Array.isArray(footerEditorConfig.rows) ? footerEditorConfig.rows : undefined;
+  const maintenanceMode = settings?.maintenance_mode ?? (settings as any)?.maintenanceMode ?? false;
 
   // Check Maintenance Mode
-  if (settings?.maintenance_mode && !previewMode) {
+  if (maintenanceMode && !previewMode) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50 dark:bg-slate-950 text-center">
         <div className="max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 space-y-4 shadow-sm">
@@ -96,26 +177,8 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
     );
   }
 
-  // Check Password Protection
-  if (settings?.password_enabled && !isPasswordUnlocked && !previewMode) {
-    return (
-      <ThemeTokenProvider tokens={themeTokens}>
-        <PasswordGateView
-          brandName={brandDisplayName}
-          tagline={brand?.tagline}
-          onUnlock={async (password) => {
-            // Check password
-            if (password.length > 0) {
-              sessionStorage.setItem('storefront_password_unlocked', 'true');
-              setIsPasswordUnlocked(true);
-              return true;
-            }
-            return false;
-          }}
-        />
-      </ThemeTokenProvider>
-    );
-  }
+  // Password protection is enforced by the public data API before this
+  // renderer receives any private publication or catalogue content.
 
   // Route Resolver
   const renderPageView = () => {
@@ -131,7 +194,9 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
           products={products}
           categories={categories}
           offerings={offerings}
+          currencyCode={store?.currency || 'INR'}
           onNavigate={handleNavigate}
+          device={runtimeDevice}
           sections={homePage?.sections || []}
         />
       );
@@ -254,7 +319,7 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
           </h1>
           <div className="prose dark:prose-invert max-w-none text-sm text-slate-700 dark:text-slate-300">
             {matchedCustomPage.content ? (
-              <div dangerouslySetInnerHTML={{ __html: matchedCustomPage.content }} />
+              <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(matchedCustomPage.content) }} />
             ) : (
               <p className="text-slate-500 italic">This page has no content published yet.</p>
             )}
@@ -268,17 +333,22 @@ export const StorefrontRenderer: React.FC<StorefrontRendererProps> = ({
   };
 
   return (
-    <ThemeTokenProvider tokens={themeTokens}>
+    <ThemeTokenProvider theme={themeTokens}>
       <StoreLayout
         brand={{
           name: brandDisplayName,
           tagline: brand?.tagline,
-          logoUrl: brand?.logo_url,
-          faviconUrl: brand?.favicon_url,
-          socialLinks: brand?.social_links
+          logoUrl: brand?.logo_url || (brand as any)?.logoUrl,
+          faviconUrl: brand?.favicon_url || (brand as any)?.faviconUrl,
+          socialLinks: brand?.social_links || (brand as any)?.socialLinks
         }}
         previewMode={previewMode}
         onNavigate={handleNavigate}
+        headerProps={headerEditorProps}
+        footerTree={publishedFooterTree}
+        footerRows={publishedFooterRows}
+        useEditorChrome={useEditorChrome}
+        device={runtimeDevice}
         currentPath={activePath}
       >
         {renderPageView()}

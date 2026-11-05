@@ -125,11 +125,15 @@ import { getDefaultTheme } from './theme/themePresets';
 import { TabRenderer } from './ui/TabRenderer';
 import { PageTabRenderer } from './ui/PageTabRenderer';
 import { getPageConfig } from './pageConfigs';
+import { getHomePage, resolveEditorPage } from './utils/pageIdentity';
 import { ThemeEditorRightPanel } from './right/ThemeEditorRightPanel';
 import { BrandRightPanel } from './right/BrandRightPanel';
 import { SettingsRightPanel } from './right/SettingsRightPanel';
+import { GrowthRightPanel } from './right/GrowthRightPanel';
 import { ColorPickerPopover } from './ui/ColorPickerPopover';
 import { CapabilityInspector } from './engine/CapabilityInspector';
+import { HeroBannerBlockInspector } from './sectionEngine/HeroBannerBlockInspector';
+import { FeaturedCollectionInspector } from './sectionEngine/FeaturedCollectionInspector';
 
 import styles from '../../pages/editor/EditorLayout.module.css';
 
@@ -7907,8 +7911,8 @@ export const EditorRightSidebar: React.FC = () => {
   const [activeEditorTab, setActiveEditorTab] = useState<'content' | 'design' | 'visibility' | 'advanced' | 'abtest' | 'personalize'>('content');
   const [visibilitySectionsOpen, setVisibilitySectionsOpen] = useState({ devices: true, schedule: true, audience: true, segment: true });
 
-  const landingPage = pages.find((p) => p.id === 'landing-page') || pages[0];
-  const activePage = pages.find((p) => p.id === selectedPageId) || landingPage;
+  const landingPage = getHomePage(pages) || pages[0];
+  const activePage = resolveEditorPage(pages, selectedPageId) || landingPage;
   const isGlobalComponent = ['header-global', 'footer-global', 'cookie-consent-global', 'toaster-global'].includes(selectedPageId);
   const activeSection = (isGlobalComponent ? landingPage : activePage)?.sections.find((s) => s.id === selectedSectionId);
 
@@ -7941,12 +7945,15 @@ export const EditorRightSidebar: React.FC = () => {
     return null;
   }
 
-  // 2. In Brand tab: render contextual brand panel
-  if (activePanel === 'brand' || activePanel === 'store-brand' || activePanel === 'seo-growth') {
+  // Identity and Growth have separate editing surfaces.
+  if (activePanel === 'brand' || activePanel === 'store-brand') {
     return <BrandRightPanel />;
   }
+  if (activePanel === 'growth' || activePanel === 'seo-growth') {
+    return <GrowthRightPanel />;
+  }
 
-  // 3. In Settings tab: render contextual settings panel
+  // In Store Setup, render the contextual settings editor.
   if (activePanel === 'settings') {
     return <SettingsRightPanel />;
   }
@@ -8077,7 +8084,7 @@ export const EditorRightSidebar: React.FC = () => {
 
   // 5. Default pages other than Homepage (Shop, Product Details, Cart, Checkout, 404, Maintenance, Legal, etc.)
   // When no section on the page is selected, render the page configuration settings
-  if (activePanel === 'pages' && selectedPageId !== 'landing-page' && !isGlobalComponent && !activeSection) {
+  if (activePanel === 'pages' && activePage?.path !== '/' && !isGlobalComponent && !activeSection) {
     let pageConfig = getPageConfig(activePage.type) || getPageConfig(activePage.id.replace('-page', ''));
 
     // Fallback config for pages without a registered config
@@ -8122,7 +8129,7 @@ export const EditorRightSidebar: React.FC = () => {
   }
 
   // If in homepage landing-page and no section is selected, hide right sidebar
-  if (activePanel === 'pages' && selectedPageId === 'landing-page' && !activeSection) {
+  if (activePanel === 'pages' && activePage?.path === '/' && !activeSection) {
     return null;
   }
 
@@ -8295,6 +8302,18 @@ export const EditorRightSidebar: React.FC = () => {
             </div>
           </div>
         </>
+      ) : activeSection?.type === 'FeaturedCollection' ? (
+        <FeaturedCollectionInspector
+          pageId={(isGlobalComponent ? landingPage?.id : activePage?.id) || landingPage?.id || ''}
+          section={activeSection}
+          onClose={closeRightSidebar}
+        />
+      ) : activeSection?.type === 'HeroBanner' ? (
+        <HeroBannerBlockInspector
+          pageId={(isGlobalComponent ? landingPage?.id : activePage?.id) || landingPage?.id || ''}
+          section={activeSection}
+          onClose={closeRightSidebar}
+        />
       ) : activeSection && sectionConfig ? (
         /* ======= NEW CONFIG-DRIVEN EDITOR ======= */
         <>

@@ -31,6 +31,7 @@ import type { FooterColumn, FooterElement } from '../engine/types';
 import { computeFooterPaletteVariables, isColorDark } from '../engine/footerDirectoryModel';
 import { FooterTreeRenderer } from './FooterTreeRenderer';
 import styles from './FooterSections.module.css';
+import { sanitizeHtml } from '../../../utils/sanitizeHtml';
 
 interface FooterMainSectionProps {
   props?: any;
@@ -1593,7 +1594,7 @@ export const FooterMainSection: React.FC<FooterMainSectionProps> = ({
                         className={`${isEditorInteractive ? styles.elementEditable : ''} ${
                           isElSelected ? styles.elementSelected : ''
                         }`}
-                        dangerouslySetInnerHTML={{ __html: elProps.html || '' }}
+                        dangerouslySetInnerHTML={{ __html: isEditorInteractive ? (elProps.html || '') : sanitizeHtml(elProps.html || '') }}
                         style={{ opacity: isElVisible ? 1 : 0.45 }}
                       />
                     );

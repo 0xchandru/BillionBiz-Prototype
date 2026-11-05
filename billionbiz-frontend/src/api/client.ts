@@ -57,6 +57,21 @@ export function clearApiBaseUrl(): void {
   }
 }
 
+const isPlatformAdminToken = (token: string | null): boolean => {
+  if (!token || typeof window === 'undefined') return false;
+  try {
+    const payloadPart = token.split('.')[1];
+    if (!payloadPart) return false;
+    const base64 = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
+    const binary = window.atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, '='));
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    const payload = JSON.parse(new TextDecoder().decode(bytes));
+    return payload?.isPlatformAdmin === true;
+  } catch {
+    return false;
+  }
+};
+
 export interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
 }
@@ -82,15 +97,21 @@ export async function apiClient<T = any>(endpoint: string, options: RequestOptio
   }
 
   const token = typeof window !== 'undefined' ? localStorage.getItem('billionbiz_token') : null;
-  const orgId = typeof window !== 'undefined' ? (localStorage.getItem('billionbiz_org_id') || 'org-billionbiz-default') : 'org-billionbiz-default';
-  const storeId = typeof window !== 'undefined' ? (localStorage.getItem('billionbiz_store_id') || 'store-shoum-default') : 'store-shoum-default';
+  const orgId = typeof window !== 'undefined' ? localStorage.getItem('billionbiz_org_id') : null;
+  const storeId = typeof window !== 'undefined' ? localStorage.getItem('billionbiz_store_id') : null;
   const storeSlug = typeof window !== 'undefined' ? localStorage.getItem('billionbiz_store_slug') : null;
+
+  // Merchant JWTs already bind the user to an organization/store. Sending
+  // stale localStorage tenant IDs alongside that token creates accidental
+  // cross-tenant mismatches. Only platform admins may explicitly select a
+  // tenant through these headers; the backend independently verifies the JWT.
+  const maySelectTenant = !token || isPlatformAdminToken(token);
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'x-organization-id': orgId,
-    'x-store-id': storeId,
-    ...(storeSlug ? { 'x-store-slug': storeSlug } : {}),
+    ...(maySelectTenant && orgId ? { 'x-organization-id': orgId } : {}),
+    ...(maySelectTenant && storeId ? { 'x-store-id': storeId } : {}),
+    ...(maySelectTenant && storeSlug ? { 'x-store-slug': storeSlug } : {}),
     // Critical for ngrok free-tier tunnels: bypass browser interstitial HTML page
     'ngrok-skip-browser-warning': 'true',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),

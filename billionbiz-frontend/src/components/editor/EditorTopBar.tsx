@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   ArrowLeft, Undo, Redo, Monitor, Tablet, Smartphone, Columns,
@@ -28,6 +28,7 @@ import { getStoreUrl } from '../../utils/subdomain';
 import { AuditButton } from './topbar/AuditButton';
 import { VersionCompareModal } from './engine/VersionCompareModal';
 import styles from './topbar/topbar.module.css';
+import { getHomePage, resolveEditorPage } from './utils/pageIdentity';
 
 export const EditorTopBar: React.FC = () => {
   const navigate = useNavigate();
@@ -55,8 +56,9 @@ export const EditorTopBar: React.FC = () => {
     hasUnsavedChanges,
     markSaved,
     lastPublishedSnapshots,
-    unpublishPage,
-    publishPage,
+    savePageDraftToBackend,
+    saveThemeToBackend,
+    saveSettingsToBackend,
   } = useSiteStore();
   const { canUndo, canRedo } = useThemeHistoryStore();
   const { storeSlug } = useAuthStore();
@@ -70,20 +72,21 @@ export const EditorTopBar: React.FC = () => {
   const [isVersionCompareOpen, setIsVersionCompareOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const activePage = pages.find((p) => p.id === selectedPageId) || pages[0];
+  const activePage = resolveEditorPage(pages, selectedPageId) || pages[0];
   const isPages = activePanel === 'pages';
   const isPagesList = isPages && pagesNavLevel === 'list';
   const isPageEditor = isPages && pagesNavLevel === 'page-detail';
   const isTheme = activePanel === 'design' || activePanel === 'design-experience';
   const isStoreBrand = activePanel === 'brand' || activePanel === 'store-brand';
+  const isGrowth = activePanel === 'growth' || activePanel === 'seo-growth';
   const isSettings = activePanel === 'settings';
   const isLandingPageEditor =
     !location.pathname.startsWith('/editor/pages') &&
-    (location.pathname.startsWith('/editor/landing-page') || (isPageEditor && selectedPageId === 'landing-page'));
+    (location.pathname.startsWith('/editor/landing-page') || (isPageEditor && activePage?.path === '/'));
 
   // Helper to determine status and baseline per editing scope
   const getPublishScopeState = () => {
-    const landingPage = pages.find((p) => p.id === 'landing-page') || pages[0];
+    const landingPage = getHomePage(pages) || pages[0];
 
     if (selectedPageId === 'header-global') {
       const currentSections = (landingPage?.sections || []).filter(isHeaderComponent);
@@ -111,9 +114,11 @@ export const EditorTopBar: React.FC = () => {
       return { isLive, isSavedDraft, hasUnpublished, name: 'Global Footer' };
     }
 
-    if (selectedPageId === 'landing-page') {
+    if (selectedPageId === 'landing-page' || activePage?.path === '/') {
       const currentSections = (landingPage?.sections || []).filter(isHomepageBodySection);
-      const snapshot = landingPage?.lastPublishedSnapshot || lastPublishedSnapshots?.['landing-page'];
+      const snapshot = landingPage?.lastPublishedSnapshot ||
+        lastPublishedSnapshots?.[landingPage?.id || ''] ||
+        lastPublishedSnapshots?.['landing-page'];
       const hasBaseline = Boolean(snapshot?.publishedAt && Array.isArray(snapshot?.sections));
       const hasUnpublished = Boolean(
         !hasBaseline ||
@@ -125,7 +130,7 @@ export const EditorTopBar: React.FC = () => {
       return { isLive, isSavedDraft, hasUnpublished, name: 'Homepage' };
     }
 
-    const targetPage = pages.find((p) => p.id === selectedPageId) || landingPage;
+    const targetPage = resolveEditorPage(pages, selectedPageId) || landingPage;
     const snapshot = targetPage?.lastPublishedSnapshot || (targetPage ? lastPublishedSnapshots?.[targetPage.id] : null);
     const hasBaseline = Boolean(snapshot?.publishedAt && Array.isArray(snapshot?.sections));
     const hasUnpublished = Boolean(
@@ -149,68 +154,150 @@ export const EditorTopBar: React.FC = () => {
     }, 3200);
   };
 
-  const handleSave = () => {
-    // Sync composable Header state to siteStore
-    try {
-      useEditorContextStore.getState().syncHeaderToSiteStore();
-    } catch (e) {
-      console.warn('Could not sync header state:', e);
+  const [isSaving, setIsSaving] = useState(false);
+  const landingPage = pages.find((page) => page.path === '/') ||
+    pages.find((page) => page.id === 'landing-page') ||
+    pages[0];
+
+  const getCurrentDraftFingerprint = useCallback(() => {
+    const state = useSiteStore.getState();
+    return JSON.stringify({
+      pages: state.pages.map((page) => ({
+        id: page.id,
+        sections: page.sections,
+        pageProps: page.pageProps
+      })),
+      theme: state.theme,
+      settings: state.settings
+    });
+  }, []);
+
+  const persistCurrentScope = useCallback(async () => {
+    if (isTheme) {
+      await saveThemeToBackend(theme);
+      return;
     }
 
-    if (isTheme) {
-      markSaved();
-      showToast('Design system changes saved');
+    if (isStoreBrand || isSettings) {
+      await saveSettingsToBackend(settings);
       return;
     }
-    if (isStoreBrand) {
-      markSaved();
-      showToast('Brand settings saved');
+
+    if (isGrowth) {
+      const section = useLandingEditorStore.getState().brandSection;
+      if (section === 'page-seo') {
+        const page = resolveEditorPage(pages, selectedPageId) || pages.find((item) => item.path === '/') || pages[0];
+        if (!page) throw new Error('Select a page before saving page metadata.');
+        await savePageDraftToBackend(page.id);
+      } else {
+        await saveSettingsToBackend(settings);
+      }
       return;
     }
-    if (isSettings) {
-      markSaved();
-      showToast('System settings saved successfully');
-      return;
-    }
+
     if (isPageEditor) {
-      markSaved();
-      showToast(`${activeScopeName} draft saved successfully`);
+      if (selectedPageId === 'header-global' || selectedPageId === 'footer-global') {
+        const editorContext = useEditorContextStore.getState();
+        if (selectedPageId === 'header-global') {
+          editorContext.syncHeaderToSiteStore();
+        } else {
+          editorContext.syncFooterToSiteStore();
+        }
+        if (!landingPage) throw new Error('The home page is not available in the current store.');
+        await savePageDraftToBackend(landingPage.id);
+        return;
+      }
+
+      const page = resolveEditorPage(pages, selectedPageId) || landingPage;
+      if (!page) throw new Error('The selected page is not available in the current store.');
+      await savePageDraftToBackend(page.id);
       return;
     }
+
+    if (hasUnsavedChanges) {
+      throw new Error('Select a page, brand, design or settings area before saving.');
+    }
+  }, [
+    isTheme,
+    isStoreBrand,
+    isGrowth,
+    isSettings,
+    isPageEditor,
+    selectedPageId,
+    landingPage,
+    pages,
+    theme,
+    settings,
+    hasUnsavedChanges,
+    saveThemeToBackend,
+    saveSettingsToBackend,
+    savePageDraftToBackend
+  ]);
+
+  const handleSave = async () => {
+    if (isSaving) return;
     if (!hasUnsavedChanges) {
-      showToast('All changes already saved to draft');
+      showToast('All changes are already saved');
       return;
     }
-    markSaved();
-    showToast('Draft edits saved successfully');
+
+    const savedFingerprint = getCurrentDraftFingerprint();
+    setIsSaving(true);
+    try {
+      await persistCurrentScope();
+      if (getCurrentDraftFingerprint() === savedFingerprint) {
+        markSaved();
+        showToast(`${activeScopeName} saved successfully`);
+      } else {
+        showToast('Saved the current snapshot. Newer edits are still pending.');
+      }
+    } catch (error: any) {
+      showToast(`Save failed: ${error?.message || 'Please retry.'}`);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  // Auto-save effect
+  // Autosave persists the active editor scope. The dirty state is cleared only
+  // after the server confirms every requested write.
   useEffect(() => {
-    if (!hasUnsavedChanges) return;
+    if (!hasUnsavedChanges || isSaving) return;
 
-    const autoSaveTimer = setTimeout(() => {
+    const autoSaveTimer = setTimeout(async () => {
+      const savedFingerprint = getCurrentDraftFingerprint();
+      setIsSaving(true);
       try {
-        useEditorContextStore.getState().syncHeaderToSiteStore();
-      } catch (e) {
-        console.warn('Could not sync header state:', e);
-      }
-      markSaved();
-      if (isTheme) {
-        showToast('Design auto-saved');
-      } else if (isStoreBrand) {
-        showToast('Brand settings auto-saved');
-      } else if (isSettings) {
-        showToast('Settings auto-saved');
-      } else if (isPageEditor) {
-        showToast(`${activeScopeName} auto-saved`);
-      } else {
-        showToast('Draft auto-saved');
+        await persistCurrentScope();
+        if (getCurrentDraftFingerprint() === savedFingerprint) {
+          markSaved();
+          showToast(`${activeScopeName} auto-saved`);
+        } else {
+          showToast('Auto-save completed. Newer edits are still pending.');
+        }
+      } catch (error: any) {
+        showToast(`Auto-save failed: ${error?.message || 'Changes remain unsaved.'}`);
+      } finally {
+        setIsSaving(false);
       }
     }, 4000);
 
     return () => clearTimeout(autoSaveTimer);
-  }, [hasUnsavedChanges, pages, theme, settings, markSaved, isTheme, isStoreBrand, isSettings, isPageEditor, activeScopeName]);
+  }, [
+    hasUnsavedChanges,
+    pages,
+    theme,
+    settings,
+    markSaved,
+    isTheme,
+    isStoreBrand,
+    isSettings,
+    isPageEditor,
+    activeScopeName,
+    selectedPageId,
+    isSaving,
+    persistCurrentScope,
+    getCurrentDraftFingerprint
+  ]);
 
   const editorEngineStore = useEditorContextStore();
   const isGlobalHeaderOrFooter = selectedPageId === 'header-global' || selectedPageId === 'footer-global';
@@ -332,26 +419,9 @@ export const EditorTopBar: React.FC = () => {
   ]);
 
   const handlePublish = () => {
-    if (selectedPageId === 'header-global') {
-      try {
-        useEditorContextStore.getState().syncHeaderToSiteStore();
-      } catch (error) {
-        console.warn('Could not sync header state before publish:', error);
-      }
-    }
-    if (selectedPageId === 'landing-page') {
-      setIsPublishModalOpen(true);
-    } else {
-      const targetId = selectedPageId === 'header-global'
-        ? 'header-global'
-        : selectedPageId === 'footer-global'
-          ? 'footer-global'
-          : activePage?.id;
-      if (targetId) {
-        publishPage(targetId);
-        showToast(`Published "${activeScopeName}" to live storefront!`);
-      }
-    }
+    // The backend publishes one atomic whole-store snapshot. Never mark a
+    // page/header/footer as live only in local Zustand state.
+    setIsPublishModalOpen(true);
   };
 
   const handlePreview = () => {
@@ -366,18 +436,10 @@ export const EditorTopBar: React.FC = () => {
 
   const handleStatusBadgeClick = () => {
     if (isLive) {
-      const targetId = selectedPageId === 'header-global'
-        ? 'header-global'
-        : selectedPageId === 'footer-global'
-          ? 'footer-global'
-          : activePage?.id;
-      if (targetId) {
-        unpublishPage(targetId);
-        showToast(`"${activeScopeName}" unpublished to draft`);
-      }
-    } else {
-      setIsPublishModalOpen(true);
+      showToast('This release remains live until a new whole-store publication replaces it.');
+      return;
     }
+    setIsPublishModalOpen(true);
   };
 
   const authStoreName = useAuthStore((s) => s.storeName);
@@ -473,17 +535,22 @@ export const EditorTopBar: React.FC = () => {
             {isSettings ? (
               <div className={styles.contextTag}>
                 <Settings size={14} color="#64748b" />
-                <span>Store Settings</span>
+                <span>Store setup</span>
               </div>
             ) : isStoreBrand ? (
               <div className={styles.contextTag}>
                 <Store size={14} color="#d97706" />
-                <span>Brand & Identity</span>
+                <span>Store identity</span>
               </div>
             ) : isTheme ? (
               <div className={styles.contextTag}>
                 <Palette size={14} color="#2563eb" />
-                <span>Design: {theme?.presetName || 'Modern'}</span>
+                <span>Design system · {theme?.presetName || 'Modern'}</span>
+              </div>
+            ) : isGrowth ? (
+              <div className={styles.contextTag}>
+                <Sparkles size={14} color="#0f766e" />
+                <span>Growth &amp; discovery</span>
               </div>
             ) : isPageEditor ? (
               /* Status Badge: only shown inside a specific page editor, not in /editor/pages list */
@@ -492,7 +559,7 @@ export const EditorTopBar: React.FC = () => {
                 onClick={handleStatusBadgeClick}
                 title={
                   isLive
-                    ? `Status: Live on storefront. Click to unpublish ${activeScopeName}.`
+                    ? `Status: Live on storefront. The currently published snapshot remains live until a new release is activated.`
                     : isSavedDraft
                       ? `Status: Saved to draft. Click to review & publish ${activeScopeName}.`
                       : `Status: Draft / Unsaved changes. Click to publish ${activeScopeName}.`
@@ -697,8 +764,8 @@ export const EditorTopBar: React.FC = () => {
               <button
                 className={styles.btnPrimarySave}
                 onClick={handleSave}
-                disabled={!hasUnsavedChanges}
-                style={!hasUnsavedChanges ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+                disabled={!hasUnsavedChanges || isSaving}
+                style={!hasUnsavedChanges || isSaving ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
                 title={hasUnsavedChanges ? "Save theme customizations" : "Theme is up to date"}
               >
                 <Save size={13} />
@@ -732,8 +799,8 @@ export const EditorTopBar: React.FC = () => {
                 <button
                   className={styles.btnGhost}
                   onClick={handleSave}
-                  disabled={!hasUnsavedChanges}
-                  style={!hasUnsavedChanges ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
+                  disabled={!hasUnsavedChanges || isSaving}
+                  style={!hasUnsavedChanges || isSaving ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
                   title={hasUnsavedChanges ? `Save ${activeScopeName} draft (Ctrl+S)` : `All ${activeScopeName} edits saved`}
                 >
                   <Save size={13} />
@@ -743,11 +810,11 @@ export const EditorTopBar: React.FC = () => {
                 <button
                   className={styles.btnPrimary}
                   onClick={handlePublish}
-                  title={selectedPageId === 'landing-page' ? `Review & publish ${activeScopeName} changes to live storefront` : `Publish ${activeScopeName} directly to live storefront`}
+                  title={activePage?.path === '/' ? `Review & publish ${activeScopeName} changes to live storefront` : `Publish ${activeScopeName} directly to live storefront`}
                 >
                   <UploadCloud size={13} />
                   <span>Publish</span>
-                  {selectedPageId === 'landing-page' && <ChevronDown size={11} style={{ opacity: 0.8 }} />}
+                  {activePage?.path === '/' && <ChevronDown size={11} style={{ opacity: 0.8 }} />}
                 </button>
               </>
             ) : null /* In /editor/pages list view: hide save and publish buttons */}

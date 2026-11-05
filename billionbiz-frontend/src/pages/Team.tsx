@@ -31,7 +31,7 @@ export const TeamPage: React.FC = () => {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [roleCode, setRoleCode] = useState('MANAGER');
-  const [pin, setPin] = useState('1234');
+  const [pin, setPin] = useState('');
   const [selectedResponsibilities, setSelectedResponsibilities] = useState<string[]>([
     'APPOINTMENT_STAFF',
     'CASHIER'
@@ -69,7 +69,7 @@ export const TeamPage: React.FC = () => {
     setEmail('');
     setPhone('');
     setRoleCode(roles[0]?.code || 'MANAGER');
-    setPin('1234');
+    setPin('');
     setSelectedResponsibilities(['APPOINTMENT_STAFF', 'CASHIER']);
     setIsModalOpen(true);
   };
@@ -443,12 +443,15 @@ export const TeamPage: React.FC = () => {
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
-                  POS Cashier PIN {editingMember && '(leave empty to keep)'}
+                  POS Cashier PIN (optional) {editingMember && '(leave empty to keep existing)'}
                 </label>
                 <input
                   type="password"
                   maxLength={6}
-                  placeholder="4-6 digits"
+                  minLength={4}
+                  pattern="[0-9]{4,6}"
+                  title="PIN must contain 4 to 6 digits."
+                  placeholder="Optional · 4-6 digits"
                   value={pin}
                   onChange={(e) => setPin(e.target.value)}
                   style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }}

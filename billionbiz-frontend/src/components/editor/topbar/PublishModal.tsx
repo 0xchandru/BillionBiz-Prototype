@@ -9,7 +9,6 @@ import {
 } from '../../../store/siteStore';
 import { useLandingEditorStore } from '../../../store/landingEditorStore';
 import { useEditorContextStore } from '../../../store/editorContextStore';
-import { api } from '../../../api/services';
 import styles from './topbar.module.css';
 
 interface PublishModalProps {
@@ -25,40 +24,52 @@ export const PublishModal: React.FC<PublishModalProps> = ({
 }) => {
   const [confirmText, setConfirmText] = useState('');
   const { selectedPageId } = useLandingEditorStore();
-  const { pages, lastPublishedSnapshots, publishPage } = useSiteStore();
+  const {
+    pages,
+    lastPublishedSnapshots,
+    theme,
+    settings,
+    savePageDraftToBackend,
+    saveThemeToBackend,
+    saveSettingsToBackend,
+    publishStoreToBackend,
+    markSaved,
+  } = useSiteStore();
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
 
-  const landingPage = pages.find((p) => p.id === 'landing-page') || pages[0];
+  const landingPage = pages.find((p) => p.path === '/') ||
+    pages.find((p) => p.id === 'landing-page') ||
+    pages[0];
+  const selectedPage = pages.find((p) => p.id === selectedPageId) || landingPage;
   const isHeader = selectedPageId === 'header-global';
   const isFooter = selectedPageId === 'footer-global';
-  const isHomepage = selectedPageId === 'landing-page';
+  const isHomepage = !isHeader && !isFooter && selectedPage?.path === '/';
 
   let scopeName = 'Homepage';
-  let targetId = 'landing-page';
   let snapshotSections: SectionData[] = [];
   let currentSections: SectionData[] = [];
 
   if (isHeader) {
     scopeName = 'Global Header';
-    targetId = 'header-global';
     const snapshot = lastPublishedSnapshots?.['header-global'];
     snapshotSections = snapshot?.sections || [];
     currentSections = (landingPage?.sections || []).filter(isHeaderComponent);
   } else if (isFooter) {
     scopeName = 'Global Footer';
-    targetId = 'footer-global';
     const snapshot = lastPublishedSnapshots?.['footer-global'];
     snapshotSections = snapshot?.sections || [];
     currentSections = (landingPage?.sections || []).filter(isFooterComponent);
   } else if (isHomepage) {
     scopeName = 'Homepage';
-    targetId = 'landing-page';
-    const snapshot = landingPage?.lastPublishedSnapshot || lastPublishedSnapshots?.['landing-page'];
+    const snapshot = landingPage?.lastPublishedSnapshot ||
+      lastPublishedSnapshots?.[landingPage?.id || ''] ||
+      lastPublishedSnapshots?.['landing-page'];
     snapshotSections = snapshot?.sections || [];
     currentSections = (landingPage?.sections || []).filter(isHomepageBodySection);
   } else {
     const activePage = pages.find((p) => p.id === selectedPageId) || landingPage;
     scopeName = activePage.name;
-    targetId = activePage.id;
     const snapshot = activePage.lastPublishedSnapshot || lastPublishedSnapshots?.[activePage.id];
     snapshotSections = snapshot?.sections || [];
     currentSections = activePage.sections || [];
@@ -67,6 +78,7 @@ export const PublishModal: React.FC<PublishModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setConfirmText('');
+      setPublishError(null);
     }
   }, [isOpen]);
 
@@ -116,19 +128,41 @@ export const PublishModal: React.FC<PublishModalProps> = ({
   const isInputValid = confirmText.trim().toLowerCase() === 'publish';
 
   const handleConfirmPublish = async () => {
-    if (!isInputValid) return;
-    useEditorContextStore.getState().syncHeaderToSiteStore();
-    publishPage(targetId);
+    if (!isInputValid || isPublishing) return;
 
+    setIsPublishing(true);
+    setPublishError(null);
     try {
-      await api.savePageDraft(targetId, currentSections);
-      await api.publishStore(`Published ${scopeName} from Store Editor`);
-    } catch (err) {
-      console.warn('[PublishModal] Server-side release sync notification:', err);
-    }
+      if (isHeader || isFooter) {
+        const editorContext = useEditorContextStore.getState();
+        if (isHeader) editorContext.syncHeaderToSiteStore();
+        if (isFooter) editorContext.syncFooterToSiteStore();
+      }
 
-    onClose();
-    onSuccess(`Published "${scopeName}" to live storefront!`);
+      // The backend publishes the entire store atomically. Flush every
+      // persisted page document first so edits made on another page cannot be
+      // silently omitted from the release.
+      const currentPages = useSiteStore.getState().pages;
+      const unpersistedPages = currentPages.filter((page) => page.draftVersion === undefined);
+      if (unpersistedPages.length > 0) {
+        throw new Error(
+          `These pages have not finished loading from the server: ${unpersistedPages.map((page) => page.name).join(', ')}. Reload the editor and retry publishing.`
+        );
+      }
+
+      await Promise.all(currentPages.map((page) => savePageDraftToBackend(page.id)));
+      await saveThemeToBackend(theme);
+      await saveSettingsToBackend(settings);
+      await publishStoreToBackend(`Published ${scopeName} from Store Editor`);
+      markSaved();
+
+      onClose();
+      onSuccess(`Published "${scopeName}" to live storefront.`);
+    } catch (error: any) {
+      setPublishError(error?.message || 'Publishing failed. The existing live version was not intentionally changed.');
+    } finally {
+      setIsPublishing(false);
+    }
   };
 
   return (
@@ -221,6 +255,21 @@ export const PublishModal: React.FC<PublishModalProps> = ({
             </div>
           )}
 
+          {publishError && (
+            <div role="alert" style={{
+              marginTop: '12px',
+              padding: '10px 12px',
+              border: '1px solid #fecaca',
+              borderRadius: '8px',
+              background: '#fef2f2',
+              color: '#991b1b',
+              fontSize: '12px',
+              lineHeight: 1.5
+            }}>
+              {publishError}
+            </div>
+          )}
+
           {/* Confirmation Input */}
           <div className={styles.confirmInputSection}>
             <label className={styles.confirmInputLabel}>
@@ -243,11 +292,11 @@ export const PublishModal: React.FC<PublishModalProps> = ({
             </button>
             <button
               className={styles.btnConfirmPublish}
-              disabled={!isInputValid}
+              disabled={!isInputValid || isPublishing}
               onClick={handleConfirmPublish}
             >
               <ShieldCheck size={14} />
-              <span>Confirm & Publish</span>
+              <span>{isPublishing ? 'Publishing…' : 'Confirm & Publish'}</span>
             </button>
           </div>
         </div>

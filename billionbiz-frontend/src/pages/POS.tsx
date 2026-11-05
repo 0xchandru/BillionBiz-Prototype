@@ -19,7 +19,7 @@ const formatCurrency = (minor: number) => {
 const POSPage: React.FC = () => {
   const { isAuthenticated, loginUnified } = useAuthStore();
   const [counters, setCounters] = useState<any[]>([]);
-  const [selectedCounter, setSelectedCounter] = useState<string>('cnt-shoum-01');
+  const [selectedCounter, setSelectedCounter] = useState<string>('');
   const [activeSession, setActiveSession] = useState<any | null>(null);
   const [openingFloat, setOpeningFloat] = useState('2000');
   const [closingCash, setClosingCash] = useState('');
@@ -69,10 +69,16 @@ const POSPage: React.FC = () => {
   const loadCounterAndRegister = async () => {
     try {
       const cRes = await api.getCounters();
-      setCounters(cRes.counters || []);
-      const activeCounterId = cRes.counters?.[0]?.id || 'cnt-shoum-01';
+      const availableCounters = cRes.counters || [];
+      setCounters(availableCounters);
+      const activeCounterId = availableCounters.some((counter: any) => counter.id === selectedCounter)
+        ? selectedCounter
+        : availableCounters[0]?.id || '';
       setSelectedCounter(activeCounterId);
-
+      if (!activeCounterId) {
+        setActiveSession(null);
+        return;
+      }
       const regRes = await api.getCurrentRegister(activeCounterId);
       setActiveSession(regRes.session);
     } catch (err) {
@@ -94,11 +100,16 @@ const POSPage: React.FC = () => {
   };
 
   useEffect(() => {
-    loadCounterAndRegister();
-    loadProductsAndAppointments();
-  }, []);
+    if (!isAuthenticated) return;
+    void loadCounterAndRegister();
+    void loadProductsAndAppointments();
+  }, [isAuthenticated]);
 
   const handleOpenRegister = async () => {
+    if (!selectedCounter) {
+      alert('Create a POS counter before opening a register.');
+      return;
+    }
     try {
       const floatMinor = Math.round(parseFloat(openingFloat || '0') * 100);
       await api.openRegister(selectedCounter, floatMinor);
@@ -161,6 +172,10 @@ const POSPage: React.FC = () => {
   const grandTotalMinor = subtotalMinor + appointmentTotalMinor;
 
   const handleCheckout = async () => {
+    if (!selectedCounter || !activeSession) {
+      alert('Open a register session for a configured POS counter before checkout.');
+      return;
+    }
     if (grandTotalMinor <= 0) {
       alert('Cart is empty. Add products or select an appointment to checkout.');
       return;
@@ -174,7 +189,7 @@ const POSPage: React.FC = () => {
 
       const res = await api.posCheckout({
         counterId: selectedCounter,
-        sessionId: activeSession?.id,
+        sessionId: activeSession.id,
         items: cart.map((c) => ({ variantId: c.variantId, quantity: c.quantity })),
         appointmentBookingId: selectedAppointment?.id,
         paymentMethod,
@@ -293,6 +308,11 @@ const POSPage: React.FC = () => {
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
+          )}
+          {counters.length === 0 && (
+            <a href="/pos/counters" style={{ fontSize: 12, color: '#b45309', fontWeight: 650, textDecoration: 'none' }}>
+              No POS counters configured · Set up a counter
+            </a>
           )}
           <span style={{
             padding: '4px 8px',

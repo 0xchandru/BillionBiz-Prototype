@@ -34,7 +34,7 @@ export const CollectionsPageView: React.FC<CollectionsPageViewProps> = ({
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3" style={{ gap: 'var(--theme-grid-gap, 24px)' }}>
           {categories.map((c) => {
             const count = products.filter(
               (p) => p.category_id === c.id || p.category?.toLowerCase() === c.name?.toLowerCase()
@@ -44,7 +44,8 @@ export const CollectionsPageView: React.FC<CollectionsPageViewProps> = ({
               <div
                 key={c.id}
                 onClick={() => onNavigate?.(`/shop?category=${c.id}`)}
-                className="group cursor-pointer p-6 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 hover:border-indigo-500 transition shadow-xs hover:shadow-md space-y-3"
+                className="group cursor-pointer bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 hover:border-indigo-500 transition shadow-xs hover:shadow-md space-y-3"
+                style={{ padding: 'var(--theme-card-padding, 24px)' }}
               >
                 <div className="w-12 h-12 rounded-xl bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center group-hover:scale-105 transition">
                   <Package size={22} />

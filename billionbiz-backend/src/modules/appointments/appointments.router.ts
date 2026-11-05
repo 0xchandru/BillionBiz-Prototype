@@ -7,6 +7,86 @@ import { requireCapability } from '../../middleware/capabilities.js';
 import { handleIdempotency } from '../../middleware/idempotency.js';
 import { recordAudit } from '../../core/auditAndOutbox.js';
 
+
+const parseDateOnly = (value: unknown): { year: number; month: number; day: number; dayOfWeek: number } | null => {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day, 12));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  return { year, month, day, dayOfWeek: date.getUTCDay() };
+};
+
+const timeZoneOffsetMs = (instant: Date, timeZone: string): number => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    timeZoneName: 'longOffset',
+    hour: '2-digit'
+  }).formatToParts(instant);
+  const zoneName = parts.find((part) => part.type === 'timeZoneName')?.value || 'GMT';
+  if (zoneName === 'GMT' || zoneName === 'UTC') return 0;
+  const match = zoneName.match(/^GMT([+-])(\d{2}):(\d{2})$/);
+  if (!match) throw new Error(`Unsupported timezone offset: ${zoneName}`);
+  const magnitude = (Number(match[2]) * 60 + Number(match[3])) * 60 * 1000;
+  return match[1] === '+' ? magnitude : -magnitude;
+};
+
+const localDateTimeToUtc = (
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  timeZone: string
+): Date => {
+  const localAsUtc = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+  let instant = localAsUtc;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    instant = localAsUtc - timeZoneOffsetMs(new Date(instant), timeZone);
+  }
+  return new Date(instant);
+};
+
+const minutesFromTime = (value: unknown): number | null => {
+  if (typeof value !== 'string') return null;
+  const match = value.match(/^(\d{2}):(\d{2})(?::\d{2})?$/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return hour * 60 + minute;
+};
+
+const localDateAndMinutes = (instant: Date, timeZone: string) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(instant);
+  const values: Record<string, string> = {};
+  for (const part of parts) if (part.type !== 'literal') values[part.type] = part.value;
+  const date = `${values.year}-${values.month}-${values.day}`;
+  const parsed = parseDateOnly(date);
+  return {
+    date,
+    dayOfWeek: parsed?.dayOfWeek ?? -1,
+    minuteOfDay: Number(values.hour) * 60 + Number(values.minute)
+  };
+};
+
+const isValidTimeZone = (value: unknown): value is string => {
+  if (typeof value !== 'string' || value.length > 64) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export const appointmentsRouter = Router();
 
 // ============================================================================
@@ -17,6 +97,7 @@ appointmentsRouter.get(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('appointments.view'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const offeringsRes = await query(
@@ -38,6 +119,7 @@ appointmentsRouter.get(
   }
 );
 
+
 appointmentsRouter.post(
   '/offerings',
   requireAuth,
@@ -46,69 +128,83 @@ appointmentsRouter.post(
   requirePermission('services.manage'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
-    const {
-      name,
-      handle: rawHandle,
-      description,
-      category = 'General',
-      serviceType = 'IN_PERSON',
-      pricingType = 'FIXED',
-      depositType = 'FIXED',
-      durationMinutes = 30,
-      bufferBeforeMinutes = 0,
-      bufferAfterMinutes = 0,
-      priceMinor = 0,
-      depositRequiredMinor = 0,
-      imageUrl,
-      assignedStaff = [],
-      resourceIds = []
-    } = req.body;
+    const body = req.body || {};
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    const durationMinutes = body.durationMinutes ?? 30;
+    const bufferBeforeMinutes = body.bufferBeforeMinutes ?? 0;
+    const bufferAfterMinutes = body.bufferAfterMinutes ?? 0;
+    const priceMinor = body.priceMinor ?? 0;
+    const depositRequiredMinor = body.depositRequiredMinor ?? 0;
+    const resourceIds = body.resourceIds;
 
-    if (!name) {
-      return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'Service offering name is required' });
+    if (!name || name.length > 160) {
+      return res.status(400).json({ error: 'INVALID_OFFERING_NAME', message: 'Service name must contain 1 to 160 characters.' });
+    }
+    if (!Number.isSafeInteger(durationMinutes) || durationMinutes < 5 || durationMinutes > 1440 ||
+        !Number.isSafeInteger(bufferBeforeMinutes) || bufferBeforeMinutes < 0 || bufferBeforeMinutes > 240 ||
+        !Number.isSafeInteger(bufferAfterMinutes) || bufferAfterMinutes < 0 || bufferAfterMinutes > 240 ||
+        !Number.isSafeInteger(priceMinor) || priceMinor < 0 ||
+        !Number.isSafeInteger(depositRequiredMinor) || depositRequiredMinor < 0 || depositRequiredMinor > priceMinor) {
+      return res.status(400).json({ error: 'INVALID_OFFERING_CONFIGURATION', message: 'Duration, buffers, price or deposit amount is outside supported limits.' });
+    }
+    if (!Array.isArray(resourceIds) || resourceIds.length < 1 || resourceIds.length > 100 ||
+        resourceIds.some((id: unknown) => typeof id !== 'string' || !id)) {
+      return res.status(400).json({ error: 'RESOURCE_ASSIGNMENT_REQUIRED', message: 'Assign at least one active appointment staff member to this service.' });
     }
 
-    const handle = (rawHandle || name)
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '');
-    const offeringId = `off-${uuidv4()}`;
+    const uniqueResourceIds = [...new Set(resourceIds)];
+    const resourceRes = await query(
+      `SELECT r.id, sp.id AS staff_profile_id
+       FROM resources r
+       JOIN staff_profiles sp ON sp.id = r.staff_profile_id
+       WHERE r.id = ANY($1::varchar[])
+         AND r.store_id = $2 AND r.is_active = TRUE
+         AND sp.store_id = $2 AND sp.is_active = TRUE
+         AND sp.responsibilities @> '["APPOINTMENT_STAFF"]'::jsonb`,
+      [uniqueResourceIds, storeId]
+    );
+    if (resourceRes.rowCount !== uniqueResourceIds.length) {
+      return res.status(400).json({ error: 'INVALID_RESOURCE_ASSIGNMENT', message: 'Every assigned staff resource must be active, appointment-enabled and owned by this store.' });
+    }
+
+    const handleBase = (typeof body.handle === 'string' && body.handle.trim() ? body.handle : name)
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 120);
+    const offeringId = 'off-' + uuidv4();
 
     await withTransaction(async (client) => {
       await client.query(
-        `INSERT INTO offerings (id, store_id, name, handle, description, category, service_type, pricing_type, deposit_type, duration_minutes, buffer_before_minutes, buffer_after_minutes, price_minor, deposit_required_minor, image_url, assigned_staff, is_active)
+        `INSERT INTO offerings (
+           id, store_id, name, handle, description, category, service_type,
+           pricing_type, deposit_type, duration_minutes, buffer_before_minutes,
+           buffer_after_minutes, price_minor, deposit_required_minor,
+           image_url, assigned_staff, is_active
+         )
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, TRUE)`,
         [
-          offeringId,
-          storeId,
-          name,
-          `${handle}-${uuidv4().substring(0, 4)}`,
-          description || '',
-          category,
-          serviceType,
-          pricingType,
-          depositType,
-          durationMinutes,
-          bufferBeforeMinutes,
-          bufferAfterMinutes,
-          priceMinor,
-          depositRequiredMinor,
-          imageUrl || null,
-          JSON.stringify(assignedStaff)
+          offeringId, storeId, name,
+          handleBase + '-' + uuidv4().slice(0, 4),
+          typeof body.description === 'string' ? body.description.slice(0, 4000) : '',
+          typeof body.category === 'string' ? body.category.slice(0, 100) : 'General',
+          body.serviceType || 'IN_PERSON',
+          body.pricingType || 'FIXED',
+          body.depositType || 'FIXED',
+          durationMinutes, bufferBeforeMinutes, bufferAfterMinutes,
+          priceMinor, depositRequiredMinor,
+          typeof body.imageUrl === 'string' ? body.imageUrl : null,
+          JSON.stringify(resourceRes.rows.map((row) => row.staff_profile_id))
         ]
       );
-
-      for (const resId of resourceIds) {
+      for (let index = 0; index < uniqueResourceIds.length; index += 1) {
         await client.query(
           `INSERT INTO offering_resources (offering_id, resource_id, is_primary)
-           VALUES ($1, $2, TRUE)
+           VALUES ($1, $2, $3)
            ON CONFLICT DO NOTHING`,
-          [offeringId, resId]
+          [offeringId, uniqueResourceIds[index], index === 0]
         );
       }
     });
 
-    res.status(201).json({ message: 'Service offering created', offeringId });
+    res.status(201).json({ message: 'Service offering created.', offeringId });
   }
 );
 
@@ -121,62 +217,112 @@ appointmentsRouter.put(
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const offeringId = req.params.id as string;
-    const {
-      name,
-      description,
-      category,
-      serviceType,
-      pricingType,
-      depositType,
-      durationMinutes,
-      bufferBeforeMinutes,
-      bufferAfterMinutes,
-      priceMinor,
-      depositRequiredMinor,
-      imageUrl,
-      assignedStaff,
-      isActive
-    } = req.body;
+    const body = req.body || {};
+    const numericFields: Array<[string, number, number]> = [
+      ['durationMinutes', 5, 1440],
+      ['bufferBeforeMinutes', 0, 240],
+      ['bufferAfterMinutes', 0, 240],
+      ['priceMinor', 0, Number.MAX_SAFE_INTEGER],
+      ['depositRequiredMinor', 0, Number.MAX_SAFE_INTEGER]
+    ];
+    for (const [key, min, max] of numericFields) {
+      if (body[key] !== undefined && (!Number.isSafeInteger(body[key]) || body[key] < min || body[key] > max)) {
+        return res.status(400).json({ error: 'INVALID_OFFERING_CONFIGURATION', message: key + ' is outside supported limits.' });
+      }
+    }
+    if (body.name !== undefined && (typeof body.name !== 'string' || !body.name.trim() || body.name.trim().length > 160)) {
+      return res.status(400).json({ error: 'INVALID_OFFERING_NAME', message: 'Service name must contain 1 to 160 characters.' });
+    }
+    if (body.resourceIds !== undefined &&
+        (!Array.isArray(body.resourceIds) || body.resourceIds.length < 1 || body.resourceIds.length > 100 ||
+         body.resourceIds.some((id: unknown) => typeof id !== 'string' || !id))) {
+      return res.status(400).json({ error: 'RESOURCE_ASSIGNMENT_REQUIRED', message: 'Assign at least one active appointment staff member to this service.' });
+    }
 
-    await query(
-      `UPDATE offerings
-       SET name = COALESCE($1, name),
-           description = COALESCE($2, description),
-           category = COALESCE($3, category),
-           service_type = COALESCE($4, service_type),
-           pricing_type = COALESCE($5, pricing_type),
-           deposit_type = COALESCE($6, deposit_type),
-           duration_minutes = COALESCE($7, duration_minutes),
-           buffer_before_minutes = COALESCE($8, buffer_before_minutes),
-           buffer_after_minutes = COALESCE($9, buffer_after_minutes),
-           price_minor = COALESCE($10, price_minor),
-           deposit_required_minor = COALESCE($11, deposit_required_minor),
-           image_url = COALESCE($12, image_url),
-           assigned_staff = COALESCE($13, assigned_staff),
-           is_active = COALESCE($14, is_active),
-           updated_at = NOW()
-       WHERE id = $15 AND store_id = $16`,
-      [
-        name,
-        description,
-        category,
-        serviceType,
-        pricingType,
-        depositType,
-        durationMinutes,
-        bufferBeforeMinutes,
-        bufferAfterMinutes,
-        priceMinor,
-        depositRequiredMinor,
-        imageUrl,
-        assignedStaff ? JSON.stringify(assignedStaff) : null,
-        isActive,
-        offeringId,
-        storeId
-      ]
-    );
+    const uniqueResourceIds = body.resourceIds === undefined ? undefined : [...new Set(body.resourceIds)];
+    try {
+      await withTransaction(async (client) => {
+        const existing = await client.query(
+          `SELECT id FROM offerings WHERE id = $1 AND store_id = $2 FOR UPDATE`,
+          [offeringId, storeId]
+        );
+        if (existing.rowCount === 0) {
+          throw Object.assign(new Error('Service offering was not found in this store.'), { statusCode: 404, code: 'OFFERING_NOT_FOUND' });
+        }
 
-    res.json({ message: 'Service offering updated successfully' });
+        let assignedStaffJson: string | null = null;
+        if (uniqueResourceIds) {
+          const resourceRes = await client.query(
+            `SELECT r.id, sp.id AS staff_profile_id
+             FROM resources r
+             JOIN staff_profiles sp ON sp.id = r.staff_profile_id
+             WHERE r.id = ANY($1::varchar[])
+               AND r.store_id = $2 AND r.is_active = TRUE
+               AND sp.store_id = $2 AND sp.is_active = TRUE
+               AND sp.responsibilities @> '["APPOINTMENT_STAFF"]'::jsonb`,
+            [uniqueResourceIds, storeId]
+          );
+          if (resourceRes.rowCount !== uniqueResourceIds.length) {
+            throw Object.assign(new Error('Every assigned staff resource must be active, appointment-enabled and owned by this store.'), { statusCode: 400, code: 'INVALID_RESOURCE_ASSIGNMENT' });
+          }
+          assignedStaffJson = JSON.stringify(resourceRes.rows.map((row) => row.staff_profile_id));
+        }
+
+        await client.query(
+          `UPDATE offerings
+           SET name = COALESCE($1, name),
+               description = COALESCE($2, description),
+               category = COALESCE($3, category),
+               service_type = COALESCE($4, service_type),
+               pricing_type = COALESCE($5, pricing_type),
+               deposit_type = COALESCE($6, deposit_type),
+               duration_minutes = COALESCE($7, duration_minutes),
+               buffer_before_minutes = COALESCE($8, buffer_before_minutes),
+               buffer_after_minutes = COALESCE($9, buffer_after_minutes),
+               price_minor = COALESCE($10, price_minor),
+               deposit_required_minor = COALESCE($11, deposit_required_minor),
+               image_url = COALESCE($12, image_url),
+               assigned_staff = COALESCE($13, assigned_staff),
+               is_active = COALESCE($14, is_active),
+               updated_at = NOW()
+           WHERE id = $15 AND store_id = $16`,
+          [
+            body.name?.trim() ?? null,
+            body.description ?? null,
+            body.category ?? null,
+            body.serviceType ?? null,
+            body.pricingType ?? null,
+            body.depositType ?? null,
+            body.durationMinutes ?? null,
+            body.bufferBeforeMinutes ?? null,
+            body.bufferAfterMinutes ?? null,
+            body.priceMinor ?? null,
+            body.depositRequiredMinor ?? null,
+            body.imageUrl ?? null,
+            assignedStaffJson,
+            body.isActive ?? null,
+            offeringId,
+            storeId
+          ]
+        );
+
+        if (uniqueResourceIds) {
+          await client.query(`DELETE FROM offering_resources WHERE offering_id = $1`, [offeringId]);
+          for (let index = 0; index < uniqueResourceIds.length; index += 1) {
+            await client.query(
+              `INSERT INTO offering_resources (offering_id, resource_id, is_primary)
+               VALUES ($1, $2, $3)`,
+              [offeringId, uniqueResourceIds[index], index === 0]
+            );
+          }
+        }
+      });
+    } catch (error: any) {
+      if (error.statusCode) return res.status(error.statusCode).json({ error: error.code, message: error.message });
+      throw error;
+    }
+
+    res.json({ message: 'Service offering updated successfully.' });
   }
 );
 
@@ -185,6 +331,7 @@ appointmentsRouter.delete(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('services.manage'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const offeringId = req.params.id as string;
@@ -201,58 +348,41 @@ appointmentsRouter.get(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('appointments.view'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
-
     const staffRes = await query(
       `SELECT sp.id, sp.display_name, sp.email, sp.phone, sp.avatar_url,
               sp.is_active, sp.capacity, sp.assigned_services, sp.responsibilities,
-              r.id as resource_id, r.name as resource_name
+              r.id AS resource_id, r.name AS resource_name
        FROM staff_profiles sp
-       LEFT JOIN resources r ON r.staff_profile_id = sp.id
+       LEFT JOIN resources r
+         ON r.staff_profile_id = sp.id
+        AND r.store_id = sp.store_id
+        AND r.is_active = TRUE
        WHERE sp.store_id = $1
+         AND sp.is_active = TRUE
+         AND sp.responsibilities @> '["APPOINTMENT_STAFF"]'::jsonb
        ORDER BY sp.display_name ASC`,
       [storeId]
     );
-
     res.json({ staff: staffRes.rows });
   }
 );
 
+// Appointment staff identities are managed in Team. This route is retained
+// for older clients but deliberately refuses to create duplicate profiles.
 appointmentsRouter.post(
   '/staff',
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
   requirePermission('team.manage'),
-  async (req: Request, res: Response) => {
-    const storeId = req.tenant!.storeId;
-    const orgId = req.tenant!.organizationId;
-    const { displayName, email, phone, avatarUrl, assignedServices = [], capacity = 1, responsibilities = ['APPOINTMENT_STAFF'] } = req.body;
-
-    if (!displayName) {
-      return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'Staff display name is required' });
-    }
-
-    const staffId = `stf-${uuidv4()}`;
-    const resourceId = `res-${uuidv4()}`;
-
-    await withTransaction(async (client) => {
-      await client.query(
-        `INSERT INTO staff_profiles (id, organization_id, store_id, display_name, email, phone, avatar_url, assigned_services, capacity, responsibilities, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE)`,
-        [staffId, orgId, storeId, displayName, email || null, phone || null, avatarUrl || null, JSON.stringify(assignedServices), capacity, JSON.stringify(responsibilities)]
-      );
-
-      // Create linked booking resource
-      await client.query(
-        `INSERT INTO resources (id, store_id, name, type, staff_profile_id, is_active)
-         VALUES ($1, $2, $3, 'PERSON', $4, TRUE)`,
-        [resourceId, storeId, displayName, staffId]
-      );
+  async (_req: Request, res: Response) => {
+    res.status(409).json({
+      error: 'TEAM_PROFILE_REQUIRED',
+      message: 'Create or update this person in Team and assign the Appointment Staff responsibility. Appointment staff share the same team profile and login.'
     });
-
-    res.status(201).json({ message: 'Staff member added successfully', staffId, resourceId });
   }
 );
 
@@ -261,37 +391,12 @@ appointmentsRouter.put(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
-  async (req: Request, res: Response) => {
-    const storeId = req.tenant!.storeId;
-    const staffId = req.params.id as string;
-    const { displayName, email, phone, avatarUrl, assignedServices, capacity, responsibilities, isActive } = req.body;
-
-    await query(
-      `UPDATE staff_profiles
-       SET display_name = COALESCE($1, display_name),
-           email = COALESCE($2, email),
-           phone = COALESCE($3, phone),
-           avatar_url = COALESCE($4, avatar_url),
-           assigned_services = COALESCE($5, assigned_services),
-           capacity = COALESCE($6, capacity),
-           responsibilities = COALESCE($7, responsibilities),
-           is_active = COALESCE($8, is_active)
-       WHERE id = $9 AND store_id = $10`,
-      [
-        displayName,
-        email,
-        phone,
-        avatarUrl,
-        assignedServices ? JSON.stringify(assignedServices) : null,
-        capacity,
-        responsibilities ? JSON.stringify(responsibilities) : null,
-        isActive,
-        staffId,
-        storeId
-      ]
-    );
-
-    res.json({ message: 'Staff profile updated successfully' });
+  requirePermission('team.manage'),
+  async (_req: Request, res: Response) => {
+    res.status(409).json({
+      error: 'TEAM_PROFILE_REQUIRED',
+      message: 'Update staff identity and responsibilities in Team. Appointment schedules are managed in Working Hours.'
+    });
   }
 );
 
@@ -303,24 +408,30 @@ appointmentsRouter.get(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('appointments.view'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
+    const [shiftsRes, timezoneRes] = await Promise.all([
+      query(
+        `SELECT s.id, s.staff_profile_id, s.day_of_week, s.start_time, s.end_time, s.is_active,
+                sp.display_name AS staff_name
+         FROM staff_shifts s
+         JOIN staff_profiles sp ON sp.id = s.staff_profile_id
+         WHERE sp.store_id = $1 AND sp.is_active = TRUE
+         ORDER BY s.day_of_week ASC, s.start_time ASC`,
+        [storeId]
+      ),
+      query(
+        `SELECT COALESCE(
+           (SELECT timezone FROM store_booking_settings WHERE store_id = $1),
+           (SELECT timezone FROM stores WHERE id = $1),
+           'Asia/Kolkata'
+         ) AS timezone`,
+        [storeId]
+      )
+    ]);
 
-    // Fetch shifts for all active staff in the store
-    const shiftsRes = await query(
-      `SELECT s.id, s.staff_profile_id, s.day_of_week, s.start_time, s.end_time, s.is_active,
-              sp.display_name as staff_name
-       FROM staff_shifts s
-       JOIN staff_profiles sp ON sp.id = s.staff_profile_id
-       WHERE sp.store_id = $1
-       ORDER BY s.day_of_week ASC, s.start_time ASC`,
-      [storeId]
-    );
-
-    res.json({
-      timezone: 'Asia/Kolkata',
-      shifts: shiftsRes.rows
-    });
+    res.json({ timezone: timezoneRes.rows[0]?.timezone || 'Asia/Kolkata', shifts: shiftsRes.rows });
   }
 );
 
@@ -329,30 +440,77 @@ appointmentsRouter.put(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('schedule.manage'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
-    const { shifts = [] } = req.body;
+    const { shifts } = req.body || {};
+    if (!Array.isArray(shifts) || shifts.length > 1000) {
+      return res.status(400).json({ error: 'INVALID_SHIFTS', message: 'Provide an array of no more than 1,000 staff shifts.' });
+    }
 
-    await withTransaction(async (client) => {
-      for (const shift of shifts) {
-        if (shift.id) {
-          await client.query(
-            `UPDATE staff_shifts
-             SET start_time = $1, end_time = $2, is_active = $3
-             WHERE id = $4`,
-            [shift.startTime, shift.endTime, shift.isActive, shift.id]
-          );
-        } else if (shift.staffProfileId) {
-          await client.query(
-            `INSERT INTO staff_shifts (id, staff_profile_id, day_of_week, start_time, end_time, is_active)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
-            [`shift-${uuidv4()}`, shift.staffProfileId, shift.dayOfWeek, shift.startTime, shift.endTime, shift.isActive !== false]
-          );
+    try {
+      await withTransaction(async (client) => {
+        for (const shift of shifts) {
+          const dayOfWeek = Number(shift.dayOfWeek);
+          const startMinutes = minutesFromTime(shift.startTime);
+          const endMinutes = minutesFromTime(shift.endTime);
+          if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6 ||
+              startMinutes === null || endMinutes === null || endMinutes <= startMinutes) {
+            throw Object.assign(new Error('Each shift requires a valid weekday and an end time after its start time.'), {
+              statusCode: 400,
+              code: 'INVALID_SHIFT_TIME'
+            });
+          }
+
+          if (shift.id) {
+            const updated = await client.query(
+              `UPDATE staff_shifts s
+               SET start_time = $1, end_time = $2, is_active = $3
+               FROM staff_profiles sp
+               WHERE s.id = $4
+                 AND s.staff_profile_id = sp.id
+                 AND sp.store_id = $5
+                 AND sp.is_active = TRUE`,
+              [shift.startTime, shift.endTime, shift.isActive !== false, shift.id, storeId]
+            );
+            if (updated.rowCount === 0) {
+              throw Object.assign(new Error('A shift was not found in the active store.'), {
+                statusCode: 404,
+                code: 'SHIFT_NOT_FOUND'
+              });
+            }
+          } else if (typeof shift.staffProfileId === 'string' && shift.staffProfileId) {
+            const staff = await client.query(
+              `SELECT id FROM staff_profiles
+               WHERE id = $1 AND store_id = $2 AND is_active = TRUE
+               FOR UPDATE`,
+              [shift.staffProfileId, storeId]
+            );
+            if (staff.rowCount === 0) {
+              throw Object.assign(new Error('The selected staff member does not belong to the active store.'), {
+                statusCode: 404,
+                code: 'STAFF_NOT_FOUND'
+              });
+            }
+            await client.query(
+              `INSERT INTO staff_shifts (id, staff_profile_id, day_of_week, start_time, end_time, is_active)
+               VALUES ($1, $2, $3, $4, $5, $6)`,
+              [`shift-${uuidv4()}`, shift.staffProfileId, dayOfWeek, shift.startTime, shift.endTime, shift.isActive !== false]
+            );
+          } else {
+            throw Object.assign(new Error('Each new shift must specify a staff profile.'), {
+              statusCode: 400,
+              code: 'STAFF_REQUIRED'
+            });
+          }
         }
-      }
-    });
+      });
+    } catch (error: any) {
+      if (error.statusCode) return res.status(error.statusCode).json({ error: error.code, message: error.message });
+      throw error;
+    }
 
-    res.json({ message: 'Working hours schedule updated in Asia/Kolkata timezone' });
+    res.json({ message: 'Staff working hours saved successfully.' });
   }
 );
 
@@ -364,6 +522,7 @@ appointmentsRouter.get(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('appointments.view'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
 
@@ -399,6 +558,7 @@ appointmentsRouter.put(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('schedule.manage'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const {
@@ -409,12 +569,37 @@ appointmentsRouter.put(
       maxAdvanceDays = 60,
       slotIntervalMinutes = 30,
       bufferMinutes = 10,
-      depositRequired = false
-    } = req.body;
+      depositRequired = false,
+      timezone: requestedTimezone
+    } = req.body || {};
+
+    const numericSettings = [minNoticeHours, maxAdvanceDays, slotIntervalMinutes, bufferMinutes];
+    if (numericSettings.some((value) => typeof value !== 'number' || !Number.isInteger(value)) ||
+        minNoticeHours < 0 || minNoticeHours > 8760 ||
+        maxAdvanceDays < 1 || maxAdvanceDays > 365 ||
+        slotIntervalMinutes < 5 || slotIntervalMinutes > 180 ||
+        bufferMinutes < 0 || bufferMinutes > 240) {
+      return res.status(400).json({ error: 'INVALID_BOOKING_SETTINGS', message: 'Notice, advance-booking, slot interval or buffer values are outside supported limits.' });
+    }
+    if (!['AUTOMATIC', 'MANUAL'].includes(confirmationMode)) {
+      return res.status(400).json({ error: 'INVALID_CONFIRMATION_MODE', message: 'Confirmation mode must be AUTOMATIC or MANUAL.' });
+    }
+    if (cancellationPolicy !== undefined && (typeof cancellationPolicy !== 'string' || cancellationPolicy.length > 4000)) {
+      return res.status(400).json({ error: 'INVALID_CANCELLATION_POLICY', message: 'Cancellation policy must be text with a maximum length of 4,000 characters.' });
+    }
+    if (reschedulingPolicy !== undefined && (typeof reschedulingPolicy !== 'string' || reschedulingPolicy.length > 4000)) {
+      return res.status(400).json({ error: 'INVALID_RESCHEDULING_POLICY', message: 'Rescheduling policy must be text with a maximum length of 4,000 characters.' });
+    }
+
+    const storeTimezoneRes = await query(`SELECT timezone FROM stores WHERE id = $1`, [storeId]);
+    const timezone = requestedTimezone || storeTimezoneRes.rows[0]?.timezone || 'Asia/Kolkata';
+    if (!isValidTimeZone(timezone)) {
+      return res.status(400).json({ error: 'INVALID_TIMEZONE', message: 'Choose a valid IANA timezone.' });
+    }
 
     await query(
       `INSERT INTO store_booking_settings (store_id, confirmation_mode, cancellation_policy, rescheduling_policy, min_notice_hours, max_advance_days, slot_interval_minutes, buffer_minutes, timezone, deposit_required, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Asia/Kolkata', $9, NOW())
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
        ON CONFLICT (store_id) DO UPDATE SET
          confirmation_mode = EXCLUDED.confirmation_mode,
          cancellation_policy = EXCLUDED.cancellation_policy,
@@ -423,9 +608,10 @@ appointmentsRouter.put(
          max_advance_days = EXCLUDED.max_advance_days,
          slot_interval_minutes = EXCLUDED.slot_interval_minutes,
          buffer_minutes = EXCLUDED.buffer_minutes,
+         timezone = EXCLUDED.timezone,
          deposit_required = EXCLUDED.deposit_required,
          updated_at = NOW()`,
-      [storeId, confirmationMode, cancellationPolicy, reschedulingPolicy, minNoticeHours, maxAdvanceDays, slotIntervalMinutes, bufferMinutes, depositRequired]
+      [storeId, confirmationMode, cancellationPolicy ?? null, reschedulingPolicy ?? null, minNoticeHours, maxAdvanceDays, slotIntervalMinutes, bufferMinutes, timezone, Boolean(depositRequired)]
     );
 
     res.json({ message: 'Booking settings saved successfully' });
@@ -440,70 +626,169 @@ appointmentsRouter.get(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('appointments.view'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
-    const { offeringId, date } = req.query; // date: YYYY-MM-DD
-
-    if (!offeringId || !date) {
-      return res.status(400).json({ error: 'MISSING_PARAMS', message: 'offeringId and date (YYYY-MM-DD) are required' });
+    const offeringId = typeof req.query.offeringId === 'string' ? req.query.offeringId : '';
+    const dateValue = typeof req.query.date === 'string' ? req.query.date : '';
+    const parsedDate = parseDateOnly(dateValue);
+    if (!offeringId || !parsedDate) {
+      return res.status(400).json({ error: 'INVALID_AVAILABILITY_REQUEST', message: 'A valid offeringId and date in YYYY-MM-DD format are required.' });
     }
 
-    const targetDate = new Date(date as string);
-    const dayOfWeek = targetDate.getDay();
+    const [offeringRes, bookingSettingsRes, storeRes] = await Promise.all([
+      query(
+        `SELECT id, name, duration_minutes, buffer_before_minutes, buffer_after_minutes
+         FROM offerings
+         WHERE id = $1 AND store_id = $2 AND is_active = TRUE`,
+        [offeringId, storeId]
+      ),
+      query(`SELECT * FROM store_booking_settings WHERE store_id = $1`, [storeId]),
+      query(`SELECT timezone FROM stores WHERE id = $1`, [storeId])
+    ]);
 
-    const offRes = await query(
-      `SELECT o.*, r.id as resource_id, r.name as resource_name
+    if (offeringRes.rowCount === 0) {
+      return res.status(404).json({ error: 'OFFERING_NOT_FOUND', message: 'Active service offering was not found in this store.' });
+    }
+
+    const offering = offeringRes.rows[0];
+    const settings = bookingSettingsRes.rows[0] || {};
+    const timeZone = settings.timezone || storeRes.rows[0]?.timezone || 'Asia/Kolkata';
+    if (!isValidTimeZone(timeZone)) {
+      return res.status(500).json({ error: 'INVALID_STORE_TIMEZONE', message: 'The store booking timezone is not valid. Update the store booking settings.' });
+    }
+
+    const interval = Number(settings.slot_interval_minutes || 30);
+    const minNoticeHours = Number(settings.min_notice_hours ?? 2);
+    const maxAdvanceDays = Number(settings.max_advance_days ?? 60);
+    const globalBuffer = Number(settings.buffer_minutes ?? 0);
+    const duration = Number(offering.duration_minutes || 30);
+    const bufferBefore = Number(offering.buffer_before_minutes || 0) + globalBuffer;
+    const bufferAfter = Number(offering.buffer_after_minutes || 0) + globalBuffer;
+
+    if (!Number.isInteger(interval) || interval < 5 || interval > 180 ||
+        !Number.isInteger(duration) || duration < 5 || duration > 1440 ||
+        !Number.isInteger(minNoticeHours) || minNoticeHours < 0 ||
+        !Number.isInteger(maxAdvanceDays) || maxAdvanceDays < 1) {
+      return res.status(500).json({ error: 'INVALID_BOOKING_SETTINGS', message: 'Booking interval, duration or notice settings are invalid.' });
+    }
+
+    const todayLocal = new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date());
+    const latestDate = new Date(`${todayLocal}T12:00:00Z`);
+    latestDate.setUTCDate(latestDate.getUTCDate() + maxAdvanceDays);
+    const latestLocalDate = [
+      latestDate.getUTCFullYear(),
+      String(latestDate.getUTCMonth() + 1).padStart(2, '0'),
+      String(latestDate.getUTCDate()).padStart(2, '0')
+    ].join('-');
+    if (dateValue < todayLocal || dateValue > latestLocalDate) {
+      return res.json({ date: dateValue, offeringId, timezone: timeZone, resources: [], slots: [] });
+    }
+
+    // A bookable resource must be explicitly assigned to the service, active,
+    // linked to an active staff profile, and have working hours for this day.
+    const resourcesRes = await query(
+      `SELECT DISTINCT r.id, r.name, r.staff_profile_id, sp.capacity,
+              s.start_time::text AS start_time, s.end_time::text AS end_time
        FROM offerings o
-       LEFT JOIN offering_resources o_r ON o_r.offering_id = o.id
-       LEFT JOIN resources r ON r.id = o_r.resource_id
-       WHERE o.id = $1 AND o.store_id = $2`,
-      [offeringId, storeId]
+       JOIN offering_resources o_r ON o_r.offering_id = o.id
+       JOIN resources r ON r.id = o_r.resource_id
+       JOIN staff_profiles sp ON sp.id = r.staff_profile_id
+       JOIN staff_shifts s ON s.staff_profile_id = sp.id
+       WHERE o.id = $1 AND o.store_id = $2
+         AND r.store_id = $2 AND r.is_active = TRUE
+         AND sp.store_id = $2 AND sp.is_active = TRUE
+         AND s.day_of_week = $3 AND s.is_active = TRUE
+       ORDER BY r.name ASC, s.start_time::text ASC`,
+      [offeringId, storeId, parsedDate.dayOfWeek]
     );
 
-    if (offRes.rowCount === 0) {
-      return res.status(404).json({ error: 'OFFERING_NOT_FOUND', message: 'Offering not found' });
-    }
+    const nowMs = Date.now();
+    const earliestStartMs = nowMs + minNoticeHours * 60 * 60 * 1000;
+    const slots: Array<{
+      timeLabel: string;
+      startTime: string;
+      endTime: string;
+      isAvailable: boolean;
+      resourceId: string;
+      resourceName: string;
+    }> = [];
+    const seen = new Set<string>();
 
-    const offering = offRes.rows[0];
-    const resourceId = offering.resource_id || 'res-stylist-shoum-01';
-    const duration = offering.duration_minutes || 30;
+    for (const resource of resourcesRes.rows) {
+      const shiftStart = minutesFromTime(resource.start_time);
+      const shiftEnd = minutesFromTime(resource.end_time);
+      if (shiftStart === null || shiftEnd === null || shiftEnd <= shiftStart) continue;
 
-    // Standard business hours 09:00 - 19:00 IST
-    const slots: any[] = [];
-    for (let hour = 9; hour < 19; hour++) {
-      for (let min of [0, 30]) {
-        const startH = hour.toString().padStart(2, '0');
-        const startM = min.toString().padStart(2, '0');
-        const endMin = min + duration;
-        const endHour = hour + Math.floor(endMin / 60);
-        const endM = (endMin % 60).toString().padStart(2, '0');
-        const endH = endHour.toString().padStart(2, '0');
-
-        const startTime = `${date}T${startH}:${startM}:00.000Z`;
-        const endTime = `${date}T${endH}:${endM}:00.000Z`;
-
-        // Check conflicts
-        const conflict = await query(
-          `SELECT id FROM bookings
-           WHERE store_id = $1 AND status NOT IN ('CANCELLED')
-             AND start_time < $3 AND end_time > $2`,
-          [storeId, startTime, endTime]
+      for (let startMinute = shiftStart; startMinute + duration + bufferAfter <= shiftEnd; startMinute += interval) {
+        const endMinute = startMinute + duration;
+        const startHour = Math.floor(startMinute / 60);
+        const startMin = startMinute % 60;
+        const endHour = Math.floor(endMinute / 60);
+        const endMin = endMinute % 60;
+        const startLocalDateTime = localDateTimeToUtc(
+          parsedDate.year, parsedDate.month, parsedDate.day, startHour, startMin, timeZone
         );
+        const endLocalDateTime = localDateTimeToUtc(
+          parsedDate.year, parsedDate.month, parsedDate.day, endHour, endMin, timeZone
+        );
+        const conflictStart = new Date(startLocalDateTime.getTime() - bufferBefore * 60 * 1000);
+        const conflictEnd = new Date(endLocalDateTime.getTime() + bufferAfter * 60 * 1000);
+        const slotKey = `${resource.id}:${startLocalDateTime.toISOString()}`;
+        if (seen.has(slotKey)) continue;
+        seen.add(slotKey);
+
+        let isAvailable = startLocalDateTime.getTime() >= earliestStartMs;
+        if (isAvailable) {
+          const [bookingConflict, holdConflict, timeOffConflict] = await Promise.all([
+            query(
+              `SELECT 1
+               FROM bookings
+               WHERE store_id = $1 AND resource_id = $2
+                 AND status NOT IN ('CANCELLED', 'NO_SHOW')
+                 AND start_time < $4 AND end_time > $3
+               LIMIT 1`,
+              [storeId, resource.id, conflictStart.toISOString(), conflictEnd.toISOString()]
+            ),
+            query(
+              `SELECT 1
+               FROM booking_holds
+               WHERE store_id = $1 AND resource_id = $2
+                 AND expires_at > NOW()
+                 AND start_time < $4 AND end_time > $3
+               LIMIT 1`,
+              [storeId, resource.id, conflictStart.toISOString(), conflictEnd.toISOString()]
+            ),
+            query(
+              `SELECT 1
+               FROM time_off
+               WHERE staff_profile_id = $1
+                 AND start_time < $3 AND end_time > $2
+               LIMIT 1`,
+              [resource.staff_profile_id, conflictStart.toISOString(), conflictEnd.toISOString()]
+            )
+          ]);
+          isAvailable = bookingConflict.rowCount === 0 &&
+            holdConflict.rowCount === 0 &&
+            timeOffConflict.rowCount === 0;
+        }
 
         slots.push({
-          timeLabel: `${startH}:${startM} - ${endH}:${endM}`,
-          startTime,
-          endTime,
-          isAvailable: conflict.rowCount === 0,
-          resourceId
+          timeLabel: `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')} - ${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`,
+          startTime: startLocalDateTime.toISOString(),
+          endTime: endLocalDateTime.toISOString(),
+          isAvailable,
+          resourceId: resource.id,
+          resourceName: resource.name
         });
       }
     }
 
     res.json({
-      date,
+      date: dateValue,
       offeringId,
-      resource: { id: resourceId, name: offering.resource_name || 'Assigned Stylist' },
+      timezone: timeZone,
+      resources: resourcesRes.rows.map((resource: any) => ({ id: resource.id, name: resource.name })),
       slots
     });
   }
@@ -514,20 +799,99 @@ appointmentsRouter.post(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('appointments.manage'),
   async (req: Request, res: Response) => {
-    const { offeringId, resourceId, startTime, endTime } = req.body;
+    const storeId = req.tenant!.storeId;
+    const { offeringId, resourceId, startTime, endTime } = req.body || {};
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    if (typeof offeringId !== 'string' || typeof resourceId !== 'string' ||
+        !Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) ||
+        end.getTime() <= start.getTime() || end.getTime() - start.getTime() > 24 * 60 * 60 * 1000 ||
+        start.getTime() <= Date.now()) {
+      return res.status(400).json({ error: 'INVALID_HOLD_REQUEST', message: 'Offering, assigned resource and a valid future time range are required.' });
+    }
+
     const holdToken = `hld-${uuidv4()}`;
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes TTL
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    try {
+      await withTransaction(async (client) => {
+        const resource = await client.query(
+          `SELECT r.id
+           FROM resources r
+           JOIN offering_resources o_r ON o_r.resource_id = r.id
+           JOIN offerings o ON o.id = o_r.offering_id
+           LEFT JOIN staff_profiles sp ON sp.id = r.staff_profile_id
+           WHERE r.id = $1 AND r.store_id = $2 AND r.is_active = TRUE
+             AND o.id = $3 AND o.store_id = $2 AND o.is_active = TRUE
+             AND (sp.id IS NULL OR (sp.store_id = $2 AND sp.is_active = TRUE))
+           FOR UPDATE OF r`,
+          [resourceId, storeId, offeringId]
+        );
+        if (resource.rowCount === 0) {
+          throw Object.assign(new Error('The selected resource is not assigned to this active service in the current store.'), {
+            statusCode: 404,
+            code: 'RESOURCE_NOT_AVAILABLE'
+          });
+        }
+
+        const conflict = await client.query(
+          `SELECT 1 FROM bookings
+           WHERE store_id = $1 AND resource_id = $2
+             AND status NOT IN ('CANCELLED', 'NO_SHOW')
+             AND start_time < $4 AND end_time > $3
+           UNION ALL
+           SELECT 1 FROM booking_holds
+           WHERE store_id = $1 AND resource_id = $2 AND expires_at > NOW()
+             AND start_time < $4 AND end_time > $3
+           LIMIT 1`,
+          [storeId, resourceId, start.toISOString(), end.toISOString()]
+        );
+        if ((conflict.rowCount ?? 0) > 0) {
+          throw Object.assign(new Error('This resource and time slot are no longer available.'), {
+            statusCode: 409,
+            code: 'SLOT_UNAVAILABLE'
+          });
+        }
+
+        await client.query(
+          `INSERT INTO booking_holds (id, store_id, offering_id, resource_id, start_time, end_time, hold_token, expires_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [`hold-${uuidv4()}`, storeId, offeringId, resourceId, start.toISOString(), end.toISOString(), holdToken, expiresAt.toISOString()]
+        );
+      });
+    } catch (error: any) {
+      if (error.statusCode) return res.status(error.statusCode).json({ error: error.code, message: error.message });
+      throw error;
+    }
 
     res.status(201).json({
-      message: 'Slot held temporarily',
+      message: 'Appointment slot held for 10 minutes.',
       holdToken,
-      expiresAt,
+      expiresAt: expiresAt.toISOString(),
       offeringId,
       resourceId,
-      startTime,
-      endTime
+      startTime: start.toISOString(),
+      endTime: end.toISOString()
     });
+  }
+);
+
+appointmentsRouter.delete(
+  '/holds/:token',
+  requireAuth,
+  resolveTenant,
+  requireCapability('appointments'),
+  requirePermission('appointments.manage'),
+  async (req: Request, res: Response) => {
+    const result = await query(
+      `DELETE FROM booking_holds WHERE hold_token = $1 AND store_id = $2`,
+      [req.params.token, req.tenant!.storeId]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'HOLD_NOT_FOUND', message: 'The appointment hold was not found or has expired.' });
+    }
+    res.json({ message: 'Appointment hold released.' });
   }
 );
 
@@ -539,6 +903,7 @@ appointmentsRouter.get(
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('appointments.view'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const { status, date, from, to } = req.query;
@@ -581,115 +946,254 @@ appointmentsRouter.get(
   }
 );
 
+
 appointmentsRouter.post(
   '/bookings',
   requireAuth,
   resolveTenant,
   requireCapability('appointments'),
+  requirePermission('appointments.manage'),
+  handleIdempotency,
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
+    const organizationId = req.tenant!.organizationId;
     const {
-      offeringId,
-      resourceId: providedResourceId,
-      startTime,
-      endTime,
-      customerDetails,
-      intakeNotes
-    } = req.body;
+      offeringId, resourceId, startTime, endTime,
+      customerDetails = {}, intakeNotes = '', holdToken
+    } = req.body || {};
 
-    if (!offeringId || !startTime || !endTime) {
-      return res.status(400).json({ error: 'MISSING_DATA', message: 'Offering and scheduled time are required' });
+    if (typeof offeringId !== 'string' || !offeringId ||
+        typeof resourceId !== 'string' || !resourceId ||
+        typeof startTime !== 'string' || typeof endTime !== 'string') {
+      return res.status(400).json({
+        error: 'INVALID_BOOKING_REQUEST',
+        message: 'An active offering, assigned resource and start/end timestamps are required.'
+      });
+    }
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) ||
+        end.getTime() <= start.getTime() || end.getTime() - start.getTime() > 24 * 60 * 60 * 1000) {
+      return res.status(400).json({ error: 'INVALID_BOOKING_TIME', message: 'Booking start/end must form a valid time range.' });
+    }
+    if (start.getTime() <= Date.now()) {
+      return res.status(400).json({ error: 'BOOKING_IN_PAST', message: 'An appointment cannot be booked in the past.' });
+    }
+    if (!customerDetails || typeof customerDetails !== 'object' || Array.isArray(customerDetails)) {
+      return res.status(400).json({ error: 'INVALID_CUSTOMER', message: 'Customer details must be an object.' });
+    }
+    const firstName = typeof customerDetails.firstName === 'string' ? customerDetails.firstName.trim() : '';
+    const lastName = typeof customerDetails.lastName === 'string' ? customerDetails.lastName.trim() : '';
+    const email = typeof customerDetails.email === 'string' ? customerDetails.email.trim().toLowerCase() : '';
+    const phone = typeof customerDetails.phone === 'string' ? customerDetails.phone.trim() : '';
+    if (!firstName || firstName.length > 120 || lastName.length > 120 ||
+        (email && (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 255)) ||
+        (phone && phone.length > 32) || (!email && !phone)) {
+      return res.status(400).json({ error: 'INVALID_CUSTOMER', message: 'Provide a customer first name and a valid email address or phone number.' });
+    }
+    if (typeof intakeNotes !== 'string' || intakeNotes.length > 4000) {
+      return res.status(400).json({ error: 'INVALID_INTAKE_NOTES', message: 'Appointment notes must be no more than 4,000 characters.' });
+    }
+    if (holdToken !== undefined && (typeof holdToken !== 'string' || !holdToken || holdToken.length > 128)) {
+      return res.status(400).json({ error: 'INVALID_HOLD_TOKEN', message: 'Appointment hold token is invalid.' });
     }
 
-    // Resolve resource
-    let resourceId = providedResourceId;
-    if (!resourceId) {
-      const resLook = await query(`SELECT resource_id FROM offering_resources WHERE offering_id = $1 LIMIT 1`, [offeringId]);
-      resourceId = resLook.rows[0]?.resource_id;
-      if (!resourceId) {
-        const defaultRes = await query(`SELECT id FROM resources WHERE store_id = $1 LIMIT 1`, [storeId]);
-        resourceId = defaultRes.rows[0]?.id || 'res-stylist-shoum-01';
-      }
-    }
-
-    const bookingId = `bkg-${uuidv4()}`;
-    const bookingNumber = `APT-${Date.now().toString().slice(-6)}`;
+    const bookingId = 'bkg-' + uuidv4();
+    const bookingNumber = 'APT-' + Date.now().toString().slice(-8) + '-' + uuidv4().slice(0, 4).toUpperCase();
 
     try {
       await withTransaction(async (client) => {
-        // 1. Row-level lock on resource to serialize concurrent bookings
-        await client.query(`SELECT id FROM resources WHERE id = $1 FOR UPDATE`, [resourceId]);
-
-        // 2. PREVENT DOUBLE BOOKINGS!
-        const conflict = await client.query(
-          `SELECT id, booking_number FROM bookings
-           WHERE resource_id = $1 AND status NOT IN ('CANCELLED')
-             AND start_time < $3 AND end_time > $2`,
-          [resourceId, startTime, endTime]
-        );
-
-        if (conflict.rowCount && conflict.rowCount > 0) {
-          const err: any = new Error(`SLOT_UNAVAILABLE: Time slot is already booked (${conflict.rows[0].booking_number})`);
-          err.statusCode = 409;
-          throw err;
+        const [offeringRes, settingsRes, storeRes] = await Promise.all([
+          client.query(
+            `SELECT id, duration_minutes, buffer_before_minutes, buffer_after_minutes, price_minor
+             FROM offerings WHERE id = $1 AND store_id = $2 AND is_active = TRUE`,
+            [offeringId, storeId]
+          ),
+          client.query('SELECT * FROM store_booking_settings WHERE store_id = $1', [storeId]),
+          client.query('SELECT timezone FROM stores WHERE id = $1', [storeId])
+        ]);
+        if (offeringRes.rowCount === 0) {
+          throw Object.assign(new Error('The selected service is not active in this store.'), { statusCode: 404, code: 'OFFERING_NOT_FOUND' });
         }
 
-        // 3. Resolve customer
-        let customerId: string | null = null;
-        if (customerDetails?.email || customerDetails?.phone) {
-          const custRes = await client.query(
-            `SELECT id FROM customers WHERE store_id = $1 AND (email = $2 OR phone = $3)`,
-            [storeId, customerDetails.email || '', customerDetails.phone || '']
+        const offering = offeringRes.rows[0];
+        const settings = settingsRes.rows[0] || {};
+        const timeZone = settings.timezone || storeRes.rows[0]?.timezone || 'Asia/Kolkata';
+        if (!isValidTimeZone(timeZone)) {
+          throw Object.assign(new Error('The store booking timezone is invalid.'), { statusCode: 500, code: 'INVALID_STORE_TIMEZONE' });
+        }
+
+        const durationMinutes = Number(offering.duration_minutes || 30);
+        if (!Number.isSafeInteger(durationMinutes) || durationMinutes < 5 ||
+            end.getTime() - start.getTime() !== durationMinutes * 60000) {
+          throw Object.assign(new Error('The selected appointment duration does not match the service duration.'), { statusCode: 400, code: 'INVALID_BOOKING_DURATION' });
+        }
+
+        const minNoticeHours = Number(settings.min_notice_hours ?? 2);
+        const maxAdvanceDays = Number(settings.max_advance_days ?? 60);
+        const globalBuffer = Number(settings.buffer_minutes ?? 0);
+        const bufferBefore = Number(offering.buffer_before_minutes || 0) + globalBuffer;
+        const bufferAfter = Number(offering.buffer_after_minutes || 0) + globalBuffer;
+        if (start.getTime() < Date.now() + minNoticeHours * 3600000) {
+          throw Object.assign(new Error('The minimum advance-notice period has not been met.'), { statusCode: 409, code: 'MINIMUM_NOTICE_NOT_MET' });
+        }
+
+        const localStart = localDateAndMinutes(start, timeZone);
+        const localEnd = localDateAndMinutes(end, timeZone);
+        const localToday = localDateAndMinutes(new Date(), timeZone).date;
+        const maxDate = new Date(localToday + 'T12:00:00Z');
+        maxDate.setUTCDate(maxDate.getUTCDate() + maxAdvanceDays);
+        const maxLocalDate = [maxDate.getUTCFullYear(), String(maxDate.getUTCMonth() + 1).padStart(2, '0'), String(maxDate.getUTCDate()).padStart(2, '0')].join('-');
+        if (localStart.date < localToday || localStart.date > maxLocalDate) {
+          throw Object.assign(new Error('The selected date is outside the store advance-booking window.'), { statusCode: 409, code: 'MAXIMUM_ADVANCE_EXCEEDED' });
+        }
+        if (localStart.date !== localEnd.date) {
+          throw Object.assign(new Error('Appointments cannot cross the store local day boundary.'), { statusCode: 400, code: 'CROSS_DAY_BOOKING_NOT_SUPPORTED' });
+        }
+
+        // Lock a resource assigned to this service and owned by this store.
+        const resourceRes = await client.query(
+          `SELECT r.id, r.name, r.staff_profile_id
+           FROM resources r
+           JOIN offering_resources o_r ON o_r.resource_id = r.id
+           JOIN offerings o ON o.id = o_r.offering_id
+           JOIN staff_profiles sp ON sp.id = r.staff_profile_id
+           WHERE r.id = $1 AND r.store_id = $2 AND r.is_active = TRUE
+             AND o.id = $3 AND o.store_id = $2 AND o.is_active = TRUE
+             AND sp.store_id = $2 AND sp.is_active = TRUE
+           FOR UPDATE OF r`,
+          [resourceId, storeId, offeringId]
+        );
+        if (resourceRes.rowCount === 0) {
+          throw Object.assign(new Error('The selected staff/resource is not assigned to this active service in this store.'), { statusCode: 404, code: 'RESOURCE_NOT_AVAILABLE' });
+        }
+        const resource = resourceRes.rows[0];
+
+        const shiftRes = await client.query(
+          `SELECT 1 FROM staff_shifts
+           WHERE staff_profile_id = $1 AND day_of_week = $2 AND is_active = TRUE
+             AND start_time <= $3::time AND end_time >= $4::time
+           LIMIT 1`,
+          [
+            resource.staff_profile_id,
+            localStart.dayOfWeek,
+            String(Math.floor(localStart.minuteOfDay / 60)).padStart(2, '0') + ':' + String(localStart.minuteOfDay % 60).padStart(2, '0'),
+            String(Math.floor(localEnd.minuteOfDay / 60)).padStart(2, '0') + ':' + String(localEnd.minuteOfDay % 60).padStart(2, '0')
+          ]
+        );
+        if (shiftRes.rowCount === 0) {
+          throw Object.assign(new Error('The selected staff member is not scheduled for the entire appointment time.'), { statusCode: 409, code: 'STAFF_OUTSIDE_WORKING_HOURS' });
+        }
+
+        const conflictStart = new Date(start.getTime() - bufferBefore * 60000);
+        const conflictEnd = new Date(end.getTime() + bufferAfter * 60000);
+        let consumedHoldId: string | null = null;
+
+        if (holdToken) {
+          const holdRes = await client.query(
+            `SELECT id FROM booking_holds
+             WHERE hold_token = $1 AND store_id = $2 AND offering_id = $3
+               AND resource_id = $4 AND start_time = $5 AND end_time = $6
+               AND expires_at > NOW()
+             FOR UPDATE`,
+            [holdToken, storeId, offeringId, resourceId, start.toISOString(), end.toISOString()]
           );
-          if (custRes.rowCount && custRes.rowCount > 0) {
-            customerId = custRes.rows[0].id;
-          } else {
-            customerId = `cust-${uuidv4()}`;
-            await client.query(
-              `INSERT INTO customers (id, store_id, email, phone, first_name, last_name)
-               VALUES ($1, $2, $3, $4, $5, $6)`,
-              [customerId, storeId, customerDetails.email || null, customerDetails.phone || null, customerDetails.firstName || 'Client', customerDetails.lastName || '']
-            );
+          if (holdRes.rowCount === 0) {
+            throw Object.assign(new Error('The appointment hold expired or no longer matches this slot. Choose another time.'), { statusCode: 409, code: 'HOLD_EXPIRED' });
           }
+          consumedHoldId = holdRes.rows[0].id;
         }
 
-        // 4. Fetch offering price
-        const offRes = await client.query(`SELECT price_minor, deposit_required_minor FROM offerings WHERE id = $1`, [offeringId]);
-        const price = offRes.rows[0]?.price_minor || 0;
-        const deposit = offRes.rows[0]?.deposit_required_minor || 0;
+        const [bookingConflict, holdConflict, timeOffConflict] = await Promise.all([
+          client.query(
+            `SELECT 1 FROM bookings
+             WHERE store_id = $1 AND resource_id = $2
+               AND status NOT IN ('CANCELLED', 'NO_SHOW')
+               AND start_time < $4 AND end_time > $3 LIMIT 1`,
+            [storeId, resourceId, conflictStart.toISOString(), conflictEnd.toISOString()]
+          ),
+          client.query(
+            `SELECT 1 FROM booking_holds
+             WHERE store_id = $1 AND resource_id = $2 AND expires_at > NOW()
+               AND ($3::varchar IS NULL OR id <> $3)
+               AND start_time < $5 AND end_time > $4 LIMIT 1`,
+            [storeId, resourceId, consumedHoldId, conflictStart.toISOString(), conflictEnd.toISOString()]
+          ),
+          client.query(
+            `SELECT 1 FROM time_off
+             WHERE staff_profile_id = $1 AND start_time < $3 AND end_time > $2 LIMIT 1`,
+            [resource.staff_profile_id, conflictStart.toISOString(), conflictEnd.toISOString()]
+          )
+        ]);
+        if ((bookingConflict.rowCount ?? 0) > 0 || (holdConflict.rowCount ?? 0) > 0 || (timeOffConflict.rowCount ?? 0) > 0) {
+          throw Object.assign(new Error('This resource and time slot is no longer available.'), { statusCode: 409, code: 'SLOT_UNAVAILABLE' });
+        }
 
-        // 5. Insert booking
-        await client.query(
-          `INSERT INTO bookings (id, store_id, booking_number, offering_id, resource_id, customer_id, start_time, end_time, status, total_minor, deposit_paid_minor, balance_due_minor, intake_notes)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'CONFIRMED', $9, $10, $11, $12)`,
-          [bookingId, storeId, bookingNumber, offeringId, resourceId, customerId, startTime, endTime, price, deposit, price - deposit, intakeNotes || '']
+        let customerId: string | null = null;
+        const customerRes = await client.query(
+          `SELECT id FROM customers
+           WHERE store_id = $1 AND (
+             ($2 <> '' AND LOWER(email) = LOWER($2)) OR ($3 <> '' AND phone = $3)
+           )
+           ORDER BY created_at ASC LIMIT 1 FOR UPDATE`,
+          [storeId, email, phone]
         );
+        if ((customerRes.rowCount ?? 0) > 0) {
+          customerId = customerRes.rows[0].id;
+          await client.query(
+            `UPDATE customers
+             SET first_name = $1, last_name = $2,
+                 email = COALESCE(NULLIF($3, ''), email),
+                 phone = COALESCE(NULLIF($4, ''), phone),
+                 updated_at = NOW()
+             WHERE id = $5 AND store_id = $6`,
+            [firstName, lastName, email, phone, customerId, storeId]
+          );
+        } else {
+          customerId = 'cust-' + uuidv4();
+          await client.query(
+            `INSERT INTO customers (id, store_id, email, phone, first_name, last_name)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [customerId, storeId, email || null, phone || null, firstName, lastName]
+          );
+        }
 
-        // 6. Audit
+        const price = Number(offering.price_minor);
+        if (!Number.isSafeInteger(price) || price < 0) {
+          throw Object.assign(new Error('The service price is invalid.'), { statusCode: 409, code: 'INVALID_OFFERING_PRICE' });
+        }
+        const confirmationMode = settings.confirmation_mode || 'AUTOMATIC';
+        const status = confirmationMode === 'MANUAL' ? 'PENDING' : 'CONFIRMED';
+
+        // Never mark a deposit as paid until a real payment transaction exists.
+        await client.query(
+          `INSERT INTO bookings (
+             id, store_id, booking_number, offering_id, resource_id, customer_id,
+             start_time, end_time, status, total_minor,
+             deposit_paid_minor, balance_due_minor, intake_notes
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, $10, $11)`,
+          [bookingId, storeId, bookingNumber, offeringId, resourceId, customerId, start.toISOString(), end.toISOString(), status, price, intakeNotes]
+        );
+        if (consumedHoldId) {
+          await client.query('DELETE FROM booking_holds WHERE id = $1 AND store_id = $2', [consumedHoldId, storeId]);
+        }
+
         await recordAudit({
-          organizationId: req.tenant?.organizationId,
+          organizationId,
           storeId,
           actorId: req.auth?.userId,
           action: 'CREATE_BOOKING',
           targetType: 'BOOKING',
           targetId: bookingId,
-          changes: { bookingNumber, startTime, endTime }
+          changes: { bookingNumber, startTime: start.toISOString(), endTime: end.toISOString(), resourceId, confirmationMode }
         });
       });
 
-      res.status(201).json({
-        message: 'Appointment booked successfully',
-        bookingId,
-        bookingNumber
-      });
-    } catch (err: any) {
-      if (err.statusCode === 409 || err.message?.includes('SLOT_UNAVAILABLE')) {
-        return res.status(409).json({
-          error: 'SLOT_UNAVAILABLE',
-          message: err.message
-        });
-      }
-      throw err;
+      res.status(201).json({ message: 'Appointment created successfully.', bookingId, bookingNumber });
+    } catch (error: any) {
+      if (error.statusCode) return res.status(error.statusCode).json({ error: error.code, message: error.message });
+      throw error;
     }
   }
 );
@@ -698,43 +1202,218 @@ appointmentsRouter.patch(
   '/bookings/:id/status',
   requireAuth,
   resolveTenant,
+  requireCapability('appointments'),
+  requirePermission('appointments.manage'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
+    const organizationId = req.tenant!.organizationId;
     const bookingId = req.params.id as string;
-    const { status, startTime, endTime } = req.body;
-
-    const bkg = await query(`SELECT * FROM bookings WHERE id = $1 AND store_id = $2`, [bookingId, storeId]);
-    if (bkg.rowCount === 0) {
-      return res.status(404).json({ error: 'NOT_FOUND', message: 'Booking not found' });
+    const { status, startTime, endTime } = req.body || {};
+    const allowedStatuses = new Set(['PENDING', 'CONFIRMED', 'CHECKED_IN', 'COMPLETED', 'CANCELLED', 'NO_SHOW']);
+    if (status !== undefined && (typeof status !== 'string' || !allowedStatuses.has(status))) {
+      return res.status(400).json({ error: 'INVALID_BOOKING_STATUS', message: 'The requested booking status is not supported.' });
+    }
+    if ((startTime === undefined) !== (endTime === undefined)) {
+      return res.status(400).json({ error: 'INVALID_RESCHEDULE', message: 'Both a start time and an end time are required to reschedule.' });
+    }
+    const requestedStart = startTime === undefined ? null : new Date(startTime);
+    const requestedEnd = endTime === undefined ? null : new Date(endTime);
+    if (requestedStart && requestedEnd &&
+        (!Number.isFinite(requestedStart.getTime()) || !Number.isFinite(requestedEnd.getTime()) ||
+         requestedEnd.getTime() <= requestedStart.getTime() ||
+         requestedEnd.getTime() - requestedStart.getTime() > 24 * 60 * 60 * 1000)) {
+      return res.status(400).json({ error: 'INVALID_RESCHEDULE', message: 'A valid future start/end time range is required.' });
     }
 
-    if (startTime && endTime) {
-      // Rescheduling check
-      const conflict = await query(
-        `SELECT id FROM bookings
-         WHERE id != $1 AND resource_id = $2 AND status NOT IN ('CANCELLED')
-           AND start_time < $4 AND end_time > $3`,
-        [bookingId, bkg.rows[0].resource_id, startTime, endTime]
-      );
-      if (conflict.rowCount && conflict.rowCount > 0) {
-        return res.status(409).json({ error: 'SLOT_UNAVAILABLE', message: 'Rescheduled time slot is already taken' });
-      }
+    let notFound = false;
+    try {
+      await withTransaction(async (client) => {
+        const bookingRes = await client.query(
+          `SELECT * FROM bookings WHERE id = $1 AND store_id = $2 FOR UPDATE`,
+          [bookingId, storeId]
+        );
+        if (bookingRes.rowCount === 0) {
+          notFound = true;
+          return;
+        }
+        const booking = bookingRes.rows[0];
 
-      await query(
-        `UPDATE bookings
-         SET start_time = $1, end_time = $2, status = COALESCE($3, status), updated_at = NOW()
-         WHERE id = $4 AND store_id = $5`,
-        [startTime, endTime, status, bookingId, storeId]
-      );
-    } else {
-      await query(
-        `UPDATE bookings
-         SET status = $1, updated_at = NOW()
-         WHERE id = $2 AND store_id = $3`,
-        [status, bookingId, storeId]
-      );
+        const transitions: Record<string, string[]> = {
+          PENDING: ['CONFIRMED', 'CANCELLED', 'NO_SHOW'],
+          CONFIRMED: ['CHECKED_IN', 'CANCELLED', 'NO_SHOW'],
+          CHECKED_IN: ['COMPLETED', 'CANCELLED', 'NO_SHOW'],
+          COMPLETED: [],
+          CANCELLED: [],
+          NO_SHOW: []
+        };
+        if (status && status !== booking.status && !(transitions[booking.status] || []).includes(status)) {
+          throw Object.assign(new Error(`Cannot change an appointment from ${booking.status} to ${status}.`), {
+            statusCode: 409,
+            code: 'INVALID_STATUS_TRANSITION'
+          });
+        }
+
+        let nextStart = new Date(booking.start_time);
+        let nextEnd = new Date(booking.end_time);
+        if (requestedStart && requestedEnd) {
+          if (['CANCELLED', 'COMPLETED', 'NO_SHOW'].includes(booking.status)) {
+            throw Object.assign(new Error('A cancelled, completed or no-show appointment cannot be rescheduled.'), {
+              statusCode: 409,
+              code: 'BOOKING_NOT_RESCHEDULABLE'
+            });
+          }
+
+          const resourceRes = await client.query(
+            `SELECT r.id, r.staff_profile_id, o.duration_minutes,
+                    o.buffer_before_minutes, o.buffer_after_minutes
+             FROM resources r
+             JOIN offerings o ON o.id = $1 AND o.store_id = $2 AND o.is_active = TRUE
+             JOIN offering_resources o_r ON o_r.offering_id = o.id AND o_r.resource_id = r.id
+             JOIN staff_profiles sp ON sp.id = r.staff_profile_id
+             WHERE r.id = $3 AND r.store_id = $2 AND r.is_active = TRUE
+               AND sp.store_id = $2 AND sp.is_active = TRUE
+             FOR UPDATE OF r`,
+            [booking.offering_id, storeId, booking.resource_id]
+          );
+          if (resourceRes.rowCount === 0) {
+            throw Object.assign(new Error('The assigned staff resource is no longer active for this service.'), {
+              statusCode: 409,
+              code: 'RESOURCE_NOT_AVAILABLE'
+            });
+          }
+
+          const resource = resourceRes.rows[0];
+          const [settingsRes, storeRes] = await Promise.all([
+            client.query('SELECT * FROM store_booking_settings WHERE store_id = $1', [storeId]),
+            client.query('SELECT timezone FROM stores WHERE id = $1', [storeId])
+          ]);
+          const settings = settingsRes.rows[0] || {};
+          const timeZone = settings.timezone || storeRes.rows[0]?.timezone || 'Asia/Kolkata';
+          if (!isValidTimeZone(timeZone)) {
+            throw Object.assign(new Error('The store booking timezone is invalid.'), { statusCode: 500, code: 'INVALID_STORE_TIMEZONE' });
+          }
+
+          const duration = Number(resource.duration_minutes || 30);
+          if (requestedEnd.getTime() - requestedStart.getTime() !== duration * 60000 || requestedStart.getTime() <= Date.now()) {
+            throw Object.assign(new Error('The new time must be in the future and match the service duration.'), {
+              statusCode: 400,
+              code: 'INVALID_RESCHEDULE_DURATION'
+            });
+          }
+
+          const localStart = localDateAndMinutes(requestedStart, timeZone);
+          const localEnd = localDateAndMinutes(requestedEnd, timeZone);
+          if (localStart.date !== localEnd.date) {
+            throw Object.assign(new Error('Appointments cannot cross the store local day boundary.'), {
+              statusCode: 400,
+              code: 'CROSS_DAY_BOOKING_NOT_SUPPORTED'
+            });
+          }
+
+          const minimumNotice = Number(settings.min_notice_hours ?? 2);
+          const maxAdvance = Number(settings.max_advance_days ?? 60);
+          if (requestedStart.getTime() < Date.now() + minimumNotice * 3600000) {
+            throw Object.assign(new Error('The minimum advance-notice period has not been met.'), {
+              statusCode: 409,
+              code: 'MINIMUM_NOTICE_NOT_MET'
+            });
+          }
+          const localToday = localDateAndMinutes(new Date(), timeZone).date;
+          const maxDate = new Date(localToday + 'T12:00:00Z');
+          maxDate.setUTCDate(maxDate.getUTCDate() + maxAdvance);
+          const maxLocalDate = [maxDate.getUTCFullYear(), String(maxDate.getUTCMonth() + 1).padStart(2, '0'), String(maxDate.getUTCDate()).padStart(2, '0')].join('-');
+          if (localStart.date < localToday || localStart.date > maxLocalDate) {
+            throw Object.assign(new Error('The selected date is outside the store advance-booking window.'), {
+              statusCode: 409,
+              code: 'MAXIMUM_ADVANCE_EXCEEDED'
+            });
+          }
+
+          const shiftRes = await client.query(
+            `SELECT 1 FROM staff_shifts
+             WHERE staff_profile_id = $1 AND day_of_week = $2 AND is_active = TRUE
+               AND start_time <= $3::time AND end_time >= $4::time
+             LIMIT 1`,
+            [
+              resource.staff_profile_id,
+              localStart.dayOfWeek,
+              String(Math.floor(localStart.minuteOfDay / 60)).padStart(2, '0') + ':' + String(localStart.minuteOfDay % 60).padStart(2, '0'),
+              String(Math.floor(localEnd.minuteOfDay / 60)).padStart(2, '0') + ':' + String(localEnd.minuteOfDay % 60).padStart(2, '0')
+            ]
+          );
+          if (shiftRes.rowCount === 0) {
+            throw Object.assign(new Error('The assigned staff member is not scheduled for the requested time.'), {
+              statusCode: 409,
+              code: 'STAFF_OUTSIDE_WORKING_HOURS'
+            });
+          }
+
+          const globalBuffer = Number(settings.buffer_minutes ?? 0);
+          const conflictStart = new Date(requestedStart.getTime() - (Number(resource.buffer_before_minutes || 0) + globalBuffer) * 60000);
+          const conflictEnd = new Date(requestedEnd.getTime() + (Number(resource.buffer_after_minutes || 0) + globalBuffer) * 60000);
+          const [bookingConflict, holdConflict, timeOffConflict] = await Promise.all([
+            client.query(
+              `SELECT 1 FROM bookings
+               WHERE store_id = $1 AND resource_id = $2 AND id <> $3
+                 AND status NOT IN ('CANCELLED', 'NO_SHOW')
+                 AND start_time < $5 AND end_time > $4 LIMIT 1`,
+              [storeId, booking.resource_id, bookingId, conflictStart.toISOString(), conflictEnd.toISOString()]
+            ),
+            client.query(
+              `SELECT 1 FROM booking_holds
+               WHERE store_id = $1 AND resource_id = $2 AND expires_at > NOW()
+                 AND start_time < $4 AND end_time > $3 LIMIT 1`,
+              [storeId, booking.resource_id, conflictStart.toISOString(), conflictEnd.toISOString()]
+            ),
+            client.query(
+              `SELECT 1 FROM time_off
+               WHERE staff_profile_id = $1 AND start_time < $3 AND end_time > $2 LIMIT 1`,
+              [resource.staff_profile_id, conflictStart.toISOString(), conflictEnd.toISOString()]
+            )
+          ]);
+          if ((bookingConflict.rowCount ?? 0) > 0 || (holdConflict.rowCount ?? 0) > 0 || (timeOffConflict.rowCount ?? 0) > 0) {
+            throw Object.assign(new Error('This resource is not available for the requested time.'), {
+              statusCode: 409,
+              code: 'SLOT_UNAVAILABLE'
+            });
+          }
+          nextStart = requestedStart;
+          nextEnd = requestedEnd;
+        }
+
+        if (!status && !requestedStart) {
+          throw Object.assign(new Error('Provide a booking status or a new time range.'), {
+            statusCode: 400,
+            code: 'NO_BOOKING_CHANGE'
+          });
+        }
+
+        const nextStatus = status || booking.status;
+        await client.query(
+          `UPDATE bookings
+           SET start_time = $1, end_time = $2, status = $3, updated_at = NOW()
+           WHERE id = $4 AND store_id = $5`,
+          [nextStart.toISOString(), nextEnd.toISOString(), nextStatus, bookingId, storeId]
+        );
+
+        await recordAudit({
+          organizationId,
+          storeId,
+          actorId: req.auth?.userId,
+          action: requestedStart ? 'RESCHEDULE_BOOKING' : 'UPDATE_BOOKING_STATUS',
+          targetType: 'BOOKING',
+          targetId: bookingId,
+          changes: { previousStatus: booking.status, status: nextStatus, startTime: nextStart.toISOString(), endTime: nextEnd.toISOString() }
+        });
+      });
+    } catch (error: any) {
+      if (error.statusCode) return res.status(error.statusCode).json({ error: error.code, message: error.message });
+      throw error;
     }
 
-    res.json({ message: `Booking status updated to ${status}` });
+    if (notFound) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Booking was not found in this store.' });
+    }
+    res.json({ message: 'Appointment updated successfully.' });
   }
 );

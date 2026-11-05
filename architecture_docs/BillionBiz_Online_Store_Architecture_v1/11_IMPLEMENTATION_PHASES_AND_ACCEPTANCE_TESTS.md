@@ -1,8 +1,10 @@
 # 11 — Implementation Plan, Phase Gates and Acceptance Tests
 
+> This legacy plan is maintained for traceability; Architecture v2 document 13 is the active authority.
+
 ## 1. Execution rule
 
-**Finish one phase completely before starting the next.** Complete all non-section work before the editable Section/Block Builder. When the non-section acceptance gates pass, stop and request approval. After approval, implement one section at a time and stop after each for review.
+**Current sequencing is defined by Architecture v2 (document 13).** The user explicitly approved progressing with the section/block architecture. Continue with one complete, testable vertical slice at a time. Do not batch multiple sections or skip quality gates. The old requirement to stop and request approval before Phase 2 or after every individual section is superseded by that explicit direction.
 
 ## 2. Phase 0 — Discovery and safe migration
 

@@ -210,32 +210,39 @@ describe('Online Store Rebuild — Phase 1 Backend API Test Suite', () => {
     expect(getRes.body.brand.name).toBe('Artisan Atelier');
   });
 
-  it('7. Domain management: add, verify, primary, and delete custom domain', async () => {
+  it('7. Domain management never fakes DNS or SSL verification', async () => {
+    const domain = `shop.phase1test-${Date.now()}.invalid`;
     const addRes = await request('POST', '/api/v1/storefront/domains', {
       token,
       headers: { 'x-organization-id': orgId, 'x-store-id': storeId },
-      body: { domain: `shop.phase1test-${Date.now()}.com` }
+      body: { domain }
     });
     expect(addRes.status).toBe(201);
     const domainId = addRes.body.domain.id;
+    expect(addRes.body.domain.isVerified).toBe(false);
+    expect(addRes.body.domain.sslStatus).toBe('PENDING');
 
-    // Verify domain
     const verifyRes = await request('POST', `/api/v1/storefront/domains/${domainId}/verify`, {
       token,
       headers: { 'x-organization-id': orgId, 'x-store-id': storeId }
     });
-    expect(verifyRes.status).toBe(200);
-    expect(verifyRes.body.isVerified).toBe(true);
+    expect([409, 503]).toContain(verifyRes.status);
+    expect(verifyRes.body.isVerified).not.toBe(true);
 
-    // Set primary
+    const persistedDomain = await query(
+      `SELECT is_verified, ssl_status FROM store_domains WHERE id = $1 AND store_id = $2`,
+      [domainId, storeId]
+    );
+    expect(persistedDomain.rows[0].is_verified).toBe(false);
+    expect(persistedDomain.rows[0].ssl_status).toBe('PENDING');
+
     const primaryRes = await request('POST', `/api/v1/storefront/domains/${domainId}/primary`, {
       token,
       headers: { 'x-organization-id': orgId, 'x-store-id': storeId }
     });
-    expect(primaryRes.status).toBe(200);
+    expect(primaryRes.status).toBe(409);
+    expect(primaryRes.body.error).toBe('DOMAIN_NOT_READY');
 
-    // Delete custom domain after unsetting primary
-    await query(`UPDATE store_domains SET is_primary = FALSE WHERE id = $1`, [domainId]);
     const delRes = await request('DELETE', `/api/v1/storefront/domains/${domainId}`, {
       token,
       headers: { 'x-organization-id': orgId, 'x-store-id': storeId }

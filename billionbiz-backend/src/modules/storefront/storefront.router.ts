@@ -1,14 +1,19 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import { query, withTransaction } from '../../db/pool.js';
-import { requireAuth, requirePermission } from '../../middleware/auth.js';
+import { requireAuth, requirePermission, JWT_SECRET } from '../../middleware/auth.js';
 import { resolveTenant } from '../../middleware/tenant.js';
 import { handleIdempotency } from '../../middleware/idempotency.js';
-import { recordAudit } from '../../core/auditAndOutbox.js';
+import { recordAudit, enqueueOutbox } from '../../core/auditAndOutbox.js';
+import { realtimeGateway } from '../../core/realtimeGateway.js';
 import { provisionDefaultStorefront } from './storefrontProvisioner.js';
 import { PLATFORM_MAIN_DOMAIN } from '../../core/subdomains.js';
+import { env } from '../../core/env.js';
+import { resolveCname } from 'node:dns/promises';
+import { validatePageSectionDocument } from './sectionDocumentValidation.js';
 
 export const storefrontRouter = Router();
 
@@ -34,7 +39,15 @@ storefrontRouter.patch(
 
     const updated = await query(
       `INSERT INTO store_themes (id, store_id, preset_name, palette, typography, buttons, effects, custom_css, version, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, NOW())
+       VALUES (
+         $1, $2, COALESCE($3, 'modern'),
+         COALESCE($4, '{}'::jsonb),
+         COALESCE($5, '{}'::jsonb),
+         COALESCE($6, '{}'::jsonb),
+         COALESCE($7, '{}'::jsonb),
+         COALESCE($8, ''),
+         1, NOW()
+       )
        ON CONFLICT (store_id) DO UPDATE SET
          preset_name = COALESCE($3, store_themes.preset_name),
          palette = COALESCE($4, store_themes.palette),
@@ -48,12 +61,12 @@ storefrontRouter.patch(
       [
         `thm-${uuidv4()}`,
         storeId,
-        presetName || 'modern',
-        JSON.stringify(palette || {}),
-        JSON.stringify(typography || {}),
-        JSON.stringify(buttons || {}),
-        JSON.stringify(effects || {}),
-        customCss || ''
+        presetName ?? null,
+        palette === undefined ? null : JSON.stringify(palette),
+        typography === undefined ? null : JSON.stringify(typography),
+        buttons === undefined ? null : JSON.stringify(buttons),
+        effects === undefined ? null : JSON.stringify(effects),
+        customCss === undefined ? null : customCss
       ]
     );
 
@@ -85,8 +98,17 @@ storefrontRouter.get('/pages', requireAuth, resolveTenant, async (req: Request, 
   const storeId = req.tenant!.storeId;
   let pagesRes = await query(
     `SELECT p.*,
-            (SELECT pd.version FROM page_draft_versions pd WHERE pd.page_id = p.id ORDER BY pd.version DESC LIMIT 1) as draft_version
+            COALESCE(pd.sections, '[]'::jsonb) AS sections,
+            COALESCE(pd.page_props, p.page_props) AS draft_page_props,
+            COALESCE(pd.version, 0) AS draft_version
      FROM store_pages p
+     LEFT JOIN LATERAL (
+       SELECT sections, page_props, version
+       FROM page_draft_versions
+       WHERE page_id = p.id
+       ORDER BY version DESC, created_at DESC
+       LIMIT 1
+     ) pd ON TRUE
      WHERE p.store_id = $1
      ORDER BY p.is_system DESC, p.name ASC`,
     [storeId]
@@ -130,6 +152,14 @@ storefrontRouter.post(
     const storeId = req.tenant!.storeId;
     const { name, title, path, slug, type = 'custom', category = 'GENERAL', templateKey = 'standard', sections = [], pageProps = {} } = req.body;
     const pageName = name || title || 'New Page';
+    const sectionValidation = validatePageSectionDocument(sections);
+    if (!sectionValidation.valid) {
+      return res.status(400).json({
+        error: 'INVALID_SECTION_DOCUMENT',
+        message: 'One or more sections do not match their registered schema.',
+        issues: sectionValidation.issues
+      });
+    }
     let pagePath = path || `/${slug || pageName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
     if (!pagePath.startsWith('/')) pagePath = `/${pagePath}`;
 
@@ -320,7 +350,8 @@ storefrontRouter.delete(
 
 // GET /api/v1/storefront/by-slug/:slug (Public Storefront by store slug, REQ-STOREFRONT-001)
 storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
-  const slug = req.params.slug as string;
+  res.setHeader('Cache-Control', 'private, no-store');
+  const slug = String(req.params.slug || '').trim().toLowerCase();
   const storeRes = await query(
     `SELECT id, organization_id, name, slug, currency, timezone, status
      FROM stores
@@ -337,53 +368,141 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
 
   const store = storeRes.rows[0];
 
+  const settingsRes = await query(
+    `SELECT mode, home_page, navigation_config, icon_visibility, brand_name, tagline,
+            logo_url, favicon_url, social_links, primary_domain, password_enabled,
+            password_hash, maintenance_mode
+     FROM storefront_settings
+     WHERE store_id = $1`,
+    [store.id]
+  );
+  const settingsRow = settingsRes.rows[0] || {};
+
+  if (settingsRow.password_enabled) {
+    const suppliedToken = req.headers['x-storefront-access-token'];
+    let hasStoreAccess = false;
+
+    if (typeof suppliedToken === 'string' && suppliedToken.length > 0) {
+      try {
+        const claims = jwt.verify(suppliedToken, JWT_SECRET) as jwt.JwtPayload;
+        hasStoreAccess =
+          claims.scope === 'STOREFRONT_PASSWORD' &&
+          claims.storeId === store.id &&
+          claims.slug === store.slug;
+      } catch {
+        hasStoreAccess = false;
+      }
+    }
+
+    if (!hasStoreAccess) {
+      return res.status(200).json({
+        store: { id: store.id, name: store.name, slug: store.slug, currency: store.currency, timezone: store.timezone },
+        brand: {
+          name: settingsRow.brand_name || store.name,
+          tagline: settingsRow.tagline || '',
+          logoUrl: settingsRow.logo_url || '',
+          faviconUrl: settingsRow.favicon_url || '',
+          socialLinks: settingsRow.social_links || {}
+        },
+        settings: { passwordEnabled: true },
+        passwordRequired: true
+      });
+    }
+  }
+
   // 1. Latest immutable published release snapshot
   const releaseRes = await query(
-    `SELECT id, release_number, snapshot, content_hash, published_by, notes, created_at
-     FROM store_releases
-     WHERE store_id = $1
-     ORDER BY release_number DESC
+    `SELECT r.id, r.release_number, r.snapshot, r.content_hash, r.published_by, r.notes, r.created_at
+     FROM storefront_settings ss
+     JOIN store_releases r ON r.id = ss.active_release_id AND r.store_id = ss.store_id
+     WHERE ss.store_id = $1
      LIMIT 1`,
     [store.id]
   );
 
-  // 2. Active theme
-  const themeRes = await query(`SELECT * FROM store_themes WHERE store_id = $1`, [store.id]);
+  // 3. Public pages always come from the immutable active release.
+  let publishedPages = Array.isArray(releaseRes.rows[0]?.snapshot?.pages)
+    ? releaseRes.rows[0].snapshot.pages
+    : [];
 
-  // 3. Published pages
-  let pagesRes = await query(
-    `SELECT id, name, path, type, category, status, page_props
-     FROM store_pages
-     WHERE store_id = $1 AND status = 'published'
-     ORDER BY (CASE WHEN path = '/' THEN 0 ELSE 1 END), is_system DESC, name ASC`,
-    [store.id]
-  );
-
-  if (pagesRes.rowCount === 0) {
-    await withTransaction(async (client) => {
-      await provisionDefaultStorefront({
-        client,
-        storeId: store.id,
-        storeName: store.name || 'Online Store',
-        storeSlug: store.slug,
-        mode: 'COMMERCE'
-      });
-    });
-    pagesRes = await query(
-      `SELECT id, name, path, type, category, status, page_props
-       FROM store_pages
-       WHERE store_id = $1 AND status = 'published'
-       ORDER BY (CASE WHEN path = '/' THEN 0 ELSE 1 END), is_system DESC, name ASC`,
+  // Backfill only stores that have never had their starter pages provisioned.
+  // Never expose mutable page rows as public storefront content.
+  if (!releaseRes.rows[0]) {
+    const existingPages = await query(
+      `SELECT 1 FROM store_pages WHERE store_id = $1 LIMIT 1`,
       [store.id]
     );
+    if (existingPages.rowCount === 0) {
+      await withTransaction(async (client) => {
+        await provisionDefaultStorefront({
+          client,
+          storeId: store.id,
+          storeName: store.name || 'Online Store',
+          storeSlug: store.slug,
+          mode: 'COMMERCE'
+        });
+      });
+      const refreshedRelease = await query(
+        `SELECT r.id, r.release_number, r.snapshot, r.content_hash, r.published_by, r.notes, r.created_at
+         FROM storefront_settings ss
+         JOIN store_releases r ON r.id = ss.active_release_id AND r.store_id = ss.store_id
+         WHERE ss.store_id = $1
+         LIMIT 1`,
+        [store.id]
+      );
+      releaseRes.rows = refreshedRelease.rows;
+      publishedPages = Array.isArray(refreshedRelease.rows[0]?.snapshot?.pages)
+        ? refreshedRelease.rows[0].snapshot.pages
+        : [];
+    }
   }
 
-  // 4. Active products with variants
+  if (!releaseRes.rows[0]) {
+    return res.status(404).json({
+      error: 'STOREFRONT_NOT_PUBLISHED',
+      message: 'This store does not have an active publication yet.'
+    });
+  }
+
+  // 4. Active catalogue products. Return one row per product with a safe
+  // public variant projection; never duplicate cards because a product has
+  // multiple variants, and never expose cost, SKU or private inventory fields.
   const productsRes = await query(
-    `SELECT p.id, p.name, p.handle, p.description, p.product_type, p.media,
-            v.id as variant_id, v.sku, v.price_minor, v.compare_at_minor
+    `SELECT
+       p.id,
+       p.name,
+       p.handle,
+       p.description,
+       p.brand,
+       p.product_type,
+       p.media,
+       p.category_id,
+       c.name AS category_name,
+       c.slug AS category_slug,
+       COALESCE((
+         SELECT json_agg(
+           json_build_object(
+             'id', v.id,
+             'price_minor', v.price_minor,
+             'compare_at_minor', v.compare_at_minor,
+             'option_values', v.option_values,
+             'stock_available', stock.available,
+             'stock_tracked', stock.is_tracked
+           )
+           ORDER BY v.created_at ASC
+         )
+         FROM product_variants v
+         LEFT JOIN LATERAL (
+           SELECT
+             CASE WHEN COUNT(ib.id) = 0 THEN NULL ELSE SUM(ib.available)::integer END AS available,
+             COUNT(ib.id) > 0 AS is_tracked
+           FROM inventory_balances ib
+           WHERE ib.variant_id = v.id
+         ) stock ON TRUE
+         WHERE v.product_id = p.id AND v.is_active = TRUE
+       ), '[]'::json) AS variants
      FROM products p
-     LEFT JOIN product_variants v ON v.product_id = p.id
+     LEFT JOIN categories c ON c.id = p.category_id
      WHERE p.store_id = $1 AND p.status = 'ACTIVE'
      ORDER BY p.created_at DESC
      LIMIT 24`,
@@ -406,43 +525,179 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
     [store.id]
   );
 
-  // 7. Storefront settings & brand
-  const settingsRes = await query(
-    `SELECT mode, home_page, navigation_config, icon_visibility, brand_name, tagline, logo_url, favicon_url, social_links, primary_domain, password_enabled, maintenance_mode
-     FROM storefront_settings WHERE store_id = $1`,
-    [store.id]
-  );
-  const settingsRow = settingsRes.rows[0] || {};
+  // 7. Storefront settings & brand. Settings were loaded before any
+  // publication/catalogue data so password-protected stores can fail closed.
+  const activeSnapshot = releaseRes.rows[0]?.snapshot || {};
+  const publishedBrand = activeSnapshot.brand || {};
+  const publishedSettings = activeSnapshot.settings || {};
 
   res.json({
     store,
-    activeRelease: releaseRes.rows[0]?.snapshot || null,
+    activeRelease: activeSnapshot,
     releaseNumber: releaseRes.rows[0]?.release_number || null,
-    theme: themeRes.rows[0] || { preset_name: 'modern', palette: {}, typography: {}, buttons: {}, effects: {} },
-    pages: pagesRes.rows,
+    // The public site is an immutable publication. Unpublished theme/brand/
+    // navigation/settings changes remain visible only in the authenticated editor.
+    // Never fall back to mutable editor theme rows on the public route.
+    theme: activeSnapshot.theme || { preset_name: 'modern', palette: {}, typography: {}, buttons: {}, effects: {} },
+    pages: publishedPages,
     products: productsRes.rows,
     offerings: offeringsRes.rows,
     categories: categoriesRes.rows,
     brand: {
-      name: settingsRow.brand_name || store.name,
-      tagline: settingsRow.tagline || '',
-      logoUrl: settingsRow.logo_url || '',
-      faviconUrl: settingsRow.favicon_url || '',
-      socialLinks: settingsRow.social_links || {}
+      name: publishedBrand.name || store.name,
+      tagline: publishedBrand.tagline ?? '',
+      logoUrl: publishedBrand.logoUrl ?? '',
+      faviconUrl: publishedBrand.faviconUrl ?? '',
+      socialLinks: publishedBrand.socialLinks || {}
     },
     settings: {
-      mode: settingsRow.mode || 'COMMERCE',
-      homePage: settingsRow.home_page || 'LANDING',
-      navigation: settingsRow.navigation_config || [],
-      primaryDomain: settingsRow.primary_domain || `${store.slug}.${PLATFORM_MAIN_DOMAIN}`,
-      passwordEnabled: settingsRow.password_enabled || false,
-      maintenanceMode: settingsRow.maintenance_mode || false
+      mode: publishedSettings.mode || 'COMMERCE',
+      homePage: publishedSettings.homePage || 'LANDING',
+      navigation: activeSnapshot.navigation || [],
+      primaryDomain: publishedSettings.primaryDomain || `${store.slug}.${PLATFORM_MAIN_DOMAIN}`,
+      // Password protection is an immediate server-side security control, not a
+      // cosmetic draft value. The backend gate and this client flag use the same
+      // authoritative setting.
+      passwordEnabled: Boolean(settingsRow.password_enabled),
+      // Maintenance mode is an immediate operational control, not a draft design token.
+      maintenanceMode: Boolean(settingsRow.maintenance_mode),
+      seoDefaults: publishedSettings.seoDefaults || {}
     }
   });
 });
 
+// GET /api/v1/storefront/by-slug/:slug/updates
+// Public, read-only stream for newly activated releases. It exposes only a
+// release identifier/version; customers re-fetch the active public snapshot.
+storefrontRouter.get('/by-slug/:slug/updates', async (req: Request, res: Response) => {
+  const slug = String(req.params.slug || '').trim().toLowerCase();
+  const storeRes = await query(
+    `SELECT id, organization_id FROM stores
+     WHERE LOWER(slug) = LOWER($1) AND status = 'ACTIVE'
+     LIMIT 1`,
+    [slug]
+  );
+
+  if (storeRes.rowCount === 0) {
+    return res.status(404).json({ error: 'STORE_NOT_FOUND', message: 'Store not found' });
+  }
+
+  realtimeGateway.registerSseClient(
+    `storefront-${storeRes.rows[0].id}-${uuidv4()}`,
+    res,
+    storeRes.rows[0].organization_id,
+    storeRes.rows[0].id,
+    ['STOREFRONT_RELEASE_PUBLISHED']
+  );
+});
+
+// POST /api/v1/storefront/by-slug/:slug/password/verify
+// Password checks happen on the server; the hash is never exposed to the storefront.
+// Attempts are tracked in PostgreSQL so limits are consistent across instances.
+
+storefrontRouter.post('/by-slug/:slug/password/verify', async (req: Request, res: Response) => {
+  const slug = String(req.params.slug || '').trim().toLowerCase();
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  if (!slug || !password) {
+    return res.status(400).json({ error: 'PASSWORD_REQUIRED', verified: false, message: 'Enter the storefront password.' });
+  }
+
+  const storeRes = await query(
+    `SELECT s.id, s.slug, ss.password_enabled, ss.password_hash
+     FROM stores s
+     JOIN storefront_settings ss ON ss.store_id = s.id
+     WHERE LOWER(s.slug) = LOWER($1) AND s.status != 'SUSPENDED'
+     LIMIT 1`,
+    [slug]
+  );
+  if (storeRes.rowCount === 0) {
+    return res.status(404).json({ error: 'STORE_NOT_FOUND', verified: false });
+  }
+
+  const store = storeRes.rows[0];
+  if (!store.password_enabled) {
+    return res.json({ verified: true });
+  }
+  if (!store.password_hash) {
+    return res.status(409).json({
+      error: 'PASSWORD_CONFIGURATION_ERROR',
+      verified: false,
+      message: 'Password protection is enabled but no password has been configured.'
+    });
+  }
+
+  const clientIp = String(req.socket?.remoteAddress || req.ip || 'unknown');
+  const ipHash = crypto.createHash('sha256')
+    .update(`${store.id}:${clientIp}:${JWT_SECRET}`)
+    .digest('hex');
+
+  const attemptRes = await query(
+    `SELECT attempt_count, window_started_at, blocked_until
+     FROM storefront_password_attempts
+     WHERE store_id = $1 AND ip_hash = $2
+     LIMIT 1`,
+    [store.id, ipHash]
+  );
+  const existingAttempt = attemptRes.rows[0];
+  if (existingAttempt?.blocked_until && new Date(existingAttempt.blocked_until).getTime() > Date.now()) {
+    return res.status(429).json({
+      error: 'TOO_MANY_ATTEMPTS',
+      verified: false,
+      message: 'Too many password attempts. Please wait before trying again.'
+    });
+  }
+
+  const verified = await bcrypt.compare(password, store.password_hash);
+  if (!verified) {
+    const savedAttempt = await query(
+      `INSERT INTO storefront_password_attempts (
+         store_id, ip_hash, window_started_at, attempt_count, blocked_until, updated_at
+       )
+       VALUES ($1, $2, NOW(), 1, NULL, NOW())
+       ON CONFLICT (store_id, ip_hash) DO UPDATE SET
+         attempt_count = CASE
+           WHEN storefront_password_attempts.window_started_at < NOW() - INTERVAL '10 minutes' THEN 1
+           ELSE storefront_password_attempts.attempt_count + 1
+         END,
+         window_started_at = CASE
+           WHEN storefront_password_attempts.window_started_at < NOW() - INTERVAL '10 minutes' THEN NOW()
+           ELSE storefront_password_attempts.window_started_at
+         END,
+         blocked_until = CASE
+           WHEN storefront_password_attempts.window_started_at < NOW() - INTERVAL '10 minutes' THEN NULL
+           WHEN storefront_password_attempts.attempt_count + 1 >= 10 THEN NOW() + INTERVAL '10 minutes'
+           ELSE NULL
+         END,
+         updated_at = NOW()
+       RETURNING attempt_count, blocked_until`,
+      [store.id, ipHash]
+    );
+
+    if (Number(savedAttempt.rows[0]?.attempt_count || 0) >= 10) {
+      return res.status(429).json({
+        error: 'TOO_MANY_ATTEMPTS',
+        verified: false,
+        message: 'Too many password attempts. Please wait before trying again.'
+      });
+    }
+    return res.json({ verified: false, message: 'Incorrect storefront password.' });
+  }
+
+  await query(
+    `DELETE FROM storefront_password_attempts WHERE store_id = $1 AND ip_hash = $2`,
+    [store.id, ipHash]
+  );
+
+  const accessToken = jwt.sign(
+    { scope: 'STOREFRONT_PASSWORD', storeId: store.id, slug: store.slug },
+    JWT_SECRET,
+    { expiresIn: '4h', issuer: 'billionbiz-storefront', subject: store.id }
+  );
+  return res.json({ verified: true, accessToken, expiresInSeconds: 4 * 60 * 60 });
+});
+
 // GET /api/v1/storefront/render (Render active storefront or draft preview)
-storefrontRouter.get('/render', resolveTenant, async (req: Request, res: Response) => {
+storefrontRouter.get('/render', requireAuth, resolveTenant, async (req: Request, res: Response) => {
   const storeId = req.tenant!.storeId;
   const storeRes = await query(`SELECT id, name, slug, currency, timezone, status FROM stores WHERE id = $1`, [storeId]);
   const store = storeRes.rows[0];
@@ -452,7 +707,20 @@ storefrontRouter.get('/render', resolveTenant, async (req: Request, res: Respons
   }
 
   let pagesRes = await query(
-    `SELECT * FROM store_pages WHERE store_id = $1 ORDER BY (CASE WHEN path = '/' THEN 0 ELSE 1 END), is_system DESC, name ASC`,
+    `SELECT p.*,
+            COALESCE(pd.sections, '[]'::jsonb) AS sections,
+            COALESCE(pd.page_props, p.page_props) AS draft_page_props,
+            COALESCE(pd.version, 0) AS draft_version
+     FROM store_pages p
+     LEFT JOIN LATERAL (
+       SELECT sections, page_props, version
+       FROM page_draft_versions
+       WHERE page_id = p.id
+       ORDER BY version DESC, created_at DESC
+       LIMIT 1
+     ) pd ON TRUE
+     WHERE p.store_id = $1
+     ORDER BY (CASE WHEN p.path = '/' THEN 0 ELSE 1 END), p.is_system DESC, p.name ASC`,
     [storeId]
   );
   if (pagesRes.rowCount === 0) {
@@ -474,7 +742,11 @@ storefrontRouter.get('/render', resolveTenant, async (req: Request, res: Respons
 
   const themeRes = await query(`SELECT * FROM store_themes WHERE store_id = $1`, [storeId]);
   const latestRel = await query(
-    `SELECT snapshot, release_number, content_hash FROM store_releases WHERE store_id = $1 ORDER BY release_number DESC LIMIT 1`,
+    `SELECT r.id, r.snapshot, r.release_number, r.content_hash
+     FROM storefront_settings ss
+     JOIN store_releases r ON r.id = ss.active_release_id AND r.store_id = ss.store_id
+     WHERE ss.store_id = $1
+     LIMIT 1`,
     [storeId]
   );
 
@@ -546,31 +818,95 @@ storefrontRouter.patch(
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const pageId = req.params.id as string;
-    const { sections, pageProps } = req.body;
+    const { sections, pageProps, expectedVersion, seoTitle, seoDescription } = req.body;
 
-    const pageRes = await query(`SELECT id FROM store_pages WHERE id = $1 AND store_id = $2`, [pageId, storeId]);
-    if (pageRes.rowCount === 0) {
-      return res.status(404).json({ error: 'PAGE_NOT_FOUND', message: 'Page not found' });
+    if (!Array.isArray(sections)) {
+      return res.status(400).json({ error: 'INVALID_DRAFT', message: 'Sections must be an array.' });
     }
 
-    const nextVerRes = await query(
-      `SELECT COALESCE(MAX(version), 0) + 1 as next_ver FROM page_draft_versions WHERE page_id = $1`,
-      [pageId]
-    );
-    const nextVer = nextVerRes.rows[0].next_ver;
+    const sectionValidation = validatePageSectionDocument(sections);
+    if (!sectionValidation.valid) {
+      return res.status(400).json({
+        error: 'INVALID_SECTION_DOCUMENT',
+        message: 'One or more sections do not match their registered schema.',
+        issues: sectionValidation.issues
+      });
+    }
+    if (pageProps !== undefined && (!pageProps || typeof pageProps !== 'object' || Array.isArray(pageProps))) {
+      return res.status(400).json({ error: 'INVALID_DRAFT', message: 'Page properties must be an object.' });
+    }
+    if (seoTitle !== undefined && (typeof seoTitle !== 'string' || seoTitle.length > 70)) {
+      return res.status(400).json({ error: 'INVALID_SEO_TITLE', message: 'SEO title must be text with a maximum length of 70 characters.' });
+    }
+    if (seoDescription !== undefined && (typeof seoDescription !== 'string' || seoDescription.length > 320)) {
+      return res.status(400).json({ error: 'INVALID_SEO_DESCRIPTION', message: 'SEO description must be text with a maximum length of 320 characters.' });
+    }
+    if (expectedVersion !== undefined && (!Number.isInteger(Number(expectedVersion)) || Number(expectedVersion) < 0)) {
+      return res.status(400).json({ error: 'INVALID_DRAFT_VERSION', message: 'Expected draft version must be a non-negative integer.' });
+    }
 
-    await query(
-      `INSERT INTO page_draft_versions (id, page_id, version, sections, page_props, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [`draft-${uuidv4()}`, pageId, nextVer, JSON.stringify(sections || []), JSON.stringify(pageProps || {}), req.auth?.userId]
-    );
+    const saveOutcome: {
+      pageNotFound: boolean;
+      versionConflict: { currentVersion: number } | null;
+      nextVersion: number;
+    } = {
+      pageNotFound: false,
+      versionConflict: null,
+      nextVersion: 0
+    };
 
-    await query(
-      `UPDATE store_pages SET status = 'draft', updated_at = NOW() WHERE id = $1`,
-      [pageId]
-    );
+    await withTransaction(async (client) => {
+      // Lock the page row so concurrent autosaves allocate distinct versions.
+      const pageRes = await client.query(
+        `SELECT id FROM store_pages WHERE id = $1 AND store_id = $2 FOR UPDATE`,
+        [pageId, storeId]
+      );
+      if (pageRes.rowCount === 0) {
+        saveOutcome.pageNotFound = true;
+        return;
+      }
 
-    res.json({ message: 'Draft saved successfully', pageId, version: nextVer });
+      const latestRes = await client.query(
+        `SELECT version FROM page_draft_versions WHERE page_id = $1 ORDER BY version DESC LIMIT 1`,
+        [pageId]
+      );
+      const currentVersion = Number(latestRes.rows[0]?.version || 0);
+      if (expectedVersion !== undefined && Number(expectedVersion) !== currentVersion) {
+        saveOutcome.versionConflict = { currentVersion };
+        return;
+      }
+
+      saveOutcome.nextVersion = currentVersion + 1;
+      await client.query(
+        `INSERT INTO page_draft_versions (id, page_id, version, sections, page_props, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [`draft-${uuidv4()}`, pageId, saveOutcome.nextVersion, JSON.stringify(sections), JSON.stringify(pageProps || {}), req.auth?.userId]
+      );
+
+      await client.query(
+        `UPDATE store_pages SET
+           status = 'draft',
+           seo_title = COALESCE($1, seo_title),
+           seo_description = COALESCE($2, seo_description),
+           updated_at = NOW()
+         WHERE id = $3 AND store_id = $4`,
+        [seoTitle !== undefined ? seoTitle : null, seoDescription !== undefined ? seoDescription : null, pageId, storeId]
+      );
+    });
+
+    if (saveOutcome.pageNotFound) {
+      return res.status(404).json({ error: 'PAGE_NOT_FOUND', message: 'Page not found' });
+    }
+    const versionConflict = saveOutcome.versionConflict;
+    if (versionConflict) {
+      return res.status(409).json({
+        error: 'DRAFT_VERSION_CONFLICT',
+        message: 'This page draft changed in another session. Refresh the draft before saving again.',
+        currentVersion: versionConflict.currentVersion
+      });
+    }
+
+    res.json({ message: 'Draft saved successfully', pageId, version: saveOutcome.nextVersion });
   }
 );
 
@@ -587,9 +923,16 @@ storefrontRouter.post(
 
     let releaseNumber = 1;
     let releaseId = `rel-${uuidv4()}`;
+    let publicationValidationIssues: Array<{ pageId: string; pageName: string; path: string; issues: Array<{ path: string; message: string }> }> = [];
 
     await withTransaction(async (client) => {
       // 1. Get next release number
+      // Serialize publishers per store so parallel publish requests cannot
+      // allocate the same release number or race the active-release pointer.
+      await client.query(
+        `SELECT store_id FROM storefront_settings WHERE store_id = $1 FOR UPDATE`,
+        [storeId]
+      );
       const numRes = await client.query(
         `SELECT COALESCE(MAX(release_number), 0) + 1 as next_num FROM store_releases WHERE store_id = $1`,
         [storeId]
@@ -602,10 +945,10 @@ storefrontRouter.post(
 
       // 3. Snapshot all pages + their latest drafts
       const pagesRes = await client.query(
-        `SELECT p.id, p.name, p.path, p.type, p.category, p.seo_title, p.seo_description, p.template_key, p.is_system, p.is_locked,
+        `SELECT p.id, p.name, p.path, p.type, p.category, p.seo_title, p.seo_description, p.template_key, p.is_system, p.is_locked, 'published'::text AS status,
                 COALESCE(
-                  (SELECT pd.sections FROM page_draft_versions pd WHERE pd.page_id = p.id ORDER BY pd.version DESC LIMIT 1),
-                  p.page_props
+                  (SELECT pd.sections FROM page_draft_versions pd WHERE pd.page_id = p.id ORDER BY pd.version DESC, pd.created_at DESC LIMIT 1),
+                  '[]'::jsonb
                 ) as sections,
                 COALESCE(
                   (SELECT pd.page_props FROM page_draft_versions pd WHERE pd.page_id = p.id ORDER BY pd.version DESC LIMIT 1),
@@ -615,6 +958,18 @@ storefrontRouter.post(
          WHERE p.store_id = $1`,
         [storeId]
       );
+
+      // Validate every page at the API boundary before a release can be created.
+      const invalidPages = pagesRes.rows.flatMap((page: any) => {
+        const validation = validatePageSectionDocument(page.sections);
+        return validation.valid
+          ? []
+          : [{ pageId: page.id, pageName: page.name, path: page.path, issues: validation.issues }];
+      });
+      if (invalidPages.length > 0) {
+        publicationValidationIssues = invalidPages;
+        return;
+      }
 
       // 4. Snapshot brand, navigation, settings
       const settingsRes = await client.query(`SELECT * FROM storefront_settings WHERE store_id = $1`, [storeId]);
@@ -635,7 +990,8 @@ storefrontRouter.post(
           homePage: settingsRow.home_page,
           primaryDomain: settingsRow.primary_domain,
           passwordEnabled: settingsRow.password_enabled,
-          maintenanceMode: settingsRow.maintenance_mode
+          maintenanceMode: settingsRow.maintenance_mode,
+          seoDefaults: settingsRow.seo_defaults || {}
         },
         pages: pagesRes.rows,
         publishedAt: new Date().toISOString()
@@ -677,6 +1033,29 @@ storefrontRouter.post(
       });
     });
 
+    if (publicationValidationIssues.length > 0) {
+      return res.status(400).json({
+        error: 'INVALID_STOREFRONT_DOCUMENT',
+        message: 'Publication blocked because one or more pages contain invalid section documents.',
+        pages: publicationValidationIssues
+      });
+    }
+
+    try {
+      await enqueueOutbox({
+        organizationId: req.tenant!.organizationId,
+        storeId,
+        eventType: 'STOREFRONT_RELEASE_PUBLISHED',
+        aggregateType: 'STOREFRONT',
+        aggregateId: releaseId,
+        payload: { storeId, releaseId, releaseNumber }
+      });
+    } catch (error) {
+      // Publication is already committed. Realtime delivery is best-effort;
+      // clients can still fetch the active release on their next request.
+      console.error('[Storefront] Failed to enqueue release notification:', error);
+    }
+
     res.status(201).json({
       message: 'Store published atomically. New release active.',
       releaseId,
@@ -698,7 +1077,7 @@ storefrontRouter.get('/releases', requireAuth, resolveTenant, async (req: Reques
   res.json({ releases: releasesRes.rows });
 });
 
-// POST /api/v1/storefront/releases/:id/restore (Restore to previous snapshot)
+// POST /api/v1/storefront/releases/:id/restore (Create and activate an immutable rollback release)
 storefrontRouter.post(
   '/releases/:id/restore',
   requireAuth,
@@ -706,44 +1085,197 @@ storefrontRouter.post(
   requirePermission('store.publish'),
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
-    const releaseId = req.params.id as string;
+    const sourceReleaseId = req.params.id as string;
 
-    const relRes = await query(
-      `SELECT snapshot FROM store_releases WHERE id = $1 AND store_id = $2`,
-      [releaseId, storeId]
+    const sourceRes = await query(
+      `SELECT release_number, snapshot
+       FROM store_releases
+       WHERE id = $1 AND store_id = $2`,
+      [sourceReleaseId, storeId]
     );
 
-    if (relRes.rowCount === 0) {
+    if (sourceRes.rowCount === 0) {
       return res.status(404).json({ error: 'RELEASE_NOT_FOUND', message: 'Release snapshot not found' });
     }
 
-    const { pages, theme } = relRes.rows[0].snapshot;
+    const sourceSnapshot = sourceRes.rows[0].snapshot;
+    if (!sourceSnapshot || !Array.isArray(sourceSnapshot.pages)) {
+      return res.status(409).json({ error: 'INVALID_RELEASE_SNAPSHOT', message: 'The selected release does not contain a valid page snapshot.' });
+    }
+
+    const rollbackReleaseId = `rel-${uuidv4()}`;
+    let rollbackReleaseNumber = 0;
+    const restoredSnapshot = {
+      ...sourceSnapshot,
+      publishedAt: new Date().toISOString(),
+      rollback: { sourceReleaseId, sourceReleaseNumber: Number(sourceRes.rows[0].release_number) }
+    };
+    const contentHash = crypto.createHash('sha256').update(JSON.stringify(restoredSnapshot)).digest('hex');
 
     await withTransaction(async (client) => {
-      // Restore theme
-      if (theme) {
-        await client.query(
-          `UPDATE store_themes
-           SET preset_name = $1, palette = $2, typography = $3, buttons = $4, effects = $5, updated_at = NOW()
-           WHERE store_id = $6`,
-          [theme.preset_name, theme.palette, theme.typography, theme.buttons, theme.effects, storeId]
-        );
+      // Lock the store configuration row to serialize rollback with publishes.
+      const settingsLock = await client.query(
+        `SELECT * FROM storefront_settings WHERE store_id = $1 FOR UPDATE`,
+        [storeId]
+      );
+      if (settingsLock.rowCount === 0) {
+        throw new Error('Storefront settings are missing for this store.');
       }
 
-      // Restore pages as new draft versions
-      for (const p of pages || []) {
-        const nextVerRes = await client.query(
-          `SELECT COALESCE(MAX(version), 0) + 1 as next_ver FROM page_draft_versions WHERE page_id = $1`,
-          [p.id]
-        );
-        const nextVer = nextVerRes.rows[0].next_ver;
+      const nextRelease = await client.query(
+        `SELECT COALESCE(MAX(release_number), 0) + 1 AS next_num
+         FROM store_releases WHERE store_id = $1`,
+        [storeId]
+      );
+      rollbackReleaseNumber = Number(nextRelease.rows[0].next_num);
 
+      // Synchronize mutable editor state to the restored snapshot, but keep the
+      // public storefront driven by the new immutable release pointer.
+      const theme = restoredSnapshot.theme || {};
+      await client.query(
+        `INSERT INTO store_themes (
+           id, store_id, preset_name, palette, typography, buttons, effects, custom_css, version, updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, NOW())
+         ON CONFLICT (store_id) DO UPDATE SET
+           preset_name = EXCLUDED.preset_name,
+           palette = EXCLUDED.palette,
+           typography = EXCLUDED.typography,
+           buttons = EXCLUDED.buttons,
+           effects = EXCLUDED.effects,
+           custom_css = EXCLUDED.custom_css,
+           version = store_themes.version + 1,
+           updated_at = NOW()`,
+        [
+          `thm-${uuidv4()}`,
+          storeId,
+          theme.preset_name || theme.presetName || 'modern',
+          JSON.stringify(theme.palette || {}),
+          JSON.stringify(theme.typography || {}),
+          JSON.stringify(theme.buttons || {}),
+          JSON.stringify(theme.effects || {}),
+          theme.custom_css || theme.customCss || ''
+        ]
+      );
+
+      const brand = restoredSnapshot.brand || {};
+      const settings = restoredSnapshot.settings || {};
+      await client.query(
+        `UPDATE storefront_settings SET
+           brand_name = $1,
+           tagline = $2,
+           logo_url = $3,
+           favicon_url = $4,
+           social_links = $5,
+           navigation_config = $6,
+           mode = $7,
+           home_page = $8,
+           primary_domain = $9,
+           password_enabled = $10,
+           maintenance_mode = $11,
+           updated_at = NOW()
+         WHERE store_id = $12`,
+        [
+          brand.name || brand.brand_name || null,
+          brand.tagline || '',
+          brand.logoUrl || brand.logo_url || '',
+          brand.faviconUrl || brand.favicon_url || '',
+          JSON.stringify(brand.socialLinks || brand.social_links || {}),
+          JSON.stringify(restoredSnapshot.navigation || []),
+          settings.mode || 'COMMERCE',
+          settings.homePage || 'LANDING',
+          settings.primaryDomain || null,
+          Boolean(settings.passwordEnabled ?? settings.password_enabled),
+          Boolean(settings.maintenanceMode ?? settings.maintenance_mode),
+          storeId
+        ]
+      );
+
+      const snapshotPageIds: string[] = [];
+      for (const page of restoredSnapshot.pages) {
+        if (!page?.id) continue;
+        const pageLock = await client.query(
+          `SELECT id FROM store_pages WHERE id = $1 AND store_id = $2 FOR UPDATE`,
+          [page.id, storeId]
+        );
+        if (pageLock.rowCount === 0) continue;
+
+        snapshotPageIds.push(page.id);
+        const nextVersionRes = await client.query(
+          `SELECT COALESCE(MAX(version), 0) + 1 AS next_ver
+           FROM page_draft_versions WHERE page_id = $1`,
+          [page.id]
+        );
         await client.query(
           `INSERT INTO page_draft_versions (id, page_id, version, sections, page_props, created_by)
            VALUES ($1, $2, $3, $4, $5, $6)`,
-          [`draft-${uuidv4()}`, p.id, nextVer, JSON.stringify(p.sections || []), JSON.stringify(p.page_props || {}), req.auth?.userId]
+          [
+            `draft-${uuidv4()}`,
+            page.id,
+            Number(nextVersionRes.rows[0].next_ver),
+            JSON.stringify(Array.isArray(page.sections) ? page.sections : []),
+            JSON.stringify(page.page_props || page.pageProps || {}),
+            req.auth?.userId
+          ]
+        );
+        await client.query(
+          `UPDATE store_pages SET
+             name = COALESCE($1, name),
+             path = CASE WHEN is_locked THEN path ELSE COALESCE($2, path) END,
+             type = COALESCE($3, type),
+             category = COALESCE($4, category),
+             seo_title = COALESCE($5, seo_title),
+             seo_description = COALESCE($6, seo_description),
+             template_key = COALESCE($7, template_key),
+             status = 'published',
+             updated_at = NOW()
+           WHERE id = $8 AND store_id = $9`,
+          [
+            page.name || null,
+            page.path || null,
+            page.type || null,
+            page.category || null,
+            page.seo_title || null,
+            page.seo_description || null,
+            page.template_key || null,
+            page.id,
+            storeId
+          ]
         );
       }
+
+      if (snapshotPageIds.length > 0) {
+        await client.query(
+          `UPDATE store_pages SET status = 'draft', updated_at = NOW()
+           WHERE store_id = $1 AND NOT (id = ANY($2::text[]))`,
+          [storeId, snapshotPageIds]
+        );
+      }
+
+      await client.query(
+        `INSERT INTO store_releases (id, store_id, release_number, content_hash, snapshot, published_by, notes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          rollbackReleaseId,
+          storeId,
+          rollbackReleaseNumber,
+          contentHash,
+          JSON.stringify(restoredSnapshot),
+          req.auth?.userId,
+          `Rollback to release ${sourceRes.rows[0].release_number}`
+        ]
+      );
+
+      // Insert the rollback release before activating its foreign-key pointer.
+      await client.query(
+        `UPDATE storefront_settings SET active_release_id = $1, updated_at = NOW() WHERE store_id = $2`,
+        [rollbackReleaseId, storeId]
+      );
+
+      await client.query(
+        `UPDATE stores SET status = 'ACTIVE', updated_at = NOW() WHERE id = $1`,
+        [storeId]
+      );
 
       await recordAudit({
         organizationId: req.tenant?.organizationId,
@@ -751,12 +1283,30 @@ storefrontRouter.post(
         actorId: req.auth?.userId,
         action: 'RESTORE_STORE_RELEASE',
         targetType: 'STORE_RELEASE',
-        targetId: releaseId,
-        changes: { restoredFrom: releaseId as string }
+        targetId: rollbackReleaseId,
+        changes: { restoredFrom: sourceReleaseId, releaseNumber: rollbackReleaseNumber }
       });
     });
 
-    res.json({ message: 'Store restored to snapshot draft state successfully' });
+    try {
+      await enqueueOutbox({
+        organizationId: req.tenant!.organizationId,
+        storeId,
+        eventType: 'STOREFRONT_RELEASE_PUBLISHED',
+        aggregateType: 'STOREFRONT',
+        aggregateId: rollbackReleaseId,
+        payload: { storeId, releaseId: rollbackReleaseId, releaseNumber: rollbackReleaseNumber, restoredFrom: sourceReleaseId }
+      });
+    } catch (error) {
+      console.error('[Storefront] Failed to enqueue rollback release notification:', error);
+    }
+
+    res.status(201).json({
+      message: 'Previous storefront version restored and activated.',
+      releaseId: rollbackReleaseId,
+      releaseNumber: rollbackReleaseNumber,
+      restoredFrom: sourceReleaseId
+    });
   }
 );
 
@@ -823,10 +1373,10 @@ storefrontRouter.get('/brand', requireAuth, resolveTenant, async (req: Request, 
   );
   const storeRes = await query(`SELECT name FROM stores WHERE id = $1`, [storeId]);
   const s = settingsRes.rows[0] || {};
-  const businessName = storeRes.rows[0]?.name || s.brand_name || 'My Store';
+  const brandDisplayName = s.brand_name || storeRes.rows[0]?.name || 'My Store';
   res.json({
     brand: {
-      name: businessName,
+      name: brandDisplayName,
       tagline: s.tagline || '',
       logoUrl: s.logo_url || '',
       faviconUrl: s.favicon_url || '',
@@ -844,13 +1394,13 @@ storefrontRouter.patch(
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const { name, brandName, tagline, logoUrl, faviconUrl, socialLinks } = req.body;
-    const effectiveBrandName = brandName || name;
+    const effectiveBrandName = brandName ?? name;
 
-    if (effectiveBrandName && effectiveBrandName.trim()) {
-      await query(`UPDATE stores SET name = $1, updated_at = NOW() WHERE id = $2`, [effectiveBrandName.trim(), storeId]);
-      if (req.tenant?.organizationId) {
-        await query(`UPDATE organizations SET name = $1, updated_at = NOW() WHERE id = $2`, [effectiveBrandName.trim(), req.tenant.organizationId]);
-      }
+    if (effectiveBrandName !== undefined && (typeof effectiveBrandName !== 'string' || !effectiveBrandName.trim())) {
+      return res.status(400).json({
+        error: 'INVALID_BRAND_NAME',
+        message: 'Brand display name must be a non-empty string.'
+      });
     }
 
     const updated = await query(
@@ -925,8 +1475,47 @@ storefrontRouter.patch(
     const storeId = req.tenant!.storeId;
     const { passwordEnabled, password, maintenanceMode, redirects, seoDefaults, primaryDomain } = req.body;
 
+    if (primaryDomain !== undefined && primaryDomain !== null && String(primaryDomain).trim() !== '') {
+      const domainCheck = await query(
+        `SELECT 1
+         FROM store_domains
+         WHERE store_id = $1
+           AND LOWER(domain) = LOWER($2)
+           AND is_verified = TRUE
+           AND UPPER(ssl_status) = 'ACTIVE'
+         LIMIT 1`,
+        [storeId, String(primaryDomain).trim()]
+      );
+      if (domainCheck.rowCount === 0) {
+        return res.status(409).json({
+          error: 'DOMAIN_NOT_READY',
+          message: 'Only a domain mapped to this store with completed verification and active HTTPS can be selected as the primary storefront domain.'
+        });
+      }
+    }
+
+    if (password !== undefined && (typeof password !== 'string' || password.trim().length < 4 || password.trim().length > 128)) {
+      return res.status(400).json({
+        error: 'INVALID_STOREFRONT_PASSWORD',
+        message: 'Storefront passwords must contain between 4 and 128 characters.'
+      });
+    }
+
+    if (passwordEnabled === true && (!password || typeof password !== 'string' || password.trim().length < 4)) {
+      const existingPassword = await query(
+        `SELECT password_hash FROM storefront_settings WHERE store_id = $1`,
+        [storeId]
+      );
+      if (!existingPassword.rows[0]?.password_hash) {
+        return res.status(400).json({
+          error: 'STOREFRONT_PASSWORD_REQUIRED',
+          message: 'Set a storefront password before enabling password protection.'
+        });
+      }
+    }
+
     let passwordHash: string | null = null;
-    if (password && password.trim().length >= 4) {
+    if (password) {
       passwordHash = await bcrypt.hash(password.trim(), 10);
     }
 
@@ -981,22 +1570,34 @@ storefrontRouter.post(
   async (req: Request, res: Response) => {
     const storeId = req.tenant!.storeId;
     const { domain } = req.body;
-    if (!domain || typeof domain !== 'string' || !domain.includes('.')) {
+    if (!domain || typeof domain !== 'string') {
       return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'A valid domain hostname is required (e.g. shop.example.com).' });
     }
-    const cleanDomain = domain.toLowerCase().trim();
+    const cleanDomain = domain.trim().toLowerCase().replace(/\.$/, '');
+    const hostnamePattern = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+    if (!hostnamePattern.test(cleanDomain) || cleanDomain === PLATFORM_MAIN_DOMAIN || cleanDomain.endsWith(`.${PLATFORM_MAIN_DOMAIN}`)) {
+      return res.status(400).json({ error: 'INVALID_DOMAIN', message: 'Enter a fully qualified custom hostname. Platform subdomains are managed automatically.' });
+    }
 
-    const existing = await query(`SELECT id FROM store_domains WHERE domain = $1`, [cleanDomain]);
+    const existing = await query(`SELECT id FROM store_domains WHERE LOWER(domain) = LOWER($1)`, [cleanDomain]);
     if (existing.rowCount && existing.rowCount > 0) {
       return res.status(409).json({ error: 'DOMAIN_ALREADY_CONNECTED', message: 'This domain is already mapped to a store.' });
     }
 
     const domainId = `dom-${uuidv4()}`;
-    await query(
+    const insertedDomain = await query(
       `INSERT INTO store_domains (id, store_id, domain, is_primary, is_verified, ssl_status)
-       VALUES ($1, $2, $3, FALSE, FALSE, 'PENDING')`,
+       VALUES ($1, $2, $3, FALSE, FALSE, 'PENDING')
+       ON CONFLICT DO NOTHING
+       RETURNING id`,
       [domainId, storeId, cleanDomain]
     );
+    if (insertedDomain.rowCount === 0) {
+      return res.status(409).json({
+        error: 'DOMAIN_ALREADY_CONNECTED',
+        message: 'This domain is already mapped to a store.'
+      });
+    }
 
     res.status(201).json({
       message: 'Domain connected. Complete DNS configuration to verify.',
@@ -1006,11 +1607,13 @@ storefrontRouter.post(
         isPrimary: false,
         isVerified: false,
         sslStatus: 'PENDING',
-        dnsInstructions: {
-          type: 'CNAME',
-          host: cleanDomain.split('.')[0],
-          target: PLATFORM_MAIN_DOMAIN
-        }
+        dnsInstructions: env.STORE_DOMAIN_CNAME_TARGET
+          ? {
+              type: 'CNAME',
+              host: cleanDomain.split('.')[0],
+              target: env.STORE_DOMAIN_CNAME_TARGET
+            }
+          : null
       }
     });
   }
@@ -1031,13 +1634,46 @@ storefrontRouter.post(
       return res.status(404).json({ error: 'DOMAIN_NOT_FOUND', message: 'Domain not found' });
     }
 
-    // Simulate DNS and SSL verification success
+    // Never mark DNS or SSL as ready without a real check. The hosting
+    // provider's CNAME destination must be configured by the platform operator.
+    const expectedCname = env.STORE_DOMAIN_CNAME_TARGET?.trim().toLowerCase().replace(/\.$/, '');
+    if (!expectedCname) {
+      return res.status(503).json({
+        error: 'DOMAIN_VERIFICATION_NOT_CONFIGURED',
+        message: 'Custom-domain verification is not configured on this deployment. No verification or SSL status was changed.'
+      });
+    }
+
+    let cnameRecords: string[];
+    try {
+      cnameRecords = await resolveCname(domRes.rows[0].domain);
+    } catch {
+      return res.status(409).json({
+        error: 'DOMAIN_DNS_NOT_READY',
+        message: 'No CNAME record could be resolved for this hostname yet. Check the DNS record and retry.'
+      });
+    }
+
+    const normalizedRecords = cnameRecords.map((record) => record.trim().toLowerCase().replace(/\.$/, ''));
+    if (!normalizedRecords.includes(expectedCname)) {
+      return res.status(409).json({
+        error: 'DOMAIN_DNS_MISMATCH',
+        message: 'The hostname does not point to the configured BillionBiz storefront target.',
+        expectedTarget: expectedCname,
+        receivedTargets: normalizedRecords
+      });
+    }
+
     await query(
-      `UPDATE store_domains SET is_verified = TRUE, ssl_status = 'ACTIVE' WHERE id = $1`,
-      [domainId]
+      `UPDATE store_domains SET is_verified = TRUE, ssl_status = CASE WHEN ssl_status = 'ACTIVE' THEN ssl_status ELSE 'PENDING' END WHERE id = $1 AND store_id = $2`,
+      [domainId, storeId]
     );
 
-    res.json({ message: 'Domain verified successfully. SSL certificate issued.', isVerified: true, sslStatus: 'ACTIVE' });
+    res.status(202).json({
+      message: 'DNS ownership verified. HTTPS activation is still pending and this domain cannot be made primary yet.',
+      isVerified: true,
+      sslStatus: 'PENDING'
+    });
   }
 );
 
@@ -1051,9 +1687,18 @@ storefrontRouter.post(
     const storeId = req.tenant!.storeId;
     const domainId = req.params.id as string;
 
-    const domRes = await query(`SELECT domain FROM store_domains WHERE id = $1 AND store_id = $2`, [domainId, storeId]);
+    const domRes = await query(
+      `SELECT domain, is_verified, ssl_status FROM store_domains WHERE id = $1 AND store_id = $2`,
+      [domainId, storeId]
+    );
     if (domRes.rowCount === 0) {
       return res.status(404).json({ error: 'DOMAIN_NOT_FOUND', message: 'Domain not found' });
+    }
+    if (!domRes.rows[0].is_verified || String(domRes.rows[0].ssl_status).toUpperCase() !== 'ACTIVE') {
+      return res.status(409).json({
+        error: 'DOMAIN_NOT_READY',
+        message: 'A domain must pass DNS verification and have an active SSL certificate before it can become primary.'
+      });
     }
     const targetDomain = domRes.rows[0].domain;
 

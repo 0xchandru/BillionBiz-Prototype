@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { app } from '../src/server.js';
 import { query } from '../src/db/pool.js';
 import { generateToken } from '../src/middleware/auth.js';
+import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 
 async function request(
@@ -163,12 +164,38 @@ describe('V2 Native Storefront Runtime & Multi-Tenant Isolation Suite (REQ-STORE
 
   it('TC-STORE-002: Unknown host header (*.chandraprakash.codes) returns 404, never a fallback', async () => {
     const res = await request('GET', '/api/v1/storefront/render', {
+      token: storeAToken,
       headers: {
         host: 'bogus-merchant.chandraprakash.codes'
       }
     });
     expect(res.status).toBe(404);
     expect(res.body.error).toBe('STORE_NOT_FOUND');
+  });
+
+  it('TC-STORE-002A: Authenticated store context cannot be overridden by tenant headers', async () => {
+    const res = await request('GET', '/api/v1/storefront/pages', {
+      token: storeAToken,
+      headers: {
+        'x-organization-id': storeAOrgId,
+        'x-store-id': storeBId,
+        'x-store-slug': storeBSlug
+      }
+    });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('CROSS_TENANT_ACCESS_DENIED');
+  });
+
+  it('TC-STORE-002B: Untrusted forwarded host cannot switch an authenticated tenant', async () => {
+    const res = await request('GET', '/api/v1/storefront/render', {
+      token: storeAToken,
+      headers: {
+        host: 'admin.chandraprakash.codes',
+        'x-forwarded-host': `${storeBSlug}.chandraprakash.codes`
+      }
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.store.slug).toBe(storeASlug);
   });
 
   it('TC-STORE-003: Storefront resolves active store by slug and returns store metadata & theme', async () => {
@@ -178,6 +205,66 @@ describe('V2 Native Storefront Runtime & Multi-Tenant Isolation Suite (REQ-STORE
     expect(res.body.store.slug).toBe(storeASlug);
     expect(res.body.theme).toBeDefined();
     expect(Array.isArray(res.body.products)).toBe(true);
+  });
+
+  it('TC-STORE-003A: Password protection blocks public data until a store-scoped token is presented', async () => {
+    // Ensure Store B has a valid initial publication before testing the gate.
+    const draftRender = await request('GET', '/api/v1/storefront/render', { token: storeBToken });
+    expect(draftRender.status).toBe(200);
+
+    const passwordHash = await bcrypt.hash('storefront-secret-2026', 10);
+    await query(
+      `INSERT INTO storefront_settings (store_id, mode, home_page, password_enabled, password_hash)
+       VALUES ($1, 'COMMERCE', 'LANDING', TRUE, $2)
+       ON CONFLICT (store_id) DO UPDATE SET password_enabled = TRUE, password_hash = EXCLUDED.password_hash`,
+      [storeBId, passwordHash]
+    );
+
+    const locked = await request('GET', `/api/v1/storefront/by-slug/${storeBSlug}`);
+    expect(locked.status).toBe(200);
+    expect(locked.body.passwordRequired).toBe(true);
+    expect(locked.body.pages).toBeUndefined();
+    expect(locked.body.activeRelease).toBeUndefined();
+    expect(locked.body.products).toBeUndefined();
+    expect(locked.body.theme).toBeUndefined();
+
+    const invalid = await request('POST', `/api/v1/storefront/by-slug/${storeBSlug}/password/verify`, {
+      body: { password: 'incorrect-password' }
+    });
+    expect(invalid.status).toBe(200);
+    expect(invalid.body.verified).toBe(false);
+    expect(invalid.body.accessToken).toBeUndefined();
+
+    const valid = await request('POST', `/api/v1/storefront/by-slug/${storeBSlug}/password/verify`, {
+      body: { password: 'storefront-secret-2026' }
+    });
+    expect(valid.status).toBe(200);
+    expect(valid.body.verified).toBe(true);
+    expect(typeof valid.body.accessToken).toBe('string');
+
+    const withToken = await request('GET', `/api/v1/storefront/by-slug/${storeBSlug}`, {
+      headers: { 'x-storefront-access-token': valid.body.accessToken }
+    });
+    expect(withToken.status).toBe(200);
+    expect(withToken.body.passwordRequired).toBeUndefined();
+    expect(Array.isArray(withToken.body.pages)).toBe(true);
+    expect(withToken.body.activeRelease).toBeDefined();
+
+    const forged = await request('GET', `/api/v1/storefront/by-slug/${storeBSlug}`, {
+      headers: { 'x-storefront-access-token': 'not-a-signed-token' }
+    });
+    expect(forged.status).toBe(200);
+    expect(forged.body.passwordRequired).toBe(true);
+    expect(forged.body.pages).toBeUndefined();
+
+    await query(
+      `UPDATE storefront_settings SET password_enabled = FALSE, password_hash = NULL WHERE store_id = $1`,
+      [storeBId]
+    );
+    await query(
+      `DELETE FROM storefront_password_attempts WHERE store_id = $1`,
+      [storeBId]
+    );
   });
 
   it('TC-STORE-004: Two test stores render distinct persisted content and active releases (REQ-STOREFRONT-001)', async () => {
@@ -258,6 +345,17 @@ describe('V2 Native Storefront Runtime & Multi-Tenant Isolation Suite (REQ-STORE
     const releaseNum2 = pub2.body.releaseNumber;
 
     expect(releaseNum2).toBe(releaseNum1 + 1);
+
+    const publishedEvent = await query(
+      `SELECT event_type, payload
+       FROM outbox_events
+       WHERE store_id = $1 AND event_type = 'STOREFRONT_RELEASE_PUBLISHED'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [storeAId]
+    );
+    expect(publishedEvent.rowCount).toBe(1);
+    expect(publishedEvent.rows[0].payload.releaseId).toBe(pub2.body.releaseId);
 
     // Verify release history contains both
     const historyRes = await request('GET', '/api/v1/storefront/releases', {

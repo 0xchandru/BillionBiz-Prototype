@@ -3,8 +3,10 @@ import {
   Store, 
   ExternalLink, 
   RefreshCw, 
-  Tablet, 
-  MapPin 
+  Tablet,
+  MapPin,
+  Plus,
+  X
 } from 'lucide-react';
 import { api } from '../api/services';
 import { getPortalUrl } from '../utils/subdomain';
@@ -12,6 +14,11 @@ import { getPortalUrl } from '../utils/subdomain';
 export const POSCountersPage: React.FC = () => {
   const [counters, setCounters] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [counterName, setCounterName] = useState('');
+  const [counterCode, setCounterCode] = useState('');
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     loadCounters();
@@ -22,10 +29,33 @@ export const POSCountersPage: React.FC = () => {
       setLoading(true);
       const res = await api.getCounters();
       setCounters(res.counters || []);
-    } catch (err) {
+      setError(null);
+    } catch (err: any) {
       console.error('[POSCounters] Failed to load counters:', err);
+      setError(err.message || 'Failed to load POS counters.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const createCounter = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!counterName.trim()) return;
+    setCreating(true);
+    setError(null);
+    try {
+      await api.createPOSCounter({
+        name: counterName.trim(),
+        code: counterCode.trim() || undefined
+      });
+      setCounterName('');
+      setCounterCode('');
+      setShowCreate(false);
+      await loadCounters();
+    } catch (err: any) {
+      setError(err.message || 'Could not create POS counter.');
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -43,6 +73,9 @@ export const POSCountersPage: React.FC = () => {
         </div>
 
         <div style={{ display: 'flex', gap: '10px' }}>
+          <button type="button" onClick={() => setShowCreate(true)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 14px', borderRadius: 8, border: 0, background: '#0f766e', color: '#fff', fontSize: 13, fontWeight: 650, cursor: 'pointer' }}>
+            <Plus size={15} /> Create counter
+          </button>
           <a
             href={posPortalUrl}
             target="_blank"
@@ -55,6 +88,8 @@ export const POSCountersPage: React.FC = () => {
           </a>
         </div>
       </div>
+
+      {error && <div role="alert" style={{ marginBottom: 14, padding: 12, borderRadius: 8, background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: 12 }}>{error}</div>}
 
       {/* Counter List */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '20px' }}>
@@ -98,11 +133,11 @@ export const POSCountersPage: React.FC = () => {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13px', color: '#475569', backgroundColor: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '16px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <MapPin size={14} color="#64748b" />
-                    <span>Location: Main Flagship Store</span>
+                    <span>Location: {c.location_name || 'Main store location'}</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <Tablet size={14} color="#64748b" />
-                    <span>Approved Terminals: 1 Device Paired</span>
+                    <span>Terminal pairing is not configured</span>
                   </div>
                 </div>
               </div>
@@ -131,6 +166,25 @@ export const POSCountersPage: React.FC = () => {
           ))
         )}
       </div>
+      {showCreate && (
+        <div role="dialog" aria-modal="true" aria-label="Create POS counter" style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
+          <form onSubmit={createCounter} style={{ background: '#fff', width: '100%', maxWidth: 440, borderRadius: 14, padding: 22, boxShadow: '0 20px 50px rgba(0,0,0,.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h2 style={{ margin: 0, fontSize: 17, color: '#0f172a' }}>Create POS counter</h2>
+              <button type="button" onClick={() => setShowCreate(false)} aria-label="Close" style={{ border: 0, background: 'transparent', cursor: 'pointer', color: '#64748b' }}><X size={18} /></button>
+            </div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 650, color: '#334155', marginBottom: 6 }}>Counter name *</label>
+            <input required maxLength={128} value={counterName} onChange={(event) => setCounterName(event.target.value)} placeholder="e.g. Front Desk" style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: 8, marginBottom: 13 }} />
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 650, color: '#334155', marginBottom: 6 }}>Counter code (optional)</label>
+            <input maxLength={64} value={counterCode} onChange={(event) => setCounterCode(event.target.value)} placeholder="e.g. POS-01" style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', border: '1px solid #cbd5e1', borderRadius: 8 }} />
+            <p style={{ margin: '8px 0 16px', fontSize: 11, color: '#64748b', lineHeight: 1.5 }}>The counter will be attached to the active store's primary location. Register sessions are opened separately by an authorized cashier.</p>
+            <button type="submit" disabled={creating || !counterName.trim()} style={{ width: '100%', padding: 11, border: 0, borderRadius: 8, background: '#064652', color: '#fff', fontWeight: 700, cursor: creating ? 'wait' : 'pointer' }}>
+              {creating ? 'Creating…' : 'Create counter'}
+            </button>
+          </form>
+        </div>
+      )}
+
     </div>
   );
 };

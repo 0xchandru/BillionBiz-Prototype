@@ -9,6 +9,8 @@ import {
 } from 'lucide-react';
 import HeaderNavbarSection from '../editor/sections/HeaderNavbarSection';
 import { FooterTreeRenderer } from '../editor/sections/FooterTreeRenderer';
+import type { FooterTreeNode } from '../editor/engine/footerTreeTypes';
+import type { FooterRow } from '../editor/engine/types';
 import { useStorefrontCartStore } from '../../store/storefrontCartStore';
 
 interface StoreLayoutProps {
@@ -24,11 +26,21 @@ interface StoreLayoutProps {
   previewMode?: boolean;
   onNavigate?: (path: string) => void;
   currentPath?: string;
+  headerProps?: Record<string, any>;
+  footerTree?: FooterTreeNode[];
+  footerRows?: FooterRow[];
+  useEditorChrome?: boolean;
+  device?: 'desktop' | 'tablet' | 'mobile';
 }
 
 export const StoreLayout: React.FC<StoreLayoutProps> = ({
   children,
-  onNavigate
+  onNavigate,
+  headerProps,
+  footerTree,
+  footerRows,
+  useEditorChrome = false,
+  device = 'desktop'
 }) => {
   const { items, isOpen, setIsOpen, updateQuantity, removeItem, getSubtotal, getTotalCount } = useStorefrontCartStore();
   const subtotal = getSubtotal();
@@ -46,7 +58,12 @@ export const StoreLayout: React.FC<StoreLayoutProps> = ({
     <div className="min-h-screen flex flex-col bg-[var(--theme-bg)] text-[var(--theme-text-body)]">
       {/* 1. Global Storefront Header */}
       <header className="sticky top-0 z-40 bg-[var(--theme-bg)] border-b border-[var(--theme-border)] shadow-xs">
-        <HeaderNavbarSection />
+        <HeaderNavbarSection
+          props={headerProps}
+          device={device}
+          isEditorInteractive={useEditorChrome}
+          useEditorModel={useEditorChrome}
+        />
       </header>
 
       {/* 2. Main Page Content */}
@@ -55,9 +72,14 @@ export const StoreLayout: React.FC<StoreLayoutProps> = ({
       </main>
 
       {/* 3. Global Storefront Footer */}
-      <footer className="w-full bg-[var(--theme-footer-bg)] text-[var(--theme-footer-text)] mt-auto border-t border-[var(--theme-footer-border)]">
-        <FooterTreeRenderer />
-      </footer>
+      <div className="w-full mt-auto">
+        <FooterTreeRenderer
+          tree={useEditorChrome ? undefined : footerTree}
+          rows={useEditorChrome ? undefined : footerRows}
+          device={device}
+          isEditorInteractive={useEditorChrome}
+        />
+      </div>
 
       {/* 4. Slide-Over Cart Drawer */}
       {isOpen && (

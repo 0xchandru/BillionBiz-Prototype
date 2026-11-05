@@ -102,6 +102,22 @@ export interface ThemeEffects {
   animationSpeed: 'fast' | 'normal' | 'slow';
 }
 
+export interface ThemeSpacing {
+  sectionY: number;
+  contentGap: number;
+  gridGap: number;
+  cardPadding: number;
+  containerMaxWidth: number;
+}
+
+export const DEFAULT_THEME_SPACING: ThemeSpacing = {
+  sectionY: 72,
+  contentGap: 32,
+  gridGap: 20,
+  cardPadding: 24,
+  containerMaxWidth: 1280
+};
+
 export interface GlobalThemeData {
   presetName: string;
   description: string;
@@ -131,6 +147,7 @@ export interface GlobalThemeData {
   typography: ThemeTypography;
   buttons: ThemeButtons;
   effects: ThemeEffects;
+  spacing?: ThemeSpacing;
   customCss?: string;
 }
 
@@ -838,7 +855,16 @@ export const themePresets: Record<string, GlobalThemeData> = {
       animationStyle: 'smooth',
       animationSpeed: 'normal',
     },
+    spacing: { ...DEFAULT_THEME_SPACING },
   },
 };
 
-export const getDefaultTheme = (): GlobalThemeData => JSON.parse(JSON.stringify(themePresets.Modern));
+export const getDefaultTheme = (): GlobalThemeData => ({
+  ...JSON.parse(JSON.stringify(themePresets.Modern)),
+  spacing: { ...DEFAULT_THEME_SPACING }
+});
+
+export const getThemeSpacing = (theme?: Partial<GlobalThemeData>): ThemeSpacing => ({
+  ...DEFAULT_THEME_SPACING,
+  ...(theme?.spacing || {})
+});

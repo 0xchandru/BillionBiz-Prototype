@@ -1,5 +1,7 @@
 # BILLIONBIZ — MASTER EXECUTION PROMPT: REBUILD ONLINE STORE + STORE EDITOR
 
+> **Active architecture update (2026-11-04):** Read `13_BILLIONBIZ_STORE_CANVAS_V2.md` as the current architecture authority wherever this legacy package conflicts with it. BillionBiz store hosts use `{handle}.chandraprakash.codes`; the old `.stores.` subdomain is retired. The user has explicitly approved proceeding with the section/block builder as sequential, tested vertical slices. Preserve the non-negotiable data ownership, tenant isolation, safe migration, Header/Footer and publication requirements in this document.
+
 You are working on BillionBiz, a multi-tenant commerce and services platform. Merchants register, receive an independent store and customer-facing website on a unique subdomain, and customize that website using the BillionBiz Store Editor. The Admin Portal is the merchant's business operating system. Online Store owns website pages, themes, navigation, public presentation, domain mapping and publishing.
 
 Read every document in this ZIP before changing code. Treat the specification and current repository as the source of truth. Inspect the repository first; do not assume a framework, database, ORM, route layout, package manager or component API.
@@ -9,7 +11,7 @@ Read every document in this ZIP before changing code. Treat the specification an
 Deliver a Shopify-inspired, production-grade Online Store platform with:
 
 - Independent stores with tenant-isolated content, theme, media, menus, domains, drafts and publications.
-- Unique URL such as `store-handle.stores.chandraprakash.codes` (use the configured domain suffix found in the repo).
+- Unique URL such as `store-handle.chandraprakash.codes` (use the configured domain suffix found in the repo).
 - A complete default storefront at registration: shared header/footer, home, commerce routes, account routes, search/cart/checkout, content/policy pages, 404/maintenance, and service/booking pages for applicable store modes.
 - A polished starter experience and truthful empty states. Never seed fake products, reviews, orders, stock, bookings, prices or analytics.
 - Store Editor primary tabs: **Pages**, **Brand**, **Design**, **Settings**.

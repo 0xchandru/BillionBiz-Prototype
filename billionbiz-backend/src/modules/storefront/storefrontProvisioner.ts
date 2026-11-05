@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import type { PoolClient } from 'pg';
-import { PLATFORM_MAIN_DOMAIN } from '../../core/subdomains.js';
+import { PLATFORM_MAIN_DOMAIN, validateSubdomainSlug } from '../../core/subdomains.js';
 
 export interface ProvisionStorefrontOptions {
   client: PoolClient;
@@ -24,6 +24,119 @@ export interface SystemPageDefinition {
   pageProps?: Record<string, any>;
 }
 
+const createStarterFeaturedCollectionSection = () => ({
+  id: `sec-${uuidv4()}`,
+  type: 'FeaturedCollection',
+  name: 'Featured Collection',
+  isHidden: false,
+  schemaVersion: 1,
+  enabled: true,
+  settings: {
+    heading: 'Featured collection',
+    description: '',
+    linkText: 'View all',
+    linkUrl: '/shop',
+    layout: 'grid',
+    columns: 4,
+    productLimit: 8,
+    emptyStateText: 'Your active products will appear here once you add them to your catalogue.'
+  },
+  blocks: [{
+    id: `blk-${uuidv4()}`,
+    type: 'product-card-template',
+    schemaVersion: 1,
+    enabled: true,
+    settings: {
+      showPrice: true,
+      showCompareAt: true,
+      showVendor: false,
+      showDescription: false,
+      showAddToCart: true,
+      imageRatio: 'square',
+      imageFit: 'cover',
+      titleSize: 'medium',
+      addToCartLabel: 'Add to cart',
+      chooseOptionsLabel: 'Choose options',
+      actionStyle: 'primary'
+    },
+    designOverrides: {},
+    responsiveOverrides: {}
+  }],
+  designOverrides: {},
+  responsiveOverrides: {},
+  props: {}
+});
+
+const createStarterHeroSection = (storeName: string, mode: 'COMMERCE' | 'SERVICES' | 'BOTH') => {
+  const isServices = mode === 'SERVICES';
+  const buttonLabel = isServices ? 'Explore services' : 'Explore products';
+  const buttonHref = isServices ? '/booking' : '/shop';
+  return {
+    id: `sec-${uuidv4()}`,
+    type: 'HeroBanner',
+    name: 'Hero Banner',
+    isHidden: false,
+    schemaVersion: 1,
+    enabled: true,
+    settings: {
+      layout: 'split-right',
+      contentWidth: 'wide',
+      verticalAlignment: 'center',
+      minHeight: 520
+    },
+    blocks: [
+      {
+        id: `blk-${uuidv4()}`,
+        type: 'eyebrow',
+        schemaVersion: 1,
+        enabled: true,
+        settings: { text: storeName.slice(0, 60) },
+        designOverrides: {},
+        responsiveOverrides: {}
+      },
+      {
+        id: `blk-${uuidv4()}`,
+        type: 'heading',
+        schemaVersion: 1,
+        enabled: true,
+        settings: { text: 'Make room for what you love.', level: 'h1' },
+        designOverrides: {},
+        responsiveOverrides: {}
+      },
+      {
+        id: `blk-${uuidv4()}`,
+        type: 'rich-text',
+        schemaVersion: 1,
+        enabled: true,
+        settings: { text: 'Explore the collection and discover something that feels right for you.' },
+        designOverrides: {},
+        responsiveOverrides: {}
+      },
+      {
+        id: `blk-${uuidv4()}`,
+        type: 'button',
+        schemaVersion: 1,
+        enabled: true,
+        settings: { label: buttonLabel, href: buttonHref, variant: 'primary', openInNewTab: false },
+        designOverrides: {},
+        responsiveOverrides: {}
+      },
+      {
+        id: `blk-${uuidv4()}`,
+        type: 'image',
+        schemaVersion: 1,
+        enabled: true,
+        settings: { src: '', alt: '', fit: 'cover' },
+        designOverrides: {},
+        responsiveOverrides: {}
+      }
+    ],
+    designOverrides: {},
+    responsiveOverrides: {},
+    props: {}
+  };
+};
+
 export function getSystemPageCatalog(storeName: string, mode: 'COMMERCE' | 'SERVICES' | 'BOTH'): SystemPageDefinition[] {
   const isServices = mode === 'SERVICES';
   const hasCommerce = mode === 'COMMERCE' || mode === 'BOTH';
@@ -38,8 +151,13 @@ export function getSystemPageCatalog(storeName: string, mode: 'COMMERCE' | 'SERV
       templateKey: 'home',
       seoTitle: `${storeName} | Official Online Store`,
       seoDescription: `Welcome to the official online store of ${storeName}. Discover our latest offerings.`,
-      initialSections: [],
-      pageProps: { showHero: false, gridColumns: 4 }
+      initialSections: mode === 'SERVICES'
+        ? [createStarterHeroSection(storeName, mode)]
+        : [
+            createStarterHeroSection(storeName, mode),
+            createStarterFeaturedCollectionSection()
+          ],
+      pageProps: { showHero: true, gridColumns: 4 }
     },
     {
       name: 'Product Listing',
@@ -208,15 +326,32 @@ export async function provisionDefaultStorefront(options: ProvisionStorefrontOpt
   pageCount: number;
 }> {
   const { client, storeId, storeName, storeSlug, mode, userId } = options;
+  const slugValidation = validateSubdomainSlug(storeSlug);
+  if (!slugValidation.isValid || slugValidation.normalizedSlug !== storeSlug) {
+    const error = new Error(slugValidation.error || 'Store handle is invalid or reserved.');
+    (error as Error & { code?: string }).code = slugValidation.errorCode || 'INVALID_STORE_HANDLE';
+    throw error;
+  }
   const platformDomain = `${storeSlug}.${PLATFORM_MAIN_DOMAIN}`;
 
-  // 1. Primary Subdomain Mapping
+  // 1. Primary platform subdomain mapping. Never reassign an existing
+  // hostname to another tenant during a retry or lazy-provisioning request.
   await client.query(
     `INSERT INTO store_domains (id, store_id, domain, is_primary, is_verified, ssl_status)
      VALUES ($1, $2, $3, TRUE, TRUE, 'ACTIVE')
-     ON CONFLICT (domain) DO UPDATE SET is_primary = TRUE, is_verified = TRUE`,
+     ON CONFLICT DO NOTHING`,
     [`dom-${uuidv4()}`, storeId, platformDomain]
   );
+
+  const domainOwner = await client.query(
+    `SELECT store_id FROM store_domains WHERE LOWER(domain) = LOWER($1) LIMIT 1`,
+    [platformDomain]
+  );
+  if (domainOwner.rowCount === 0 || domainOwner.rows[0].store_id !== storeId) {
+    const error = new Error('The requested platform subdomain is already mapped to another store.');
+    (error as Error & { code?: string }).code = 'STORE_DOMAIN_CONFLICT';
+    throw error;
+  }
 
   // 2. Default Store Navigation
   const defaultNav = [
@@ -251,7 +386,7 @@ export async function provisionDefaultStorefront(options: ProvisionStorefrontOpt
       JSON.stringify(defaultNav),
       JSON.stringify({ showCart: true, showWishlist: true, showAccount: true }),
       storeName,
-      'Handcrafted Quality & Direct Commerce',
+      '',
       platformDomain
     ]
   );
@@ -323,7 +458,8 @@ export async function provisionDefaultStorefront(options: ProvisionStorefrontOpt
     if (sections.length > 0) {
       await client.query(
         `INSERT INTO page_draft_versions (id, page_id, version, sections, page_props, created_by)
-         VALUES ($1, $2, 1, $3, $4, $5)`,
+         VALUES ($1, $2, 1, $3, $4, $5)
+         ON CONFLICT (page_id, version) DO NOTHING`,
         [`draft-${uuidv4()}`, actualPageId, JSON.stringify(sections), JSON.stringify(pageProps), userId || null]
       );
     }
@@ -335,6 +471,7 @@ export async function provisionDefaultStorefront(options: ProvisionStorefrontOpt
       type: pageDef.type,
       category: pageDef.category,
       templateKey: pageDef.templateKey,
+      status: 'published',
       sections,
       pageProps
     });
@@ -345,7 +482,7 @@ export async function provisionDefaultStorefront(options: ProvisionStorefrontOpt
   const initialSnapshot = {
     brand: {
       name: storeName,
-      tagline: 'Handcrafted Quality & Direct Commerce',
+      tagline: '',
       logoUrl: '',
       faviconUrl: '',
       socialLinks: {}
@@ -369,9 +506,25 @@ export async function provisionDefaultStorefront(options: ProvisionStorefrontOpt
     [initialReleaseId, storeId, contentHash, JSON.stringify(initialSnapshot), userId || null]
   );
 
+  const initialRelease = await client.query(
+    `SELECT id FROM store_releases
+     WHERE store_id = $1
+     ORDER BY release_number DESC
+     LIMIT 1`,
+    [storeId]
+  );
+  const effectiveInitialReleaseId = initialRelease.rows[0]?.id;
+  if (!effectiveInitialReleaseId) {
+    throw new Error('Initial storefront publication could not be created.');
+  }
+
+  // Retries may repair a missing pointer, but must never roll an existing
+  // store back from a later publication to release 1.
   await client.query(
-    `UPDATE storefront_settings SET active_release_id = $1 WHERE store_id = $2`,
-    [initialReleaseId, storeId]
+    `UPDATE storefront_settings
+     SET active_release_id = COALESCE(active_release_id, $1), updated_at = NOW()
+     WHERE store_id = $2`,
+    [effectiveInitialReleaseId, storeId]
   );
 
   return {

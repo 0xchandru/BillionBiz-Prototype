@@ -917,6 +917,90 @@ export async function runMigrations() {
     END $$;
   `);
 
+  // 21. Draft version integrity: serialize page autosaves on a stable version key.
+  // Retain the newest legacy row when prior releases created duplicate versions.
+  await query(`
+    DELETE FROM page_draft_versions older
+    USING page_draft_versions newer
+    WHERE older.page_id = newer.page_id
+      AND older.version = newer.version
+      AND (
+        older.created_at < newer.created_at
+        OR (older.created_at = newer.created_at AND older.id < newer.id)
+      );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_page_draft_page_version
+      ON page_draft_versions (page_id, version);
+  `);
+
+  // 22. Shared rate limits for storefront password verification.
+  await query(`
+    CREATE TABLE IF NOT EXISTS storefront_password_attempts (
+      store_id VARCHAR(64) NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+      ip_hash VARCHAR(64) NOT NULL,
+      window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+      blocked_until TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (store_id, ip_hash)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_storefront_password_attempts_updated
+      ON storefront_password_attempts (updated_at);
+  `);
+
+  // 23. Repair legacy active-release pointers and make domain ownership
+  // case-insensitive. Keep the oldest existing mapping if legacy rows differ
+  // only by hostname casing.
+  await query(`
+    DELETE FROM store_domains older
+    USING store_domains newer
+    WHERE LOWER(older.domain) = LOWER(newer.domain)
+      AND (
+        older.created_at > newer.created_at
+        OR (older.created_at = newer.created_at AND older.id > newer.id)
+      );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_store_domains_domain_lower
+      ON store_domains (LOWER(domain));
+
+    UPDATE storefront_settings ss
+    SET active_release_id = (
+      SELECT r.id
+      FROM store_releases r
+      WHERE r.store_id = ss.store_id
+      ORDER BY r.release_number DESC
+      LIMIT 1
+    )
+    WHERE ss.active_release_id IS NULL
+      AND EXISTS (
+        SELECT 1 FROM store_releases r WHERE r.store_id = ss.store_id
+      );
+  `);
+
+  // Tenant-scoped operational lookup indexes. These are additive and safe
+  // for existing production records.
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_roles_organization_code
+      ON roles (organization_id, code);
+
+    CREATE INDEX IF NOT EXISTS idx_role_assignments_store_staff
+      ON role_assignments (store_id, staff_profile_id);
+
+    CREATE INDEX IF NOT EXISTS idx_staff_profiles_user_store_active
+      ON staff_profiles (user_id, store_id, is_active);
+
+    CREATE INDEX IF NOT EXISTS idx_resources_store_active_staff
+      ON resources (store_id, staff_profile_id, is_active);
+
+    CREATE INDEX IF NOT EXISTS idx_bookings_store_resource_time
+      ON bookings (store_id, resource_id, start_time, end_time)
+      WHERE status <> 'CANCELLED';
+
+    CREATE INDEX IF NOT EXISTS idx_booking_holds_store_resource_expiry
+      ON booking_holds (store_id, resource_id, expires_at);
+  `);
+
   console.log('[Migration] All migrations completed successfully.');
 }
 

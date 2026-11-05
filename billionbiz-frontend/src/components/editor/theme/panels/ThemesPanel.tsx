@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { CheckCircle2, Circle, Sparkles } from 'lucide-react';
 import { useSiteStore } from '../../../../store/siteStore';
-import { themePresets } from '../themePresets';
+import { DEFAULT_THEME_SPACING, themePresets } from '../themePresets';
 import { isThemeModified } from '../themeDefaultChecker';
 
 export const ThemesPanel: React.FC = () => {
@@ -20,6 +20,7 @@ export const ThemesPanel: React.FC = () => {
         typography: JSON.parse(JSON.stringify(selected.typography)),
         buttons: JSON.parse(JSON.stringify(selected.buttons)),
         effects: JSON.parse(JSON.stringify(selected.effects)),
+        spacing: { ...DEFAULT_THEME_SPACING, ...(selected.spacing || {}) },
         colors: { ...selected.colors },
         ui: { ...selected.ui },
       }, true);

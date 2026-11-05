@@ -8,6 +8,7 @@ import { ColorPalettePanel } from '../theme/panels/ColorPalettePanel';
 import { TypographyPanel } from '../theme/panels/TypographyPanel';
 import { ButtonsPanel } from '../theme/panels/ButtonsPanel';
 import { EffectsPanel } from '../theme/panels/EffectsPanel';
+import { SpacingPanel } from '../theme/panels/SpacingPanel';
 import { CustomCssPanel } from '../theme/panels/CustomCssPanel';
 import type { ThemeCategoryType } from '../../../store/landingEditorStore';
 import { ThemeResetButton } from '../theme/ui/ThemeResetButton';
@@ -30,7 +31,7 @@ const ThemeCategoryRightPanel: React.FC<{ isHidden?: boolean }> = ({ isHidden = 
   const { closeRightSidebar, selectedThemeCategory } = useLandingEditorStore();
   const { 
     theme, resetAllThemeSettings, resetColorPalette, resetTypography, 
-    resetButtons, resetEffects, resetCustomCss 
+    resetButtons, resetSpacing, resetEffects, resetCustomCss
   } = useSiteStore();
   const [confirmResetCategory, setConfirmResetCategory] = useState<ThemeCategoryType | null>(null);
 
@@ -39,6 +40,7 @@ const ThemeCategoryRightPanel: React.FC<{ isHidden?: boolean }> = ({ isHidden = 
     colors: 'Color Palette',
     typography: 'Typography',
     buttons: 'Buttons',
+    spacing: 'Spacing & Layout',
     effects: 'Effects',
     'custom-css': 'Custom CSS',
   };
@@ -50,6 +52,7 @@ const ThemeCategoryRightPanel: React.FC<{ isHidden?: boolean }> = ({ isHidden = 
     colors: 'Reset Colors',
     typography: 'Reset Typography',
     buttons: 'Reset Buttons',
+    spacing: 'Reset Spacing',
     effects: 'Reset Effects',
     'custom-css': 'Clear CSS',
   };
@@ -66,6 +69,8 @@ const ThemeCategoryRightPanel: React.FC<{ isHidden?: boolean }> = ({ isHidden = 
       resetTypography();
     } else if (confirmResetCategory === 'buttons') {
       resetButtons();
+    } else if (confirmResetCategory === 'spacing') {
+      resetSpacing();
     } else if (confirmResetCategory === 'effects') {
       resetEffects();
     } else if (confirmResetCategory === 'custom-css') {
@@ -100,6 +105,12 @@ const ThemeCategoryRightPanel: React.FC<{ isHidden?: boolean }> = ({ isHidden = 
           title: 'Reset Buttons?',
           description: `Are you sure you want to reset button styles back to the "${presetName}" preset defaults? Your button shape and style customizations will be discarded.`,
           confirmLabel: 'Reset Buttons',
+        };
+      case 'spacing':
+        return {
+          title: 'Reset Spacing & Layout?',
+          description: 'Restore section spacing, content gaps, grid gaps, card padding and container width to the current theme defaults.',
+          confirmLabel: 'Reset Spacing',
         };
       case 'effects':
         return {
@@ -151,6 +162,7 @@ const ThemeCategoryRightPanel: React.FC<{ isHidden?: boolean }> = ({ isHidden = 
           {activeCategory === 'colors' && <ColorPalettePanel />}
           {activeCategory === 'typography' && <TypographyPanel />}
           {activeCategory === 'buttons' && <ButtonsPanel />}
+          {activeCategory === 'spacing' && <SpacingPanel />}
           {activeCategory === 'effects' && <EffectsPanel />}
           {activeCategory === 'custom-css' && <CustomCssPanel />}
         </div>

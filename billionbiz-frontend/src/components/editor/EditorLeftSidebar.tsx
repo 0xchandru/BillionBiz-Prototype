@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import {
-  Files, Store, Palette, Settings,
+  Files, Store, Palette, Settings, TrendingUp,
   Home, ShoppingBag, ShoppingCart,
   Search as SearchIcon, AlertTriangle, Cookie, Bell, FileText,
   Shield, Truck, RotateCcw, Phone, Heart,
@@ -14,6 +14,7 @@ import {
 import { BrandPanel } from './panels/BrandPanel';
 import { DesignPanel } from './panels/DesignPanel';
 import { SettingsPanel } from './panels/SettingsPanel';
+import { GrowthPanel } from './panels/GrowthPanel';
 import { ComponentTreePanel } from './engine/ComponentTreePanel';
 import { FooterTreePanel } from './engine/FooterTreePanel';
 import { useEditorContextStore } from '../../store/editorContextStore';
@@ -25,6 +26,7 @@ import { getPageConfig } from './pageConfigs';
 import styles from '../../pages/editor/EditorLayout.module.css';
 import type { EditorPanelType } from '../../store/landingEditorStore';
 import { getEditorPath, resolveHeaderRowId } from './utils/editorNavigation';
+import { resolveEditorPage } from './utils/pageIdentity';
 
 // ─── Icon mapping for pages matching user specification ───
 const pageIconMap: Record<string, React.FC<{ size?: number }>> = {
@@ -109,9 +111,10 @@ interface TabDef {
 
 const TABS: TabDef[] = [
   { id: 'pages', label: 'Pages', icon: Files },
-  { id: 'brand', label: 'Brand', icon: Store },
-  { id: 'design', label: 'Design', icon: Palette },
-  { id: 'settings', label: 'Settings', icon: Settings },
+  { id: 'brand', label: 'Identity', icon: Store },
+  { id: 'design', label: 'Design system', icon: Palette },
+  { id: 'growth', label: 'Growth', icon: TrendingUp },
+  { id: 'settings', label: 'Store setup', icon: Settings },
 ];
 
 // ─── Chrome component entries (Header, Footer, Toaster, Cookie / Consent) ───
@@ -141,7 +144,7 @@ export const EditorLeftSidebar: React.FC = () => {
     isRightSidebarOpen, setRightSidebarOpen,
   } = useLandingEditorStore();
   const { pages, updatePageProps, removeSection } = useSiteStore();
-  const activePage = pages.find(p => p.id === selectedPageId) || pages[0];
+  const activePage = resolveEditorPage(pages, selectedPageId) || pages[0];
 
   const headerBarTypes = ['AnnouncementBar', 'UtilityBar'];
   const footerBarTypes = ['FooterTrust', 'FooterNewsletter', 'FooterSocial', 'FooterBottom', 'FooterMenu', 'FooterText'];
@@ -250,16 +253,17 @@ export const EditorLeftSidebar: React.FC = () => {
       'pages': '/editor/pages',
       'brand': '/editor/brand',
       'design': '/editor/design',
+      'growth': '/editor/growth',
       'settings': '/editor/settings',
       'store-brand': '/editor/brand',
       'design-experience': '/editor/design',
-      'seo-growth': '/editor/brand',
+      'seo-growth': '/editor/growth',
     };
     navigate(routeMap[tabId] || '/editor/pages');
   };
 
   // ─────────────────────────────────────────────────────
-  // RENDER: CONTEXTUAL CONTENT FOR EACH OF THE 4 TABS
+  // RENDER: CONTEXTUAL CONTENT FOR EACH STORE EDITOR WORKSPACE
   // ─────────────────────────────────────────────────────
 
   const renderContextualPanel = () => {
@@ -269,10 +273,13 @@ export const EditorLeftSidebar: React.FC = () => {
       case 'design':
       case 'design-experience':
         return <DesignPanel />;
+      case 'growth':
+        return <GrowthPanel />;
       case 'brand':
       case 'store-brand':
-      case 'seo-growth':
         return <BrandPanel />;
+      case 'seo-growth':
+        return <GrowthPanel />;
       case 'settings':
         return <SettingsPanel />;
       default:
@@ -852,7 +859,7 @@ export const EditorLeftSidebar: React.FC = () => {
         <div className={styles.horizontalTabBar}>
           {TABS.map(tab => {
             const Icon = tab.icon;
-            const isActive = activePanel === tab.id || (tab.id === 'brand' && (activePanel === 'store-brand' || activePanel === 'seo-growth')) || (tab.id === 'design' && activePanel === 'design-experience');
+            const isActive = activePanel === tab.id || (tab.id === 'brand' && activePanel === 'store-brand') || (tab.id === 'design' && activePanel === 'design-experience');
             return (
               <button
                 key={tab.id}
@@ -930,7 +937,7 @@ export const EditorLeftSidebar: React.FC = () => {
           <div className={styles.collapsedDivider} />
           {!isPageDetail && TABS.map(tab => {
             const Icon = tab.icon;
-            const isActive = activePanel === tab.id || (tab.id === 'brand' && (activePanel === 'store-brand' || activePanel === 'seo-growth')) || (tab.id === 'design' && activePanel === 'design-experience');
+            const isActive = activePanel === tab.id || (tab.id === 'brand' && activePanel === 'store-brand') || (tab.id === 'design' && activePanel === 'design-experience');
             return (
               <button
                 key={tab.id}

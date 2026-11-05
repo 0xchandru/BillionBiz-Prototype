@@ -591,13 +591,38 @@ identityRouter.post('/google', async (req: Request, res: Response) => {
         }
 
         const tokenData = await tokenRes.json() as any;
-        if (tokenData.id_token) {
-          const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(tokenData.id_token)}`);
-          const tokenInfo = await verifyRes.json() as any;
-          googleId = tokenInfo.sub;
-          email = tokenInfo.email;
-          fullName = tokenInfo.name || 'Google User';
+        if (!tokenData.id_token) {
+          return res.status(401).json({
+            error: 'MISSING_GOOGLE_ID_TOKEN',
+            message: 'Google did not return an ID token for this authorization code.'
+          });
         }
+
+        const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(tokenData.id_token)}`);
+        if (!verifyRes.ok) {
+          return res.status(401).json({
+            error: 'INVALID_GOOGLE_TOKEN',
+            message: 'Google ID token verification failed.'
+          });
+        }
+
+        const tokenInfo = await verifyRes.json() as any;
+        if (tokenInfo.aud !== clientId) {
+          return res.status(401).json({
+            error: 'AUDIENCE_MISMATCH',
+            message: 'Google token was not issued for this application.'
+          });
+        }
+        if (tokenInfo.email_verified !== 'true' && tokenInfo.email_verified !== true) {
+          return res.status(400).json({
+            error: 'UNVERIFIED_EMAIL',
+            message: 'Google account email is not verified.'
+          });
+        }
+
+        googleId = tokenInfo.sub;
+        email = tokenInfo.email;
+        fullName = tokenInfo.name || 'Google User';
       } catch (err: any) {
         return res.status(500).json({
           error: 'GOOGLE_OAUTH_FAILED',
@@ -666,47 +691,55 @@ identityRouter.post('/google', async (req: Request, res: Response) => {
       primaryOrg = primaryOrg || `org-${uuidv4()}`;
       primaryStore = primaryStore || `str-${uuidv4()}`;
       const storeName = `${fullName || 'My Store'}'s Store`;
-      const storeSlug = `store-${uuidv4().substring(0, 8)}`;
+      const slugBase = generateCandidateSlug(fullName || cleanEmail.split('@')[0] || 'merchant').slice(0, 44) || 'merchant';
+      const storeSlug = `${slugBase}-${uuidv4().substring(0, 8)}`;
+      const slugValidation = validateSubdomainSlug(storeSlug);
+      if (!slugValidation.isValid) {
+        throw new Error(`Unable to create a valid storefront subdomain: ${slugValidation.error || 'invalid slug'}`);
+      }
       primaryStoreName = storeName;
-      primaryStoreSlug = storeSlug;
+      primaryStoreSlug = slugValidation.normalizedSlug;
 
       await withTransaction(async (client) => {
         await client.query(
-          `INSERT INTO organizations (id, name, slug) 
-           VALUES ($1, $2, $3)
-           ON CONFLICT DO NOTHING`,
-          [primaryOrg, `${storeName} Group`, storeSlug]
+          `INSERT INTO organizations (id, name, slug)
+           VALUES ($1, $2, $3)`,
+          [primaryOrg, `${storeName} Group`, primaryStoreSlug]
         );
         await client.query(
-          `INSERT INTO stores (id, organization_id, name, slug, status) 
-           VALUES ($1, $2, $3, $4, 'ACTIVE')
-           ON CONFLICT DO NOTHING`,
-          [primaryStore, primaryOrg, storeName, storeSlug]
+          `INSERT INTO stores (id, organization_id, name, slug, status)
+           VALUES ($1, $2, $3, $4, 'ACTIVE')`,
+          [primaryStore, primaryOrg, storeName, primaryStoreSlug]
         );
         await client.query(
-          `INSERT INTO organization_memberships (id, organization_id, user_id, role) 
-           VALUES ($1, $2, $3, 'OWNER')
-           ON CONFLICT DO NOTHING`,
+          `INSERT INTO organization_memberships (id, organization_id, user_id, role)
+           VALUES ($1, $2, $3, 'OWNER')`,
           [`mem-${uuidv4()}`, primaryOrg, userId]
         );
         await client.query(
-          `INSERT INTO store_capabilities (store_id, product_commerce_enabled, appointments_enabled) 
+          `INSERT INTO store_capabilities (store_id, product_commerce_enabled, appointments_enabled)
            VALUES ($1, TRUE, TRUE)
-           ON CONFLICT DO NOTHING`,
+           ON CONFLICT (store_id) DO NOTHING`,
           [primaryStore]
         );
         await client.query(
-          `INSERT INTO store_locations (id, store_id, name, is_primary) 
-           VALUES ($1, $2, 'Main Location', TRUE)
+          `INSERT INTO store_locations (id, store_id, name, is_primary, is_active)
+           VALUES ($1, $2, 'Main Location', TRUE, TRUE)
            ON CONFLICT DO NOTHING`,
           [`loc-${uuidv4()}`, primaryStore]
         );
-        await client.query(
-          `INSERT INTO store_themes (id, store_id, preset_name) 
-           VALUES ($1, $2, 'modern')
-           ON CONFLICT DO NOTHING`,
-          [`thm-${uuidv4()}`, primaryStore]
-        );
+
+        // Google-created merchants must receive the same domain, settings,
+        // theme, navigation, page catalog and initial publication as all other
+        // registration paths.
+        await provisionDefaultStorefront({
+          client,
+          storeId: primaryStore,
+          storeName,
+          storeSlug: primaryStoreSlug,
+          mode: 'BOTH',
+          userId
+        });
       });
 
       // Refetch updated orgs
@@ -1422,13 +1455,7 @@ identityRouter.post('/register-streamlined', async (req: Request, res: Response)
       [storeId, orgId, storeName, storeSlug]
     );
 
-    // Register primary store domain
-    await client.query(
-      `INSERT INTO store_domains (id, store_id, domain, is_primary, is_verified, ssl_status)
-       VALUES ($1, $2, $3, TRUE, TRUE, 'ACTIVE')
-       ON CONFLICT (domain) DO UPDATE SET is_primary = TRUE, is_verified = TRUE`,
-      [`dom-${uuidv4()}`, storeId, `${storeSlug}.${PLATFORM_MAIN_DOMAIN}`]
-    );
+    // provisionDefaultStorefront owns the single canonical platform-domain mapping.
 
     // 4. Capabilities & Storefront Settings
     await client.query(

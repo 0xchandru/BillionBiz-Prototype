@@ -11,8 +11,8 @@ export interface PendingEditorSwitch {
 }
 
 export type DeviceType = 'desktop' | 'tablet' | 'mobile' | 'all';
-export type ThemeCategoryType = 'themes' | 'colors' | 'typography' | 'buttons' | 'effects' | 'custom-css';
-export type EditorPanelType = 'pages' | 'brand' | 'design' | 'settings' | 'store-brand' | 'design-experience' | 'seo-growth';
+export type ThemeCategoryType = 'themes' | 'colors' | 'typography' | 'buttons' | 'spacing' | 'effects' | 'custom-css';
+export type EditorPanelType = 'pages' | 'brand' | 'design' | 'growth' | 'settings' | 'store-brand' | 'design-experience' | 'seo-growth';
 export type PagesNavLevel = 'list' | 'page-detail';
 
 export type BrandSection = 
@@ -35,7 +35,7 @@ export type SeoSection = 'global' | 'page';
 export type SettingsSection = 
   | 'launch-checklist' | 'language-region' | 'notifications'
   | 'refund-policy' | 'privacy-policy' | 'terms-of-service' | 'shipping-policy'
-  | 'integrations' | 'custom-code' | 'api-webhooks' | 'permissions'
+  | 'integrations' | 'custom-code' | 'api-webhooks' | 'permissions' | 'store-access'
   | 'setup' | 'general' | 'policies' | 'language';
 
 interface LandingEditorState {

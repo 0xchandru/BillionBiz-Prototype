@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Monitor, 
   Tablet, 
@@ -9,6 +9,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { StorefrontRenderer } from './StorefrontRenderer';
+import { StorefrontPreviewViewport } from './StorefrontPreviewViewport';
 import { apiClient } from '../../api/client';
 import { useAuthStore } from '../../store/authStore';
 import { useSiteStore } from '../../store/siteStore';
@@ -47,21 +48,6 @@ export const StorefrontPreview: React.FC<StorefrontPreviewProps> = ({
     }
   }, [selectedPageId, siteStore.pages]);
 
-  // Measure container width for responsive scaling
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [containerWidth, setContainerWidth] = useState<number>(1200);
-
-  useEffect(() => {
-    const handleResize = () => {
-      if (containerRef.current) {
-        setContainerWidth(containerRef.current.clientWidth);
-      }
-    };
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
   // Fetch real authoritative tenant data from backend
   const fetchTenantData = async () => {
     try {
@@ -87,26 +73,6 @@ export const StorefrontPreview: React.FC<StorefrontPreviewProps> = ({
     fetchTenantData();
   }, [storeSlug]);
 
-  // Determine target preview width & scale
-  let targetWidth: string | number = '100%';
-  let scale = 1;
-
-  if (deviceMode === 'tablet') {
-    targetWidth = 768;
-    scale = containerWidth > 0 && containerWidth < 800 ? (containerWidth - 32) / 768 : 1;
-  } else if (deviceMode === 'mobile') {
-    targetWidth = 375;
-    scale = containerWidth > 0 && containerWidth < 400 ? (containerWidth - 32) / 375 : 1;
-  } else if (deviceMode === 'custom') {
-    const w = Math.max(300, Math.min(1440, customWidth));
-    targetWidth = w;
-    scale = containerWidth > 0 && containerWidth < w + 32 ? (containerWidth - 32) / w : 1;
-  } else {
-    // Desktop: full native desktop width, never squished
-    targetWidth = '100%';
-    scale = 1;
-  }
-
   // Pages Catalog for selector
   const standardPages = [
     { label: 'Home Page', path: '/' },
@@ -127,7 +93,7 @@ export const StorefrontPreview: React.FC<StorefrontPreviewProps> = ({
   // Merge custom pages from server data or local store
   const allPages = [
     ...standardPages,
-    ...(serverData?.pages || siteStore.pages || [])
+    ...(previewMode === 'draft' ? siteStore.pages : (serverData?.activeRelease?.pages || serverData?.pages || []))
       .filter((p: any) => !standardPages.some((sp) => sp.path === p.path))
       .map((p: any) => ({ label: `${p.name} (Custom)`, path: p.path }))
   ];
@@ -140,24 +106,44 @@ export const StorefrontPreview: React.FC<StorefrontPreviewProps> = ({
     }
   };
 
-  // Real store data source based on Draft vs Published mode
-  const effectiveTheme = previewMode === 'draft' && siteStore.theme
-    ? siteStore.theme
-    : serverData?.theme || {};
+  // Published mode is sourced only from the immutable active release.
+  // Draft mode deliberately uses the editor's current local workspace state.
+  const publishedSnapshot = serverData?.activeRelease || {};
+  const publishedTheme = publishedSnapshot.theme || serverData?.theme || {};
+  const publishedBrand = publishedSnapshot.brand || serverData?.brand || {};
+  const publishedSettings = publishedSnapshot.settings || serverData?.settings || {};
+  const publishedPages = Array.isArray(publishedSnapshot.pages)
+    ? publishedSnapshot.pages
+    : (serverData?.pages || []);
 
-  const effectiveBrand = previewMode === 'draft' && siteStore.settings
+  const effectiveTheme = previewMode === 'draft'
+    ? siteStore.theme
+    : publishedTheme;
+
+  const effectiveBrand = previewMode === 'draft'
     ? {
         brand_name: siteStore.settings.storeName || serverData?.brand?.brand_name || serverData?.brand?.name,
-        tagline: siteStore.settings.tagline || serverData?.brand?.tagline,
-        logo_url: siteStore.settings.logoUrl || serverData?.brand?.logo_url || serverData?.brand?.logoUrl,
-        favicon_url: siteStore.settings.faviconUrl || serverData?.brand?.favicon_url || serverData?.brand?.faviconUrl,
-        social_links: siteStore.settings.socialLinks || serverData?.brand?.social_links || serverData?.brand?.socialLinks
+        tagline: siteStore.settings.tagline ?? serverData?.brand?.tagline,
+        logo_url: siteStore.settings.logoUrl ?? serverData?.brand?.logo_url ?? serverData?.brand?.logoUrl,
+        favicon_url: siteStore.settings.faviconUrl ?? serverData?.brand?.favicon_url ?? serverData?.brand?.faviconUrl,
+        social_links: siteStore.settings.socialLinks ?? serverData?.brand?.social_links ?? serverData?.brand?.socialLinks
       }
-    : serverData?.brand || {};
+    : {
+        brand_name: publishedBrand.brand_name || publishedBrand.name || serverData?.brand?.brand_name || serverData?.brand?.name,
+        tagline: publishedBrand.tagline,
+        logo_url: publishedBrand.logo_url || publishedBrand.logoUrl,
+        favicon_url: publishedBrand.favicon_url || publishedBrand.faviconUrl,
+        social_links: publishedBrand.social_links || publishedBrand.socialLinks || {}
+      };
 
-  const effectiveSettings = previewMode === 'draft' && siteStore.settings
+  const effectiveSettings = previewMode === 'draft'
     ? { ...serverData?.settings, ...siteStore.settings }
-    : serverData?.settings || {};
+    : {
+        ...publishedSettings,
+        password_enabled: publishedSettings.password_enabled ?? publishedSettings.passwordEnabled ?? false,
+        maintenance_mode: publishedSettings.maintenance_mode ?? publishedSettings.maintenanceMode ?? false
+      };
+  const effectivePages = previewMode === 'draft' ? siteStore.pages : publishedPages;
 
   const effectiveSlug = serverData?.store?.slug || storeSlug;
   const pathSuffix = activePath === '/' ? '' : activePath;
@@ -305,45 +291,43 @@ export const StorefrontPreview: React.FC<StorefrontPreviewProps> = ({
         </div>
       </div>
 
-      {/* ─── Canvas Preview Stage ─── */}
-      <div
-        ref={containerRef}
-        className="flex-1 overflow-y-auto p-4 sm:p-6 flex items-start justify-center"
-      >
-        {loading ? (
-          <div className="flex items-center justify-center h-64 text-slate-400 gap-2 text-xs">
-            <RefreshCw size={16} className="animate-spin text-indigo-600" />
-            <span>Loading preview environment...</span>
-          </div>
-        ) : (
-          <div
-            style={{
-              width: typeof targetWidth === 'number' ? `${targetWidth}px` : targetWidth,
-              maxWidth: deviceMode === 'desktop' ? '1280px' : undefined,
-              minHeight: '820px',
-              transform: scale < 1 ? `scale(${scale})` : undefined,
-              transformOrigin: 'top center',
-              transition: 'all 0.2s ease'
-            }}
-            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl overflow-hidden shrink-0"
-          >
-            <StorefrontRenderer
-              store={serverData?.store || { name: 'Demo Store', slug: storeSlug }}
-              brand={effectiveBrand}
-              themeTokens={effectiveTheme?.palette || effectiveTheme?.tokens}
-              settings={effectiveSettings}
-              pages={serverData?.pages || []}
-              products={serverData?.products || []}
-              offerings={serverData?.offerings || []}
-              categories={serverData?.categories || []}
-              currentPath={activePath}
-              onNavigate={(path) => setActivePath(path)}
-              previewMode={true}
-            />
-          </div>
-        )}
-      </div>
+      {/* Shared responsive preview viewport used by every storefront preview surface. */}
+      {loading ? (
+        <div className="flex-1 flex items-center justify-center text-slate-400 gap-2 text-xs">
+          <RefreshCw size={16} className="animate-spin text-indigo-600" />
+          <span>Loading preview environment...</span>
+        </div>
+      ) : (
+        <StorefrontPreviewViewport
+          device={deviceMode}
+          customWidth={customWidth}
+          className="flex-1 overflow-y-auto p-4 sm:p-6"
+          minHeight={820}
+          desktopMaxWidth={1280}
+          frameClassName="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl overflow-hidden shrink-0"
+        >
+          <StorefrontRenderer
+            store={serverData?.store || { name: 'Demo Store', slug: storeSlug }}
+            brand={effectiveBrand}
+            themeTokens={effectiveTheme}
+            settings={effectiveSettings}
+            pages={effectivePages}
+            products={serverData?.products || []}
+            offerings={serverData?.offerings || []}
+            categories={serverData?.categories || []}
+            currentPath={activePath}
+            onNavigate={(path) => setActivePath(path)}
+            previewMode={true}
+            useEditorChrome={previewMode === 'draft'}
+            device={deviceMode === 'custom'
+              ? (customWidth <= 600 ? 'mobile' : customWidth <= 900 ? 'tablet' : 'desktop')
+              : deviceMode}
+          />
+        </StorefrontPreviewViewport>
+      )}
     </div>
   );
 };
+
+export default StorefrontPreview;
 

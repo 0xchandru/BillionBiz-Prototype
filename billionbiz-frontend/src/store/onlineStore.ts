@@ -3,6 +3,8 @@ import { persist } from 'zustand/middleware';
 import { apiClient } from '../api/client';
 import { defaultPropsMap, sectionNameMap } from '../components/editor/SectionRenderer';
 import { getAllPageConfigs } from '../components/editor/pageConfigs';
+import { createHeroBannerInstance } from '../components/editor/sectionEngine/heroBannerDefinition';
+import { createFeaturedCollectionInstance } from '../components/editor/sectionEngine/featuredCollectionDefinition';
 import type { PageCategory } from '../components/editor/pageConfigs/types';
 import { useContentStateStore } from './contentStateStore';
 import {
@@ -16,6 +18,12 @@ export interface SectionData {
   name: string;
   props: Record<string, any>;
   isHidden: boolean;
+  schemaVersion?: number;
+  enabled?: boolean;
+  settings?: Record<string, any>;
+  blocks?: Array<Record<string, any>>;
+  designOverrides?: Record<string, any>;
+  responsiveOverrides?: Record<string, any>;
 }
 
 export interface PageSnapshot {
@@ -44,10 +52,11 @@ export interface PageData {
     mobile: boolean;
   };
   lastPublishedSnapshot?: PageSnapshot;
+  draftVersion?: number;
 }
 
 import type { GlobalThemeData } from '../components/editor/theme/themePresets';
-import { getDefaultTheme, themePresets } from '../components/editor/theme/themePresets';
+import { DEFAULT_THEME_SPACING, getDefaultTheme, themePresets } from '../components/editor/theme/themePresets';
 import { useThemeHistoryStore } from './themeHistoryStore';
 
 export type ThemeData = GlobalThemeData;
@@ -63,6 +72,7 @@ export interface OnlineStoreState {
   markUnsaved: () => void;
   
   updateSectionProps: (pageId: string, sectionId: string, newProps: Record<string, any>) => void;
+  updateSectionInstance: (pageId: string, sectionId: string, patch: Partial<SectionData>) => void;
   reorderSections: (pageId: string, startIndex: number, endIndex: number) => void;
   toggleSectionVisibility: (pageId: string, sectionId: string) => void;
   addSection: (pageId: string, sectionType: string, insertIndex?: number) => void;
@@ -78,6 +88,7 @@ export interface OnlineStoreState {
   resetColorPalette: () => void;
   resetTypography: () => void;
   resetButtons: () => void;
+  resetSpacing: () => void;
   resetEffects: () => void;
   resetCustomCss: () => void;
   undoTheme: () => void;
@@ -87,6 +98,7 @@ export interface OnlineStoreState {
   fetchLiveStoreData: () => Promise<void>;
   saveSettingsToBackend: (settings: Record<string, any>) => Promise<void>;
   saveThemeToBackend: (theme: Partial<ThemeData>) => Promise<void>;
+  savePageDraftToBackend: (pageId: string) => Promise<any>;
   publishStoreToBackend: (notes?: string) => Promise<any>;
   // Methods for Online Store Editor
   updatePageSettings: (pageId: string, settings: Record<string, any>) => void;
@@ -99,15 +111,31 @@ export interface OnlineStoreState {
 
 export type SiteState = OnlineStoreState;
 
+const createSectionId = (): string => {
+  const suffix = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+  return `sec-${suffix}`;
+};
+
 // Helper to create a section with default props
-const createSection = (id: string, type: string, overrides?: Partial<SectionData>): SectionData => ({
-  id,
-  type,
-  name: sectionNameMap[type] || type.replace(/([A-Z])/g, ' $1').trim(),
-  isHidden: false,
-  props: { ...defaultPropsMap[type] },
-  ...overrides,
-});
+const createSection = (id: string, type: string, overrides?: Partial<SectionData>): SectionData => {
+  if (type === 'HeroBanner' && !overrides) {
+    return createHeroBannerInstance(id, sectionNameMap[type] || 'Hero Banner') as SectionData;
+  }
+  if (type === 'FeaturedCollection' && !overrides) {
+    return createFeaturedCollectionInstance(id, sectionNameMap[type] || 'Featured Collection') as SectionData;
+  }
+
+  return {
+    id,
+    type,
+    name: sectionNameMap[type] || type.replace(/([A-Z])/g, ' $1').trim(),
+    isHidden: false,
+    props: { ...defaultPropsMap[type] },
+    ...overrides,
+  };
+};
 
 // Helper predicate functions for separating Header, Footer, and Homepage scopes
 export const isHeaderComponent = (s: SectionData | { type: string; id?: string }) => {
@@ -287,14 +315,14 @@ export const getInitialPages = (): PageData[] => [
 ];
 
 export const getInitialSettings = (): Record<string, any> => {
-  const dynamicStoreName = (typeof window !== 'undefined' ? localStorage.getItem('billionbiz_store_name') : null) || 'Chandru Store';
+  const dynamicStoreName = (typeof window !== 'undefined' ? localStorage.getItem('billionbiz_store_name') : null) || 'Your store';
   return {
     storeName: dynamicStoreName,
     siteName: dynamicStoreName,
-    tagline: 'Handcrafted Quality & Direct Commerce',
-    description: `Official online store for ${dynamicStoreName}.`,
+    tagline: '',
+    description: '',
     language: 'English',
-    announcement: 'Free shipping on orders above $99',
+    announcement: '',
     copyright: `© ${new Date().getFullYear()} ${dynamicStoreName}. All rights reserved.`,
     showBottomNav: true,
     bottomNavLinks: [
@@ -362,10 +390,14 @@ export const useOnlineStore = create<OnlineStoreState>()(
               type: sp.type || 'standard',
               category: sp.category || (sp.is_system ? 'storefront' : 'custom'),
               status: sp.status === 'published' ? 'published' : 'draft',
-              seoTitle: sp.seo_title || `${sp.name} - Store`,
+              seoTitle: sp.seo_title || '',
               seoDescription: sp.seo_description || '',
+              socialImage: sp.social_image || '',
+              canonicalUrl: sp.canonical_url || '',
+              searchVisibility: sp.search_visibility !== false,
               sections: Array.isArray(sp.sections) ? sp.sections : [],
-              pageProps: sp.page_props || {},
+              pageProps: sp.draft_page_props || sp.page_props || {},
+              draftVersion: Number(sp.draft_version || 0),
               visibility: sp.visibility || { desktop: true, tablet: true, mobile: true },
               is_system: sp.is_system,
               is_locked: sp.is_locked,
@@ -424,49 +456,68 @@ export const useOnlineStore = create<OnlineStoreState>()(
       },
 
       saveSettingsToBackend: async (newSettings: Record<string, any>) => {
-        try {
-          const brandFields: any = {};
-          if (newSettings.storeName || newSettings.name) brandFields.name = newSettings.storeName || newSettings.name;
-          if (newSettings.tagline !== undefined) brandFields.tagline = newSettings.tagline;
-          if (newSettings.logoUrl !== undefined) brandFields.logoUrl = newSettings.logoUrl;
-          if (newSettings.faviconUrl !== undefined) brandFields.faviconUrl = newSettings.faviconUrl;
-          if (newSettings.socialLinks !== undefined) brandFields.socialLinks = newSettings.socialLinks;
-
-          const settingFields: any = {};
-          if (newSettings.passwordEnabled !== undefined) settingFields.passwordEnabled = newSettings.passwordEnabled;
-          if (newSettings.password !== undefined) settingFields.password = newSettings.password;
-          if (newSettings.maintenanceMode !== undefined) settingFields.maintenanceMode = newSettings.maintenanceMode;
-          if (newSettings.redirects !== undefined) settingFields.redirects = newSettings.redirects;
-          if (newSettings.seoDefaults !== undefined) settingFields.seoDefaults = newSettings.seoDefaults;
-          if (newSettings.primaryDomain !== undefined) settingFields.primaryDomain = newSettings.primaryDomain;
-
-          const promises: Promise<any>[] = [];
-          if (Object.keys(brandFields).length > 0) {
-            promises.push(apiClient.patch('/storefront/brand', brandFields));
-          }
-          if (Object.keys(settingFields).length > 0) {
-            promises.push(apiClient.patch('/storefront/settings', settingFields));
-          }
-          if (promises.length > 0) {
-            await Promise.allSettled(promises);
-          }
-        } catch (e) {
-          console.warn('[OnlineStore] saveSettingsToBackend error:', e);
+        const brandFields: any = {};
+        if (newSettings.storeName !== undefined || newSettings.name !== undefined) {
+          brandFields.name = newSettings.storeName ?? newSettings.name;
         }
+        if (newSettings.tagline !== undefined) brandFields.tagline = newSettings.tagline;
+        if (newSettings.logoUrl !== undefined) brandFields.logoUrl = newSettings.logoUrl;
+        if (newSettings.faviconUrl !== undefined) brandFields.faviconUrl = newSettings.faviconUrl;
+        if (newSettings.socialLinks !== undefined) brandFields.socialLinks = newSettings.socialLinks;
+
+        const settingFields: any = {};
+        if (newSettings.passwordEnabled !== undefined) settingFields.passwordEnabled = newSettings.passwordEnabled;
+        if (newSettings.password !== undefined) settingFields.password = newSettings.password;
+        if (newSettings.maintenanceMode !== undefined) settingFields.maintenanceMode = newSettings.maintenanceMode;
+        if (newSettings.redirects !== undefined) settingFields.redirects = newSettings.redirects;
+        if (newSettings.seoDefaults !== undefined) settingFields.seoDefaults = newSettings.seoDefaults;
+        if (newSettings.primaryDomain !== undefined) settingFields.primaryDomain = newSettings.primaryDomain;
+
+        const requests: Promise<any>[] = [];
+        if (Object.keys(brandFields).length > 0) {
+          requests.push(apiClient.patch('/storefront/brand', brandFields));
+        }
+        if (Object.keys(settingFields).length > 0) {
+          requests.push(apiClient.patch('/storefront/settings', settingFields));
+        }
+        await Promise.all(requests);
       },
 
       saveThemeToBackend: async (newTheme: Partial<ThemeData>) => {
-        try {
-          await apiClient.patch('/storefront/theme', {
-            presetName: newTheme.presetName || (newTheme as any).id || (newTheme as any).name || 'modern',
-            palette: newTheme.palette,
-            typography: newTheme.typography,
-            buttons: newTheme.buttons,
-            effects: newTheme.effects,
-          });
-        } catch (e) {
-          console.warn('[OnlineStore] saveThemeToBackend error:', e);
+        await apiClient.patch('/storefront/theme', {
+          presetName: newTheme.presetName || (newTheme as any).id || (newTheme as any).name || 'modern',
+          palette: newTheme.palette,
+          typography: newTheme.typography,
+          buttons: newTheme.buttons,
+          effects: newTheme.effects,
+          customCss: (newTheme as any).customCss,
+        });
+      },
+
+      savePageDraftToBackend: async (pageId: string) => {
+        const page = get().pages.find((item) => item.id === pageId);
+        if (!page) {
+          throw new Error('The selected page could not be found in the current store.');
         }
+
+        const response = await apiClient.patch<{ message: string; pageId: string; version: number }>(
+          `/storefront/pages/${encodeURIComponent(page.id)}/draft`,
+          {
+            sections: page.sections || [],
+            pageProps: page.pageProps || {},
+            seoTitle: page.seoTitle || '',
+            seoDescription: page.seoDescription || '',
+            expectedVersion: page.draftVersion ?? 0,
+          }
+        );
+
+        set((state) => ({
+          pages: state.pages.map((item) =>
+            item.id === pageId ? { ...item, draftVersion: response.version } : item
+          ),
+        }));
+
+        return response;
       },
 
       publishStoreToBackend: async (notes = 'Published from Store Editor') => {
@@ -482,6 +533,25 @@ export const useOnlineStore = create<OnlineStoreState>()(
         ...page,
         sections: page.sections.map(sec => 
           sec.id === sectionId ? { ...sec, props: { ...sec.props, ...newProps } } : sec
+        )
+      };
+    });
+    return { pages, hasUnsavedChanges: true };
+  }),
+
+  updateSectionInstance: (pageId, sectionId, patch) => set((state) => {
+    const pages = state.pages.map((page) => {
+      if (page.id !== pageId) return page;
+      return {
+        ...page,
+        sections: page.sections.map((section) =>
+          section.id === sectionId
+            ? {
+                ...section,
+                ...patch,
+                props: patch.props ? { ...section.props, ...patch.props } : section.props
+              }
+            : section
         )
       };
     });
@@ -515,7 +585,7 @@ export const useOnlineStore = create<OnlineStoreState>()(
   addSection: (pageId, sectionType, insertIndex) => set((state) => {
     const pages = state.pages.map(page => {
       if (page.id !== pageId) return page;
-      const newSection = createSection(`sec-${Date.now()}`, sectionType);
+      const newSection = createSection(createSectionId(), sectionType);
       
       const sections = [...page.sections];
       
@@ -592,11 +662,12 @@ export const useOnlineStore = create<OnlineStoreState>()(
       pageProps: {},
       visibility: { desktop: true, tablet: true, mobile: true }
     };
-    return { pages: [...state.pages, newPage] };
+    return { pages: [...state.pages, newPage], hasUnsavedChanges: true };
   }),
 
   removePage: (pageId) => set((state) => ({
-    pages: state.pages.filter(page => page.id !== pageId)
+    pages: state.pages.filter(page => page.id !== pageId),
+    hasUnsavedChanges: true
   })),
 
   updateTheme: (newTheme, forceHistory = false) => {
@@ -641,7 +712,6 @@ export const useOnlineStore = create<OnlineStoreState>()(
       }
       return { theme: merged, hasUnsavedChanges: true };
     });
-    get().saveThemeToBackend(get().theme);
   },
 
   resetTheme: () => {
@@ -698,7 +768,8 @@ export const useOnlineStore = create<OnlineStoreState>()(
         theme: {
           ...state.theme,
           typography: JSON.parse(JSON.stringify(preset.typography)),
-        }
+        },
+        hasUnsavedChanges: true
       };
     });
   },
@@ -711,7 +782,25 @@ export const useOnlineStore = create<OnlineStoreState>()(
         theme: {
           ...state.theme,
           buttons: JSON.parse(JSON.stringify(preset.buttons)),
-        }
+        },
+        hasUnsavedChanges: true
+      };
+    });
+  },
+
+  resetSpacing: () => {
+    useThemeHistoryStore.getState().pushState(get().theme, true);
+    set((state) => {
+      const preset = themePresets[state.theme.presetName] || getDefaultTheme();
+      return {
+        theme: {
+          ...state.theme,
+          spacing: {
+            ...DEFAULT_THEME_SPACING,
+            ...(preset.spacing || {})
+          }
+        },
+        hasUnsavedChanges: true
       };
     });
   },
@@ -725,7 +814,8 @@ export const useOnlineStore = create<OnlineStoreState>()(
           ...state.theme,
           effects: JSON.parse(JSON.stringify(preset.effects)),
           ui: { ...preset.ui },
-        }
+        },
+        hasUnsavedChanges: true
       };
     });
   },
@@ -760,7 +850,6 @@ export const useOnlineStore = create<OnlineStoreState>()(
       settings: { ...state.settings, ...newSettings },
       hasUnsavedChanges: true,
     }));
-    get().saveSettingsToBackend(newSettings);
   },
 
   // --- Pages Editor Methods ---

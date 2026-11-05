@@ -56,6 +56,15 @@ describe('V2 Realtime, Concurrency & Release Gate Suite', () => {
     });
 
     const ts = Date.now();
+
+    // Keep this suite independent of test-file execution order. Registration
+    // assigns role-owner and the database FK requires that system role to exist.
+    await query(
+      `INSERT INTO roles (id, name, code, description, is_system)
+       VALUES ('role-owner', 'Store Owner', 'OWNER', 'Full access for test registrations', TRUE)
+       ON CONFLICT (id) DO NOTHING`
+    );
+
     // 2. Register Tenant A
     const regResA = await api('POST', '/api/v1/auth/register', {
       body: {
@@ -243,7 +252,29 @@ describe('V2 Realtime, Concurrency & Release Gate Suite', () => {
   // SECTION 16: Concurrency & Atomic Collision Protection
   // ============================================================
   it('TC-CONC-001: Concurrent appointment booking attempts for same slot trigger conflict (FOR UPDATE)', async () => {
-    // 1. Create a service offering
+    // 1. Provision a store-owned appointment specialist, bookable resource and shift.
+    const fixtureSuffix = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+    const staffProfileId = `stf-concurrency-${fixtureSuffix}`;
+    const resourceId = `res-concurrency-${fixtureSuffix}`;
+    await query(
+      `INSERT INTO staff_profiles (
+         id, organization_id, store_id, display_name, responsibilities, assigned_services, capacity, is_active
+       )
+       VALUES ($1, $2, $3, 'Concurrency Test Specialist', '["APPOINTMENT_STAFF"]'::jsonb, '[]'::jsonb, 1, TRUE)`,
+      [staffProfileId, tenantAOrgId, tenantAStoreId]
+    );
+    await query(
+      `INSERT INTO resources (id, store_id, name, type, staff_profile_id, is_active)
+       VALUES ($1, $2, 'Concurrency Test Specialist', 'PERSON', $3, TRUE)`,
+      [resourceId, tenantAStoreId, staffProfileId]
+    );
+    await query(
+      `INSERT INTO staff_shifts (id, staff_profile_id, day_of_week, start_time, end_time, is_active)
+       VALUES ($1, $2, 2, '09:00:00', '20:00:00', TRUE)`,
+      [`shift-concurrency-${fixtureSuffix}`, staffProfileId]
+    );
+
+    // 2. Create a service explicitly assigned to that specialist.
     const offRes = await api('POST', '/api/v1/appointments/offerings', {
       token: tenantAToken,
       orgId: tenantAOrgId,
@@ -252,28 +283,15 @@ describe('V2 Realtime, Concurrency & Release Gate Suite', () => {
         name: 'VIP Haircut & Styling',
         durationMinutes: 30,
         priceMinor: 4500,
-        depositRequiredMinor: 1000
+        depositRequiredMinor: 1000,
+        resourceIds: [resourceId]
       }
     });
     expect(offRes.status).toBe(201);
     const offeringId = offRes.body.offeringId;
 
-    // 2. Fetch default resource for store
-    const resList = await query('SELECT id FROM resources WHERE store_id = $1 LIMIT 1', [tenantAStoreId]);
-    let resourceId: string;
-    if (resList.rowCount && resList.rowCount > 0) {
-      resourceId = resList.rows[0].id;
-    } else {
-      // create a resource if not present
-      const newRes = await query(
-        `INSERT INTO resources (id, store_id, name, type) VALUES ($1, $2, 'Staff Specialist', 'STAFF') RETURNING id`,
-        [`res-${Date.now()}`, tenantAStoreId]
-      );
-      resourceId = newRes.rows[0].id;
-    }
-
-    const startTime = '2026-12-01T14:00:00.000Z';
-    const endTime = '2026-12-01T14:30:00.000Z';
+    const startTime = '2026-12-01T08:30:00.000Z';
+    const endTime = '2026-12-01T09:00:00.000Z';
 
     // 3. Launch two simultaneous booking requests
     const bookingReq1 = api('POST', '/api/v1/appointments/bookings', {
@@ -313,7 +331,8 @@ describe('V2 Realtime, Concurrency & Release Gate Suite', () => {
     const failedRes = res1.status === 201 ? res2 : res1;
 
     expect(successfulRes.body.bookingId).toBeDefined();
-    expect(failedRes.body.message).toContain('SLOT_UNAVAILABLE');
+    expect(failedRes.body.error).toBe('SLOT_UNAVAILABLE');
+    expect(failedRes.body.message).toContain('no longer available');
   });
 
   // ============================================================
@@ -429,8 +448,8 @@ describe('V2 Realtime, Concurrency & Release Gate Suite', () => {
         title: 'About Us',
         slug: `about-${Date.now()}`,
         sections: [
-          { type: 'hero', heading: 'Our Story', subheading: 'Handcrafted with passion' },
-          { type: 'text', content: 'Serving quality products since 2026.' }
+          { id: 'about-hero', type: 'hero', heading: 'Our Story', subheading: 'Handcrafted with passion' },
+          { id: 'about-copy', type: 'text', content: 'Serving quality products since 2026.' }
         ]
       }
     });

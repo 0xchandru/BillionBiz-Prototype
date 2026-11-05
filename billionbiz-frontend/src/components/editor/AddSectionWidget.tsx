@@ -20,6 +20,7 @@ import {
 import { useLandingEditorStore } from '../../store/landingEditorStore';
 import { useSiteStore } from '../../store/siteStore';
 import styles from './AddSectionWidget.module.css';
+import { resolveEditorPage } from './utils/pageIdentity';
 
 interface SectionItem {
   type: string;
@@ -37,10 +38,9 @@ export const AddSectionWidget: React.FC = () => {
     insertIndex,
     setInsertIndex,
     setSelectedSectionId,
-    setRightSidebarOpen
+    setRightSidebarOpen,
+    selectedPageId
   } = useLandingEditorStore();
-
-  const selectedPageId = 'landing-page';
   const { pages, addSection } = useSiteStore();
   const [activeCategory, setActiveCategory] = useState<string>('All sections');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -299,7 +299,7 @@ export const AddSectionWidget: React.FC = () => {
 
   if (!isAddSectionWidgetOpen) return null;
 
-  const activePage = pages.find((p) => p.id === selectedPageId) || pages[0];
+  const activePage = resolveEditorPage(pages, selectedPageId) || pages[0];
 
   const handleAdd = (type: string) => {
     if (activePage) {
@@ -431,7 +431,7 @@ export const AddSectionWidget: React.FC = () => {
                         handleAdd(sec.type);
                       }
                     }}
-                    title={`Add ${sec.name} to landing page`}
+                    title={`Add ${sec.name} to ${activePage?.name || 'current page'}`}
                   >
                     {/* Preview of the section */}
                     <div className={styles.cardPreview}>

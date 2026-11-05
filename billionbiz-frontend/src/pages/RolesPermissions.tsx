@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { FC } from 'react';
-import { Shield, Plus, Search, Check, Key } from 'lucide-react';
+import { Shield, Plus, Search, Check, Key, Pencil, Trash2 } from 'lucide-react';
 import { api } from '../api/services';
 import SkeletonLoader from '../components/common/SkeletonLoader';
 import EmptyState from '../components/common/EmptyState';
@@ -11,6 +11,7 @@ export const RolesPermissions: FC = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingRole, setEditingRole] = useState<any | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,28 +43,69 @@ export const RolesPermissions: FC = () => {
     fetchData();
   }, []);
 
+  const openCreateRole = () => {
+    setEditingRole(null);
+    setRoleName('');
+    setRoleCode('');
+    setDescription('');
+    setSelectedPermissions([]);
+    setIsModalOpen(true);
+  };
+
+  const openEditRole = (role: any) => {
+    setEditingRole(role);
+    setRoleName(role.name || '');
+    setRoleCode(role.code || '');
+    setDescription(role.description || '');
+    setSelectedPermissions(Array.isArray(role.permissions) ? role.permissions : []);
+    setIsModalOpen(true);
+  };
+
   const handleCreateRole = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!roleName.trim()) return;
 
     setSubmitting(true);
     try {
-      await api.createCustomRole({
-        name: roleName.trim(),
-        code: roleCode.trim() || undefined,
-        description: description.trim(),
-        permissionCodes: selectedPermissions
-      });
+      if (editingRole) {
+        await api.updateCustomRole(editingRole.id, {
+          name: roleName.trim(),
+          description: description.trim(),
+          permissionCodes: selectedPermissions
+        });
+      } else {
+        await api.createCustomRole({
+          name: roleName.trim(),
+          code: roleCode.trim() || undefined,
+          description: description.trim(),
+          permissionCodes: selectedPermissions
+        });
+      }
       setIsModalOpen(false);
+      setEditingRole(null);
       setRoleName('');
       setRoleCode('');
       setDescription('');
       setSelectedPermissions([]);
-      fetchData();
+      await fetchData();
     } catch (err: any) {
-      alert(err.message || 'Failed to create custom role');
+      alert(err.message || (editingRole ? 'Failed to update custom role' : 'Failed to create custom role'));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDeleteRole = async (role: any) => {
+    if (role.is_system) return;
+    const confirmed = window.confirm(
+      `Delete the custom role "${role.name}"? This is allowed only after all team members have been reassigned.`
+    );
+    if (!confirmed) return;
+    try {
+      await api.deleteCustomRole(role.id);
+      await fetchData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete custom role');
     }
   };
 
@@ -107,7 +149,7 @@ export const RolesPermissions: FC = () => {
         </div>
 
         <button
-          onClick={() => setIsModalOpen(true)}
+          onClick={openCreateRole}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -189,7 +231,7 @@ export const RolesPermissions: FC = () => {
                 title="No Roles Found"
                 description={search ? 'No roles match your search term.' : 'No roles configured.'}
                 actionLabel="Create Custom Role"
-                onAction={() => setIsModalOpen(true)}
+                onAction={openCreateRole}
               />
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '16px' }}>
@@ -234,12 +276,22 @@ export const RolesPermissions: FC = () => {
                       </p>
                     </div>
 
-                    <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
                       <span style={{ fontSize: '12px', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <Key size={13} style={{ color: '#083e47' }} />
                         {role.permissions ? role.permissions.length : 0} Permissions Assigned
                       </span>
-                      <span style={{ fontSize: '11px', color: '#16a34a', fontWeight: 600 }}>Active in Store</span>
+                      {!role.is_system && (
+                        <span style={{ display: 'flex', gap: 6 }}>
+                          <button type="button" onClick={() => openEditRole(role)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 8px', border: '1px solid #cbd5e1', borderRadius: 7, background: '#fff', color: '#334155', fontSize: 11, cursor: 'pointer' }}>
+                            <Pencil size={12} /> Edit
+                          </button>
+                          <button type="button" onClick={() => void handleDeleteRole(role)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 8px', border: '1px solid #fecaca', borderRadius: 7, background: '#fff', color: '#b91c1c', fontSize: 11, cursor: 'pointer' }}>
+                            <Trash2 size={12} /> Delete
+                          </button>
+                        </span>
+                      )}
+                      {role.is_system && <span style={{ fontSize: '11px', color: '#16a34a', fontWeight: 600 }}>System managed</span>}
                     </div>
                   </div>
                 ))}
@@ -294,7 +346,7 @@ export const RolesPermissions: FC = () => {
         </div>
       )}
 
-      {/* Create Custom Role Modal */}
+      {/* Create / Edit Custom Role Modal */}
       {isModalOpen && (
         <div
           style={{
@@ -323,13 +375,13 @@ export const RolesPermissions: FC = () => {
               boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)'
             }}
           >
-            <h2 style={{ margin: '0 0 6px', fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>Create Custom Role</h2>
+            <h2 style={{ margin: '0 0 6px', fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>{editingRole ? 'Edit Custom Role' : 'Create Custom Role'}</h2>
             <p style={{ margin: '0 0 20px', color: '#64748b', fontSize: '13px' }}>
               Select specific security permission scopes to craft an operational role for your staff.
             </p>
 
             <form onSubmit={handleCreateRole}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: editingRole ? '1fr' : '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>
                     Role Name *
@@ -353,7 +405,7 @@ export const RolesPermissions: FC = () => {
                   />
                 </div>
 
-                <div>
+                {!editingRole && <div>
                   <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>
                     Role Code (Uppercase Identifier)
                   </label>
@@ -373,7 +425,7 @@ export const RolesPermissions: FC = () => {
                       outline: 'none'
                     }}
                   />
-                </div>
+                </div>}
               </div>
 
               <div style={{ marginBottom: '16px' }}>
@@ -450,7 +502,7 @@ export const RolesPermissions: FC = () => {
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
+                  onClick={() => { setIsModalOpen(false); setEditingRole(null); }}
                   style={{
                     backgroundColor: 'transparent',
                     border: '1px solid #cbd5e1',
@@ -479,7 +531,7 @@ export const RolesPermissions: FC = () => {
                     opacity: submitting ? 0.7 : 1
                   }}
                 >
-                  {submitting ? 'Creating...' : 'Create Role'}
+                  {submitting ? (editingRole ? 'Saving...' : 'Creating...') : (editingRole ? 'Save Changes' : 'Create Role')}
                 </button>
               </div>
             </form>

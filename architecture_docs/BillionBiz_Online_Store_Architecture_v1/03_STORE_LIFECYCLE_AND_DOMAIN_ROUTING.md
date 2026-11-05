@@ -6,9 +6,11 @@ Any eligible merchant can register, create an independent store and publish a cu
 
 Recommended default URL:
 
-`{storeHandle}.stores.chandraprakash.codes`
+`{storeHandle}.chandraprakash.codes`
 
 Use the suffix already configured in the repository if it differs. Do not hardcode a second suffix or change the current routing setup blindly.
+
+Current platform rule: store hosts are single-level subdomains of `chandraprakash.codes`. Reserved labels include `www`, `admin`, `accounts`, `staff`, `pos`, `ops`, `api`, `help` and `support`; the same validator must run for availability, registration, store creation and domain provisioning.
 
 This should be one shared multi-tenant application and deployment. A separate deployment/project per merchant is unnecessary unless merchants later run arbitrary custom code or require isolated infrastructure.
 
@@ -40,7 +42,7 @@ Rules:
 
 ## 3. DNS and deployment setup
 
-Platform operations must configure a wildcard host such as `*.stores.chandraprakash.codes` to the shared storefront deployment using the hosting provider's supported wildcard-domain procedure. Verify wildcard certificate and routing before self-service registration is enabled.
+Platform operations must configure a wildcard host such as `*.chandraprakash.codes` to the shared storefront deployment using the hosting provider's supported wildcard-domain procedure. Verify wildcard certificate and routing before self-service registration is enabled.
 
 This is a **platform-level prerequisite**, not something each merchant fixes. If missing, show a platform-operator warning and do not report every newly registered subdomain as live.
 

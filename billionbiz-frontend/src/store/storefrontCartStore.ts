@@ -35,9 +35,16 @@ export const useStorefrontCartStore = create<StorefrontCartState>()(
 
       addItem: (product: any, variant?: any, quantity = 1) => {
         const lineId = variant?.id ? `${product.id}-${variant.id}` : product.id;
-        const price = variant?.price_minor ? variant.price_minor / 100 : product.price_minor ? product.price_minor / 100 : 999;
-        const compareAt = variant?.compare_at_minor ? variant.compare_at_minor / 100 : undefined;
-        const imageUrl = product.media?.[0]?.url || product.media_urls?.[0] || 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&fit=crop';
+        const rawPrice = variant?.price_minor ?? product.price_minor;
+        if (rawPrice === undefined || rawPrice === null || !Number.isFinite(Number(rawPrice))) {
+          return;
+        }
+        const price = Number(rawPrice) / 100;
+        const rawCompareAt = variant?.compare_at_minor ?? product.compare_at_minor;
+        const compareAt = rawCompareAt === undefined || rawCompareAt === null
+          ? undefined
+          : Number(rawCompareAt) / 100;
+        const imageUrl = product.media?.[0]?.url || product.media_urls?.[0] || undefined;
 
         set((state) => {
           const existing = state.items.find((item) => item.id === lineId);

@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  Palette, Paintbrush, Hash, CreditCard,
+  Palette, Paintbrush, Hash, CreditCard, Ruler,
   Loader2, FileText, Smartphone, ChevronsUp, Globe,
   PanelLeftClose, PanelLeftOpen, ChevronRight,
 } from 'lucide-react';
@@ -14,6 +14,7 @@ const THEME_CATEGORIES = [
   { id: 'colors' as const, label: 'Color Palette', icon: Paintbrush, desc: 'Brand, surface & accents' },
   { id: 'typography' as const, label: 'Typography', icon: Hash, desc: 'Fonts & typography scale' },
   { id: 'buttons' as const, label: 'Buttons & Forms', icon: CreditCard, desc: 'Shapes, inputs & CTA styling' },
+  { id: 'spacing' as const, label: 'Spacing & Layout', icon: Ruler, desc: 'Section rhythm, grids and containers' },
   { id: 'effects' as const, label: 'Effects & Motion', icon: Loader2, desc: 'Radius, shadows & animations' },
   { id: 'custom-css' as const, label: 'Custom CSS', icon: FileText, desc: 'Custom code styling' },
 ];
@@ -40,8 +41,8 @@ export const DesignPanel: React.FC = () => {
     <div className={styles.contextPanelInner}>
       <div className={styles.contextPanelHeader}>
         <div>
-          <h3 className={styles.contextPanelTitle}>Design &amp; Theme</h3>
-          <p className={styles.contextPanelDesc}>Theme tokens, interactions &amp; responsive UI</p>
+          <h3 className={styles.contextPanelTitle}>Design system</h3>
+          <p className={styles.contextPanelDesc}>One consistent visual language across every page</p>
         </div>
         <button
           onClick={() => setLeftSidebarCollapsed(!isLeftSidebarCollapsed)}
@@ -55,7 +56,7 @@ export const DesignPanel: React.FC = () => {
       <div className={styles.contextPanelScroll}>
         {/* Group 1: Theme Styling */}
         <div className={styles.navGroup}>
-          <div className={styles.navGroupTitle}>Theme Design System</div>
+          <div className={styles.navGroupTitle}>GLOBAL DESIGN TOKENS</div>
 
           {THEME_CATEGORIES.map((cat) => {
             const isSelected = isThemeCategoryActive(cat.id);
@@ -86,7 +87,7 @@ export const DesignPanel: React.FC = () => {
 
         {/* Group 2: Global Interactive Elements */}
         <div className={styles.navGroup}>
-          <div className={styles.navGroupTitle}>Global Elements</div>
+          <div className={styles.navGroupTitle}>INTERACTIONS</div>
 
           {/* Loader */}
           <div
@@ -129,7 +130,7 @@ export const DesignPanel: React.FC = () => {
 
         {/* Group 3: Mobile & Responsive */}
         <div className={styles.navGroup}>
-          <div className={styles.navGroupTitle}>Mobile &amp; Responsive</div>
+          <div className={styles.navGroupTitle}>RESPONSIVE EXPERIENCE</div>
 
           {/* Mobile Navigation */}
           <div

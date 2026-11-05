@@ -1,71 +1,57 @@
+
 import React from 'react';
 import {
-  Building2, Paintbrush, FileText, Link2, MessageCircle, Globe,
-  Search, Share2, ShieldCheck, Layers,
-  PanelLeftClose, PanelLeftOpen, ChevronRight,
+  Building2, Image, Globe, PanelLeftClose, PanelLeftOpen,
+  ChevronRight, Store, Share2
 } from 'lucide-react';
 import { useLandingEditorStore } from '../../../store/landingEditorStore';
 import type { BrandSection } from '../../../store/landingEditorStore';
 import styles from '../../../pages/editor/EditorLayout.module.css';
 
-interface NavItemDef {
+interface NavItem {
   id: BrandSection;
-  label: string;
+  title: string;
   description: string;
   icon: React.FC<{ size?: number; className?: string }>;
-  tag?: string;
 }
 
-interface NavGroupDef {
-  title: string;
-  items: NavItemDef[];
-}
-
-const BRAND_GROUPS: NavGroupDef[] = [
+const GROUPS: Array<{ title: string; items: NavItem[] }> = [
   {
-    title: 'Identity',
+    title: 'STORE IDENTITY',
     items: [
-      { id: 'store-profile', label: 'Store Profile', description: 'Name, tagline, description & contacts', icon: Building2 },
-      { id: 'logo-favicon', label: 'Logo & Favicon', description: 'Store logos, browser favicon & brand marks', icon: Paintbrush },
-      { id: 'business-details', label: 'Business Details', description: 'Legal name, address & operating hours', icon: FileText },
+      { id: 'store-profile', title: 'Brand profile', description: 'Public name, tagline and brand voice', icon: Store },
+      { id: 'business-details', title: 'Business identity', description: 'The legal store identity and account details', icon: Building2 },
+      { id: 'logo-favicon', title: 'Brand assets', description: 'Logo, favicon and image assets', icon: Image },
     ]
   },
   {
-    title: 'Online Presence',
+    title: 'CONNECTED CHANNELS',
     items: [
-      { id: 'social-profiles', label: 'Social Profiles', description: 'Instagram, Facebook, X, YouTube & LinkedIn', icon: Link2 },
-      { id: 'whatsapp', label: 'WhatsApp Widget', description: 'Floating chat button & greeting message', icon: MessageCircle },
-      { id: 'domain-urls', label: 'Domain & URLs', description: 'Custom domain & storefront links', icon: Globe },
-    ]
-  },
-  {
-    title: 'SEO & Discovery',
-    items: [
-      { id: 'global-seo', label: 'Global SEO', description: 'Meta title, description, keywords & canonical', icon: Search },
-      { id: 'social-sharing', label: 'Social Sharing (OG)', description: 'Open Graph preview & social cards', icon: Share2 },
-      { id: 'indexing', label: 'Indexing & Sitemap', description: 'Robots.txt, XML sitemap & search bots', icon: ShieldCheck },
-      { id: 'page-seo', label: 'Per-Page SEO', description: 'Page metadata & search engine overrides', icon: Layers },
+      { id: 'social-profiles', title: 'Social profiles', description: 'Connect public social destinations', icon: Share2 },
+      { id: 'domain-urls', title: 'Domains', description: 'Store subdomain and custom domains', icon: Globe },
     ]
   }
 ];
 
 export const BrandPanel: React.FC = () => {
   const {
-    brandSection, storeBrandSection, setBrandSection,
-    isLeftSidebarCollapsed, setLeftSidebarCollapsed,
+    brandSection,
+    setBrandSection,
     setActivePanel,
+    setRightSidebarOpen,
+    isLeftSidebarCollapsed,
+    setLeftSidebarCollapsed
   } = useLandingEditorStore();
-
-  const currentSection = brandSection || storeBrandSection || 'store-profile';
 
   return (
     <div className={styles.contextPanelInner}>
       <div className={styles.contextPanelHeader}>
         <div>
-          <h3 className={styles.contextPanelTitle}>Brand &amp; Identity</h3>
-          <p className={styles.contextPanelDesc}>Identity, online presence &amp; SEO discovery</p>
+          <h3 className={styles.contextPanelTitle}>Identity</h3>
+          <p className={styles.contextPanelDesc}>How customers recognize and reach your store</p>
         </div>
         <button
+          type="button"
           onClick={() => setLeftSidebarCollapsed(!isLeftSidebarCollapsed)}
           className={styles.collapseBtn}
           title={isLeftSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -75,35 +61,33 @@ export const BrandPanel: React.FC = () => {
       </div>
 
       <div className={styles.contextPanelScroll}>
-        {BRAND_GROUPS.map((grp, idx) => (
-          <div key={idx} className={styles.navGroup}>
-            <div className={styles.navGroupTitle}>{grp.title}</div>
-            {grp.items.map(item => {
-              const isSelected = 
-                currentSection === item.id ||
-                (item.id === 'store-profile' && currentSection === 'general') ||
-                (item.id === 'logo-favicon' && currentSection === 'branding') ||
-                (item.id === 'social-profiles' && currentSection === 'socials') ||
-                (item.id === 'global-seo' && currentSection === 'seo');
+        {GROUPS.map((group) => (
+          <div key={group.title} className={styles.navGroup}>
+            <div className={styles.navGroupTitle}>{group.title}</div>
+            {group.items.map((item) => {
               const Icon = item.icon;
+              const active = brandSection === item.id;
               return (
-                <div
+                <button
                   key={item.id}
-                  className={`${styles.navItem} ${isSelected ? styles.navItemActive : ''}`}
+                  type="button"
+                  className={`${styles.navItem} ${active ? styles.navItemActive : ''}`}
                   onClick={() => {
                     setBrandSection(item.id);
                     setActivePanel('brand');
+                    setRightSidebarOpen(true);
                   }}
+                  style={{ width: '100%', textAlign: 'left', background: 'transparent', border: 0 }}
                 >
-                  <div className={`${styles.navItemIcon} ${isSelected ? styles.navItemIconActive : ''}`}>
+                  <span className={`${styles.navItemIcon} ${active ? styles.navItemIconActive : ''}`}>
                     <Icon size={16} />
-                  </div>
-                  <div className={styles.navItemContent}>
-                    <span className={`${styles.navItemLabel} ${isSelected ? styles.navItemLabelActive : ''}`}>{item.label}</span>
+                  </span>
+                  <span className={styles.navItemContent}>
+                    <span className={`${styles.navItemLabel} ${active ? styles.navItemLabelActive : ''}`}>{item.title}</span>
                     <span className={styles.navItemPath}>{item.description}</span>
-                  </div>
+                  </span>
                   <ChevronRight size={14} className={styles.navItemChevron} />
-                </div>
+                </button>
               );
             })}
           </div>
@@ -112,3 +96,5 @@ export const BrandPanel: React.FC = () => {
     </div>
   );
 };
+
+export default BrandPanel;

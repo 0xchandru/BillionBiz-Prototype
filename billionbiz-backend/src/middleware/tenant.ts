@@ -2,117 +2,268 @@ import { Request, Response, NextFunction } from 'express';
 import { query } from '../db/pool.js';
 import { isReservedSubdomain, PLATFORM_MAIN_DOMAIN } from '../core/subdomains.js';
 
+type TenantResolution = {
+  storeId: string;
+  organizationId: string;
+  slug: string;
+};
+
+const normalizeHost = (value: unknown): string => {
+  if (typeof value !== 'string') return '';
+
+  // Host is the HTTP authority supplied by the connected peer. Do not accept
+  // X-Forwarded-Host here: it is only safe behind an explicitly trusted proxy.
+  const authority = value.split(',')[0].trim().toLowerCase();
+
+  // IPv6 authorities must be handled before hostname:port parsing. Stripping
+  // ":digits" from "::1" corrupts the address and can route local requests
+  // into public-domain resolution.
+  if (authority.startsWith('[')) {
+    const closingBracket = authority.indexOf(']');
+    if (closingBracket > 0) {
+      return authority.slice(1, closingBracket);
+    }
+  }
+
+  const colonCount = (authority.match(/:/g) || []).length;
+  if (colonCount === 1) {
+    const separator = authority.lastIndexOf(':');
+    const hostname = authority.slice(0, separator);
+    const port = authority.slice(separator + 1);
+    if (/^\d+$/.test(port)) return hostname;
+  }
+
+  // Bare IPv6 literals (including ::1) are preserved unchanged.
+  return authority;
+};
+
+const isLocalHost = (host: string): boolean =>
+  host === 'localhost' ||
+  host === '127.0.0.1' ||
+  host === '::1' ||
+  host.endsWith('.localhost');
+
+const isPlatformHost = (host: string): boolean => {
+  if (!host) return true;
+  if (host === PLATFORM_MAIN_DOMAIN || host === `www.${PLATFORM_MAIN_DOMAIN}`) return true;
+
+  const suffix = `.${PLATFORM_MAIN_DOMAIN}`;
+  if (!host.endsWith(suffix)) return false;
+  const subdomain = host.slice(0, -suffix.length);
+  return !subdomain.includes('.') && isReservedSubdomain(subdomain);
+};
+
 export async function resolveTenant(req: Request, res: Response, next: NextFunction) {
-  let orgId = (req.headers['x-organization-id'] as string) || req.auth?.organizationId;
-  let storeId = (req.headers['x-store-id'] as string) || req.auth?.storeId;
-  const locationId = req.headers['x-location-id'] as string | undefined;
+  try {
+    const auth = req.auth;
+    const isPlatformAdmin = auth?.isPlatformAdmin === true;
+    const host = normalizeHost(req.headers.host);
+    const headerOrgId = typeof req.headers['x-organization-id'] === 'string'
+      ? req.headers['x-organization-id'].trim()
+      : '';
+    const headerStoreId = typeof req.headers['x-store-id'] === 'string'
+      ? req.headers['x-store-id'].trim()
+      : '';
+    const headerSlug = typeof req.headers['x-store-slug'] === 'string'
+      ? req.headers['x-store-slug'].trim().toLowerCase()
+      : '';
+    const locationId = typeof req.headers['x-location-id'] === 'string'
+      ? req.headers['x-location-id'].trim()
+      : undefined;
 
-  // Resolve store from slug header, query parameter, or Host header (*.<PLATFORM_MAIN_DOMAIN>)
-  const host = (req.headers['x-forwarded-host'] as string) || req.headers.host || '';
-  const hostClean = host.toLowerCase().split(':')[0];
-  const hostParts = hostClean.split('.');
-  let hostSlug: string | undefined;
+    let hostTenant: TenantResolution | null = null;
+    const isPlatformDomain = host === PLATFORM_MAIN_DOMAIN || host.endsWith(`.${PLATFORM_MAIN_DOMAIN}`);
 
-  // Single-level store subdomains only: {slug}.<PLATFORM_MAIN_DOMAIN>
-  if (hostParts.length === 3 && hostClean.endsWith(PLATFORM_MAIN_DOMAIN)) {
-    const candidateSub = hostParts[0];
-    if (!isReservedSubdomain(candidateSub)) {
-      hostSlug = candidateSub;
-    }
-  } else if (hostClean && !hostClean.includes('localhost') && !hostClean.includes('127.0.0.1') && !hostClean.endsWith(PLATFORM_MAIN_DOMAIN)) {
-    // Custom domain resolution
-    const domainRes = await query(
-      `SELECT d.store_id, s.organization_id
-       FROM store_domains d
-       JOIN stores s ON s.id = d.store_id
-       WHERE LOWER(d.domain) = LOWER($1) AND d.is_verified = TRUE AND s.status != 'SUSPENDED'`,
-      [hostClean]
-    );
-    if (domainRes.rowCount && domainRes.rowCount > 0) {
-      storeId = domainRes.rows[0].store_id;
-      orgId = domainRes.rows[0].organization_id;
-    } else {
+    // Resolve merchant hosts exclusively through the persisted domain mapping.
+    // This supports both platform subdomains and custom domains, and prevents
+    // arbitrary Host headers from selecting a tenant by a guessed slug.
+    if (host && !isLocalHost(host) && !isPlatformHost(host)) {
+      const domainRes = await query(
+        `SELECT sd.store_id, sd.is_verified, sd.ssl_status,
+                s.organization_id, s.slug, s.status
+         FROM store_domains sd
+         JOIN stores s ON s.id = sd.store_id
+         WHERE LOWER(sd.domain) = LOWER($1)
+         LIMIT 1`,
+        [host]
+      );
+
+      if (domainRes.rowCount === 0) {
+        return res.status(404).json({
+          error: 'STORE_NOT_FOUND',
+          message: 'No store is mapped to this hostname'
+        });
+      }
+
+      const domain = domainRes.rows[0];
+      if (domain.status === 'SUSPENDED') {
+        return res.status(404).json({ error: 'STORE_NOT_FOUND', message: 'This store is not available' });
+      }
+      if (!domain.is_verified || String(domain.ssl_status).toUpperCase() !== 'ACTIVE') {
+        return res.status(404).json({
+          error: 'DOMAIN_NOT_READY',
+          message: 'This storefront domain has not completed verification and HTTPS activation'
+        });
+      }
+
+      hostTenant = {
+        storeId: domain.store_id,
+        organizationId: domain.organization_id,
+        slug: domain.slug
+      };
+    } else if (
+      host &&
+      isPlatformDomain &&
+      host !== PLATFORM_MAIN_DOMAIN &&
+      host !== `www.${PLATFORM_MAIN_DOMAIN}` &&
+      !isPlatformHost(host)
+    ) {
+      // A non-reserved single-level platform subdomain must have a domain row.
       return res.status(404).json({
         error: 'STORE_NOT_FOUND',
-        message: 'Store not found'
+        message: 'No active storefront is mapped to this subdomain'
       });
     }
-  }
 
-  const explicitSlug = (req.headers['x-store-slug'] as string) || (req.query.slug as string) || hostSlug;
+    let organizationId: string | undefined;
+    let storeId: string | undefined;
 
-  if (explicitSlug) {
-    const slugRes = await query(
-      `SELECT id, organization_id, status FROM stores WHERE LOWER(slug) = LOWER($1) AND status != 'SUSPENDED'`,
-      [explicitSlug]
-    );
-    if (slugRes.rowCount && slugRes.rowCount > 0) {
-      storeId = slugRes.rows[0].id;
-      orgId = slugRes.rows[0].organization_id;
-    } else {
-      // Host or slug was explicitly provided but does not match any active store => return 404, never fallback
-      return res.status(404).json({
-        error: 'STORE_NOT_FOUND',
-        message: 'Store not found'
+    if (hostTenant) {
+      // A merchant hostname is authoritative. A browser header must never
+      // override the tenant selected by that hostname.
+      if (headerOrgId && headerOrgId !== hostTenant.organizationId) {
+        return res.status(403).json({ error: 'TENANT_HEADER_MISMATCH', message: 'Organization header does not match this hostname' });
+      }
+      if (headerStoreId && headerStoreId !== hostTenant.storeId) {
+        return res.status(403).json({ error: 'TENANT_HEADER_MISMATCH', message: 'Store header does not match this hostname' });
+      }
+      if (headerSlug && headerSlug !== hostTenant.slug) {
+        return res.status(403).json({ error: 'TENANT_HEADER_MISMATCH', message: 'Store slug header does not match this hostname' });
+      }
+      if (auth && !isPlatformAdmin) {
+        if (auth.organizationId && auth.organizationId !== hostTenant.organizationId) {
+          return res.status(403).json({ error: 'CROSS_TENANT_ACCESS_DENIED', message: 'Authenticated organization does not match this storefront' });
+        }
+        if (auth.storeId && auth.storeId !== hostTenant.storeId) {
+          return res.status(403).json({ error: 'CROSS_TENANT_ACCESS_DENIED', message: 'Authenticated store does not match this storefront' });
+        }
+      }
+      organizationId = hostTenant.organizationId;
+      storeId = hostTenant.storeId;
+    } else if (auth) {
+      // Authenticated merchant tenant context comes from the signed JWT.
+      // X-Organization-ID / X-Store-ID are consistency checks, not authority.
+      organizationId = isPlatformAdmin
+        ? (headerOrgId || auth.organizationId)
+        : auth.organizationId;
+      storeId = isPlatformAdmin
+        ? (headerStoreId || auth.storeId)
+        : auth.storeId;
+
+      if (!isPlatformAdmin && headerOrgId && headerOrgId !== auth.organizationId) {
+        return res.status(403).json({ error: 'CROSS_TENANT_ACCESS_DENIED', message: 'Organization header cannot override the authenticated organization' });
+      }
+      if (!isPlatformAdmin && headerStoreId && headerStoreId !== auth.storeId) {
+        return res.status(403).json({ error: 'CROSS_TENANT_ACCESS_DENIED', message: 'Store header cannot override the authenticated store' });
+      }
+      if (!isPlatformAdmin && headerSlug) {
+        const slugRes = await query(
+          `SELECT id FROM stores WHERE id = $1 AND LOWER(slug) = LOWER($2)`,
+          [auth.storeId || '', headerSlug]
+        );
+        if (slugRes.rowCount === 0) {
+          return res.status(403).json({ error: 'CROSS_TENANT_ACCESS_DENIED', message: 'Store slug header does not match the authenticated store' });
+        }
+      }
+    }
+
+    // No "first store" fallback. Missing context must fail closed instead of
+    // silently attaching a request to somebody else's tenant.
+    if (!organizationId || !storeId) {
+      return res.status(400).json({
+        error: 'TENANT_CONTEXT_REQUIRED',
+        message: 'A store hostname or authenticated store context is required'
       });
     }
-  }
 
-  // Fallback to default store and org only if neither store nor slug was explicitly requested
-  if (!orgId || !storeId) {
-    const defaultStoreRes = await query(
-      `SELECT s.id as store_id, s.organization_id
-       FROM stores s
-       WHERE s.status != 'SUSPENDED'
-       ORDER BY s.created_at ASC
-       LIMIT 1;`
+    const storeCheck = await query(
+      `SELECT id, organization_id, status
+       FROM stores
+       WHERE id = $1 AND organization_id = $2`,
+      [storeId, organizationId]
     );
-    if (defaultStoreRes.rowCount && defaultStoreRes.rowCount > 0) {
-      if (!orgId) orgId = defaultStoreRes.rows[0].organization_id;
-      if (!storeId) storeId = defaultStoreRes.rows[0].store_id;
-    }
-  }
 
-  if (!orgId || !storeId) {
-    return res.status(400).json({
-      error: 'TENANT_CONTEXT_REQUIRED',
-      message: 'Active organization and store identifiers are required'
-    });
-  }
-
-  // Verify store belongs to organization (prevent cross-tenant hijacking)
-  const storeCheck = await query(
-    `SELECT id, organization_id, status FROM stores WHERE id = $1 AND organization_id = $2`,
-    [storeId, orgId]
-  );
-
-  if (storeCheck.rowCount === 0) {
-    return res.status(403).json({
-      error: 'CROSS_TENANT_ACCESS_DENIED',
-      message: 'Specified store does not belong to the authorized organization context'
-    });
-  }
-
-  // If authenticated user is present, verify membership
-  if (req.auth && !req.auth.isPlatformAdmin) {
-    const memCheck = await query(
-      `SELECT role FROM organization_memberships WHERE organization_id = $1 AND user_id = $2`,
-      [orgId, req.auth.userId]
-    );
-    if (memCheck.rowCount === 0) {
+    if (storeCheck.rowCount === 0) {
       return res.status(403).json({
-        error: 'MEMBERSHIP_ACCESS_DENIED',
-        message: 'User does not hold membership in the specified organization'
+        error: 'CROSS_TENANT_ACCESS_DENIED',
+        message: 'Specified store does not belong to the authorized organization context'
       });
     }
+
+    if (storeCheck.rows[0].status === 'SUSPENDED') {
+      return res.status(403).json({ error: 'STORE_SUSPENDED', message: 'This store is suspended' });
+    }
+
+    if (auth && !isPlatformAdmin) {
+      const membership = await query(
+        `SELECT role
+         FROM organization_memberships
+         WHERE organization_id = $1 AND user_id = $2
+         LIMIT 1`,
+        [organizationId, auth.userId]
+      );
+      if (membership.rowCount === 0) {
+        return res.status(403).json({
+          error: 'MEMBERSHIP_ACCESS_DENIED',
+          message: 'User does not hold membership in the specified organization'
+        });
+      }
+
+      // Resolve the membership role and staff permissions only after the
+      // authoritative tenant/store has been selected. JWT store claims may be
+      // absent or stale, so they are never the final RBAC scope.
+      auth.organizationId = organizationId;
+      auth.storeId = storeId;
+      auth.role = membership.rows[0].role || 'MEMBER';
+
+      if (auth.role !== 'OWNER') {
+        const permissions = await query(
+          `SELECT DISTINCT p.code
+           FROM staff_profiles sp
+           JOIN role_assignments ra ON ra.staff_profile_id = sp.id
+           JOIN roles r ON r.id = ra.role_id
+           JOIN role_permissions rp ON rp.role_id = ra.role_id
+           JOIN permissions p ON p.id = rp.permission_id
+           WHERE sp.user_id = $1
+             AND sp.organization_id = $2
+             AND sp.store_id = $3
+             AND sp.is_active = TRUE
+             AND (ra.store_id = $3 OR ra.store_id IS NULL)
+             AND (r.organization_id IS NULL OR r.organization_id = $2)`,
+          [auth.userId, organizationId, storeId]
+        );
+        auth.permissions = permissions.rows.map((row) => row.code);
+      } else {
+        auth.permissions = [];
+      }
+    }
+
+    if (locationId) {
+      const locationCheck = await query(
+        `SELECT 1 FROM store_locations WHERE id = $1 AND store_id = $2 AND is_active = TRUE`,
+        [locationId, storeId]
+      );
+      if (locationCheck.rowCount === 0) {
+        return res.status(403).json({
+          error: 'LOCATION_ACCESS_DENIED',
+          message: 'The requested location does not belong to this store or is inactive'
+        });
+      }
+    }
+
+    req.tenant = { organizationId, storeId, locationId };
+    return next();
+  } catch (error) {
+    return next(error);
   }
-
-  req.tenant = {
-    organizationId: orgId,
-    storeId: storeId,
-    locationId: locationId
-  };
-
-  next();
 }
-

@@ -1,5 +1,5 @@
 import type { GlobalThemeData } from './themePresets';
-import { getDefaultTheme, themePresets } from './themePresets';
+import { DEFAULT_THEME_SPACING, getDefaultTheme, getThemeSpacing, themePresets } from './themePresets';
 import type { ThemeCategoryType } from '../../../store/landingEditorStore';
 
 /**
@@ -39,6 +39,7 @@ export function isThemeModified(theme: GlobalThemeData): boolean {
     !isDeepEqual(theme.typography, preset.typography) ||
     !isDeepEqual(theme.buttons, preset.buttons) ||
     !isDeepEqual(theme.effects, preset.effects) ||
+    !isSpacingDefault(theme) ||
     !isDeepEqual(theme.ui, preset.ui) ||
     Boolean(theme.customCss && theme.customCss.trim().length > 0)
   );
@@ -84,6 +85,16 @@ export function isButtonsDefault(theme: GlobalThemeData): boolean {
 /**
  * Check if effects match the default for current preset
  */
+export function isSpacingDefault(theme: GlobalThemeData): boolean {
+  if (!theme) return true;
+  const preset = themePresets[theme.presetName] || getDefaultTheme();
+  const expected = { ...DEFAULT_THEME_SPACING, ...(preset.spacing || {}) };
+  return isDeepEqual(getThemeSpacing(theme), expected);
+}
+
+/**
+ * Check if effects match the default for current preset
+ */
 export function isEffectsDefault(theme: GlobalThemeData): boolean {
   if (!theme) return true;
   const preset = themePresets[theme.presetName] || getDefaultTheme();
@@ -116,6 +127,8 @@ export function isCategoryDefault(category: ThemeCategoryType, theme: GlobalThem
       return isButtonsDefault(theme);
     case 'effects':
       return isEffectsDefault(theme);
+    case 'spacing':
+      return isSpacingDefault(theme);
     case 'custom-css':
       return isCustomCssDefault(theme);
     default:

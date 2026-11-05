@@ -26,7 +26,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(8080),
   HOST: z.string().default('0.0.0.0'),
   DATABASE_URL: z.string().default('postgres://postgres:postgres@localhost:5432/billionbiz'),
-  JWT_SECRET: z.string().default('billionbiz-secret-jwt-key-2026-production-ready'),
+  JWT_SECRET: z.string().min(32).default('billionbiz-local-development-only-secret-not-for-production'),
   ROOT_DOMAIN: z.string().default('chandraprakash.codes'),
   MAIN_WEBSITE_URL: z.string().default('https://www.chandraprakash.codes'),
   ADMIN_URL: z.string().default('https://admin.chandraprakash.codes'),
@@ -36,6 +36,7 @@ const envSchema = z.object({
   OPS_URL: z.string().default('https://ops.chandraprakash.codes'),
   API_URL: z.string().default('https://api.chandraprakash.codes'),
   STORE_DOMAIN_PATTERN: z.string().default('*.chandraprakash.codes'),
+  STORE_DOMAIN_CNAME_TARGET: z.string().optional(),
   ALLOWED_ORIGINS: z.string().default(
     'https://www.chandraprakash.codes,https://admin.chandraprakash.codes,https://accounts.chandraprakash.codes,https://staff.chandraprakash.codes,https://pos.chandraprakash.codes,https://ops.chandraprakash.codes'
   ),
@@ -71,6 +72,18 @@ try {
   } else {
     console.error(err);
   }
+  process.exit(1);
+}
+
+if (
+  parsedEnv.NODE_ENV === 'production' &&
+  (
+    !process.env.JWT_SECRET ||
+    process.env.JWT_SECRET.length < 32 ||
+    process.env.JWT_SECRET === 'billionbiz-local-development-only-secret-not-for-production'
+  )
+) {
+  console.error('[CRITICAL ENV CONFIGURATION ERROR] Production requires a unique JWT_SECRET of at least 32 characters.');
   process.exit(1);
 }
 
