@@ -9,6 +9,7 @@ import { sendEmail } from '../../core/notificationWorker.js';
 import { provisionDefaultStorefront } from '../storefront/storefrontProvisioner.js';
 import { env } from '../../core/env.js';
 import { encodeBase32, encryptMfaSecret, decryptMfaSecret, findValidTotpCounter, hashRecoveryCode } from '../../core/totp.js';
+import { createMfaLoginChallenge, verifyMfaLoginChallenge } from '../../core/mfaService.js';
 import {
   validateSubdomainSlug,
   generateCandidateSlug,
@@ -17,6 +18,16 @@ import {
 } from '../../core/subdomains.js';
 
 export const identityRouter = Router();
+
+async function respondWithMfaChallenge(res: Response, user: { id: string; email?: string | null; full_name?: string | null }) {
+  const challenge = await createMfaLoginChallenge(user.id);
+  return res.status(200).json({
+    mfaRequired: true,
+    challengeToken: challenge.challengeToken,
+    expiresInSeconds: challenge.expiresInSeconds,
+    user: { id: user.id, email: user.email || null, fullName: user.full_name || null }
+  });
+}
 
 const OTP_MAX_ATTEMPTS = 5;
 
@@ -149,6 +160,9 @@ identityRouter.post('/login', async (req: Request, res: Response) => {
   const isValid = await bcrypt.compare(password, user.password_hash);
   if (!isValid) {
     return res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Invalid email or password' });
+  }
+  if (user.mfa_enabled) {
+    return respondWithMfaChallenge(res, user);
   }
 
   // Fetch organizations and stores
