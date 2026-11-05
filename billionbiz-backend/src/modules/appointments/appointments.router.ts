@@ -699,7 +699,7 @@ appointmentsRouter.get(
          AND r.store_id = $2 AND r.is_active = TRUE
          AND sp.store_id = $2 AND sp.is_active = TRUE
          AND s.day_of_week = $3 AND s.is_active = TRUE
-       ORDER BY r.name ASC, s.start_time ASC`,
+       ORDER BY r.name ASC, s.start_time::text ASC`,
       [offeringId, storeId, parsedDate.dayOfWeek]
     );
 
