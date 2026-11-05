@@ -58,8 +58,13 @@ ordersRouter.get(
       sql += ` AND o.created_at <= $${params.length}`;
     }
     if (search) {
-      params.push(`%${search}%`);
-      sql += ' AND (o.order_number ILIKE 
+      params.push('%' + String(search) + '%');
+      const searchParameter = String.fromCharCode(36) + params.length;
+      sql += ' AND (o.order_number ILIKE ' + searchParameter +
+        ' OR c.first_name ILIKE ' + searchParameter +
+        ' OR c.last_name ILIKE ' + searchParameter +
+        ' OR c.email ILIKE ' + searchParameter +
+        ' OR c.phone ILIKE ' + searchParameter + ')';
     }
 
     const whereClause = sql.slice(sql.indexOf('WHERE o.store_id = $1'));
