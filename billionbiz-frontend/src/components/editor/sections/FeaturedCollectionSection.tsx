@@ -418,7 +418,6 @@ const FeaturedCollectionSection: React.FC<{ props: Record<string, any> }> = ({ p
                               minHeight: 40,
                               marginTop: 'auto',
                               padding: '9px 12px',
-                              border: 0,
                               borderRadius: 'var(--theme-btn-radius, 9px)',
                               background: actionStyle === 'secondary'
                                 ? 'var(--theme-btn-secondary-bg, #f1f5f9)'
