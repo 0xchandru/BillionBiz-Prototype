@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { query } from '../db/pool.js';
 import { realtimeGateway } from './realtimeGateway.js';
+import type { RealtimeEvent } from './realtimeGateway.js';
 
 export interface AuditParams {
   organizationId?: string;
@@ -49,31 +50,33 @@ export async function publishOutboxEvent(
   aggregateId: string,
   payload: Record<string, any>,
   correlationId?: string
-) {
+): Promise<RealtimeEvent> {
   const id = `evt-${uuidv4()}`;
+  const timestamp = new Date().toISOString();
   await client.query(
     `INSERT INTO outbox_events (id, organization_id, store_id, event_type, aggregate_type, aggregate_id, payload, correlation_id, published)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE)`,
     [id, organizationId, storeId, eventType, aggregateType, aggregateId, JSON.stringify(payload), correlationId || uuidv4()]
   );
 
-  try {
-    realtimeGateway.broadcast({
-      id,
-      type: eventType,
-      channel: aggregateType.toLowerCase(),
-      organizationId,
-      storeId,
-      aggregateType,
-      aggregateId,
-      payload,
-      timestamp: new Date().toISOString()
-    });
-  } catch (err) {
-    // Non-blocking realtime broadcast
-  }
+  // Do not broadcast inside the transaction: clients must never observe an
+  // event for a business record that may still roll back. The caller broadcasts
+  // the returned event only after its transaction commits.
+  return {
+    id,
+    type: eventType,
+    channel: aggregateType.toLowerCase(),
+    organizationId,
+    storeId,
+    aggregateType,
+    aggregateId,
+    payload,
+    timestamp
+  };
+}
 
-  return id;
+export function broadcastCommittedOutboxEvent(event: RealtimeEvent): void {
+  realtimeGateway.broadcast(event);
 }
 
 export async function enqueueOutbox(params: {
