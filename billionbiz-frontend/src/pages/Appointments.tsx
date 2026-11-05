@@ -412,10 +412,10 @@ export const AppointmentsPage: React.FC = () => {
                     }}
                   >
                     <span style={{ fontSize: '11px', textTransform: 'uppercase', fontWeight: 600, color: isSelected ? '#0d9488' : '#64748b' }}>
-                      {d.toLocaleDateString('en-US', { weekday: 'short' })}
+                      {d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' })}
                     </span>
                     <span style={{ fontSize: '18px', fontWeight: 700, margin: '2px 0' }}>
-                      {d.getDate()}
+                      {d.getUTCDate()}
                     </span>
                     {isToday && (
                       <span style={{ width: '4px', height: '4px', borderRadius: '50%', background: '#0d9488' }} />
@@ -713,21 +713,29 @@ export const AppointmentsPage: React.FC = () => {
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
                   Available Slots for {selectedDate} (IST)
                 </label>
-                {availableSlots.length === 0 ? (
+                {loadingSlots ? (
                   <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '8px', fontSize: '13px', color: '#64748b', textAlign: 'center' }}>
-                    No slots available for this service on {selectedDate}.
+                    Checking staff schedules and available resources…
+                  </div>
+                ) : slotLoadError ? (
+                  <div role="alert" style={{ padding: '12px', background: '#fef2f2', borderRadius: '8px', fontSize: '13px', color: '#b91c1c' }}>
+                    {slotLoadError}
+                  </div>
+                ) : availableSlots.length === 0 ? (
+                  <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '8px', fontSize: '13px', color: '#64748b', textAlign: 'center' }}>
+                    No available staff slots for this service on {selectedDate}.
                   </div>
                 ) : (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: '8px', maxHeight: '160px', overflowY: 'auto' }}>
                     {availableSlots.map((s, idx) => {
-                      const isSelected = selectedSlot?.startTime === s.startTime;
+                      const isSelected = selectedSlot?.startTime === s.startTime && selectedSlot?.resourceId === s.resourceId;
                       return (
                         <button
-                          key={idx}
+                          key={s.resourceId + ':' + s.startTime}
                           type="button"
                           onClick={() => setSelectedSlot(s)}
                           style={{
-                            padding: '6px 8px',
+                            padding: '8px 10px',
                             borderRadius: '6px',
                             border: isSelected ? '2px solid #0d9488' : '1px solid #e2e8f0',
                             background: isSelected ? '#f0fdfa' : '#fff',
@@ -737,7 +745,8 @@ export const AppointmentsPage: React.FC = () => {
                             cursor: 'pointer'
                           }}
                         >
-                          {new Date(s.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          <span style={{ display: 'block' }}>{new Date(s.startTime).toLocaleTimeString('en-IN', { timeZone: storeTimezone, hour: '2-digit', minute: '2-digit' })}</span>
+                          <span style={{ display: 'block', fontSize: 10, marginTop: 2, opacity: 0.75 }}>{s.resourceName}</span>
                         </button>
                       );
                     })}
