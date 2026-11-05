@@ -51,6 +51,7 @@
 /* Dashboard / Direct Link Button */
 .itemBtn {
   display: flex;
+  min-height: 44px;
   align-items: center;
   justify-content: space-between;
   width: 100%;
@@ -87,6 +88,7 @@
 
 .dropdownBtn {
   display: flex;
+  min-height: 44px;
   align-items: center;
   justify-content: space-between;
   width: 100%;
@@ -151,7 +153,9 @@
 }
 
 .subItem {
-  display: block;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
   padding: 6px 12px;
   font-size: 13px;
   font-weight: 500;
