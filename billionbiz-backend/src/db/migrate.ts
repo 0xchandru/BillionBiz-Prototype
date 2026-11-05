@@ -782,6 +782,7 @@ export async function runMigrations() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_otps_identifier_type ON verification_otps(identifier, type, is_used);
+    ALTER TABLE verification_otps ALTER COLUMN code TYPE VARCHAR(128);
 
     -- V3 Production Platform Enhancements: Warehouses, Invoices, Returns & Universal Scheduling
     ALTER TABLE inventory_locations ADD COLUMN IF NOT EXISTS address_line1 TEXT;
