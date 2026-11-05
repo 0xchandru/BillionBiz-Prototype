@@ -736,6 +736,17 @@ export async function runMigrations() {
         mfa_locked_until = NULL
     WHERE mfa_secret IS NOT NULL AND mfa_secret NOT LIKE 'v1.%';
 
+    CREATE TABLE IF NOT EXISTS mfa_login_challenges (
+      id VARCHAR(64) PRIMARY KEY,
+      user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      challenge_hash VARCHAR(64) NOT NULL UNIQUE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      consumed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_mfa_login_challenges_user_expiry
+      ON mfa_login_challenges(user_id, expires_at);
+
     CREATE TABLE IF NOT EXISTS email_verification_tokens (
       id VARCHAR(64) PRIMARY KEY,
       user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
