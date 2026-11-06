@@ -587,6 +587,33 @@ storefrontRouter.delete(
 );
 
 // GET /api/v1/storefront/by-slug/:slug (Public Storefront by store slug, REQ-STOREFRONT-001)
+// Resolve a verified custom hostname to its tenant slug so the shared frontend
+// runtime can mount the same StorefrontPage used by wildcard subdomains.
+storefrontRouter.get('/resolve-host', async (req: Request, res: Response) => {
+  const origin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
+  let hostname = '';
+  try {
+    const parsed = new URL(origin);
+    if (parsed.protocol === 'https:' && !parsed.port && !parsed.username && !parsed.password) hostname = parsed.hostname.toLowerCase();
+  } catch { /* Invalid or absent origins are not mapped to a custom storefront. */ }
+  if (!hostname) return res.status(400).json({ error: 'STOREFRONT_HOST_REQUIRED', message: 'A valid HTTPS storefront origin is required.' });
+
+  const result = await query<{ slug: string }>(
+    `SELECT s.slug
+     FROM store_domains sd
+     JOIN stores s ON s.id = sd.store_id
+     WHERE LOWER(sd.domain) = LOWER($1)
+       AND sd.is_verified = TRUE
+       AND UPPER(sd.ssl_status) = 'ACTIVE'
+       AND UPPER(s.status) = 'ACTIVE'
+     LIMIT 1`,
+    [hostname]
+  );
+  if (!result.rowCount) return res.status(404).json({ error: 'STOREFRONT_HOST_NOT_FOUND', message: 'No live storefront is mapped to this hostname.' });
+  res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+  return res.json({ slug: result.rows[0].slug });
+});
+
 storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'private, no-store');
   const slug = String(req.params.slug || '').trim().toLowerCase();

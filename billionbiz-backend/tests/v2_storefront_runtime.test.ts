@@ -235,6 +235,33 @@ describe('V2 Native Storefront Runtime & Multi-Tenant Isolation Suite (REQ-STORE
     expect(Array.isArray(res.body.products)).toBe(true);
   });
 
+  it('TC-STORE-003C: verified custom domains resolve to their store through the shared runtime', async () => {
+    const customDomain = `store-${storeAId.slice(0, 8)}-${Date.now()}.example.com`;
+    await query(
+      `INSERT INTO store_domains (id, store_id, domain, is_primary, is_verified, ssl_status)
+       VALUES ($1, $2, $3, FALSE, TRUE, 'ACTIVE')`,
+      [`dom-test-${uuidv4()}`, storeAId, customDomain]
+    );
+
+    const origin = `https://${customDomain}`;
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    let preflight: Awaited<ReturnType<typeof request>>;
+    try {
+      preflight = await request('OPTIONS', '/api/v1/storefront/resolve-host', { headers: {
+        origin,
+        'access-control-request-method': 'GET'
+      } });
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
+    expect(preflight.headers['access-control-allow-origin']).toBe(origin);
+
+    const resolved = await request('GET', '/api/v1/storefront/resolve-host', { headers: { origin } });
+    expect(resolved.status).toBe(200);
+    expect(resolved.body.slug).toBe(storeASlug);
+  });
+
   it('TC-STORE-003B: Store UI configuration stays draft until published, then reaches the live storefront response', async () => {
     const draftNonce = `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const uiConfig = {

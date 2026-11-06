@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { parseSubdomain, getPortalUrl, isLocalOrPreview } from '../../utils/subdomain';
 import { hasVerifiedAuthSession } from '../../utils/authSession';
 import { useAuthStore } from '../../store/authStore';
+import { getApiBaseUrl } from '../../api/client';
 
 // Layout & Route Guards
 import AppLayout from '../layout/AppLayout';
@@ -76,6 +77,30 @@ const OpsPortalPage = lazy(() => import('../../pages/OpsPortalPage'));
 const POSPage = lazy(() => import('../../pages/POS'));
 const StorefrontPage = lazy(() => import('../../pages/StorefrontPage'));
 const CustomerPortalPage = lazy(() => import('../../pages/CustomerPortalPage').then((module) => ({ default: module.CustomerPortalPage })));
+
+const CustomDomainStorefront: React.FC = () => {
+  const [slug, setSlug] = React.useState<string | null>(null);
+  const [resolved, setResolved] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch(`${getApiBaseUrl()}/storefront/resolve-host`, { headers: { Accept: 'application/json' } })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('No active storefront is mapped to this domain.');
+        return response.json();
+      })
+      .then((result: { slug?: string }) => {
+        if (!cancelled && result.slug) setSlug(result.slug);
+      })
+      .catch(() => undefined)
+      .finally(() => { if (!cancelled) setResolved(true); });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (slug) return <StorefrontPage slug={slug} />;
+  if (!resolved) return <RouteLoadingFallback />;
+  return <NotFoundPage message="This domain is not connected to an active BillionBiz storefront." />;
+};
 
 export const RouteLoadingFallback: React.FC = () => (
   <div className="route-loading-shell" role="status" aria-live="polite" aria-label="Loading page">
@@ -441,14 +466,7 @@ export const HostDispatcher: React.FC = () => {
 
   // 9. UNKNOWN / UNCONFIGURED HOSTNAME
   if (subInfo.type === 'unknown') {
-    return (
-      <Routes>
-        <Route
-          path="*"
-          element={<NotFoundPage message="The requested domain is not configured on BillionBiz." />}
-        />
-      </Routes>
-    );
+    return <CustomDomainStorefront />;
   }
 
   // 7. NATIVE MERCHANT STOREFRONT RUNTIME

@@ -57,6 +57,37 @@ const ALLOWED_EXACT_ORIGINS = new Set(rawOrigins.map((o) => o.trim().toLowerCase
 const DEV_ORIGIN_REGEX = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 const ESCAPED_ROOT = env.ROOT_DOMAIN.replace(/\./g, '\\.');
 const STORE_SUBDOMAIN_REGEX = new RegExp(`^https://([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)\\.${ESCAPED_ROOT}$`, 'i');
+const verifiedOriginCache = new Map<string, { allowed: boolean; expiresAt: number }>();
+
+async function isAllowedStorefrontOrigin(origin: string | undefined): Promise<boolean> {
+  if (!origin || isAllowedOrigin(origin)) return Boolean(origin);
+  let parsed: URL;
+  try { parsed = new URL(origin); } catch { return false; }
+  if (parsed.protocol !== 'https:' || parsed.port || parsed.username || parsed.password) return false;
+  const hostname = parsed.hostname.toLowerCase();
+  if (!hostname || hostname === env.ROOT_DOMAIN || hostname.endsWith(`.${env.ROOT_DOMAIN.toLowerCase()}`)) return false;
+
+  const cached = verifiedOriginCache.get(origin.toLowerCase());
+  if (cached && cached.expiresAt > Date.now()) return cached.allowed;
+  try {
+    const result = await pool.query(
+      `SELECT 1
+       FROM store_domains sd
+       JOIN stores s ON s.id = sd.store_id
+       WHERE LOWER(sd.domain) = LOWER($1)
+         AND sd.is_verified = TRUE
+         AND UPPER(sd.ssl_status) = 'ACTIVE'
+         AND UPPER(s.status) = 'ACTIVE'
+       LIMIT 1`,
+      [hostname]
+    );
+    const allowed = (result.rowCount || 0) > 0;
+    verifiedOriginCache.set(origin.toLowerCase(), { allowed, expiresAt: Date.now() + (allowed ? 60_000 : 5_000) });
+    return allowed;
+  } catch {
+    return false;
+  }
+}
 
 export function isAllowedOrigin(origin: string | undefined): boolean {
   if (!origin) return false;
@@ -86,6 +117,7 @@ export function isAllowedOrigin(origin: string | undefined): boolean {
 
 // Strict CORS & Preflight Middleware with Explicit Origin Allowlist
 app.use((req, res, next) => {
+  void (async () => {
   const origin = req.headers.origin;
 
   if (origin) {
@@ -98,7 +130,7 @@ app.use((req, res, next) => {
     }
   }
 
-  if (origin && isAllowedOrigin(origin)) {
+  if (origin && await isAllowedStorefrontOrigin(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
@@ -119,16 +151,13 @@ app.use((req, res, next) => {
     return res.status(204).end();
   }
   next();
+  })().catch(next);
 });
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || isAllowedOrigin(origin)) {
-        callback(null, true);
-      } else {
-        callback(null, false);
-      }
+      void isAllowedStorefrontOrigin(origin).then((allowed) => callback(null, allowed)).catch(callback);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
