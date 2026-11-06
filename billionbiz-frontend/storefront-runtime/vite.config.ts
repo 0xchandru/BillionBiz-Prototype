@@ -11,7 +11,7 @@ const port = Number(process.env.STOREFRONT_PORT || process.env.PORT || 3000);
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, runtimeRoot, '');
   const apiOrigin = env.BACKEND_API_URL || process.env.BACKEND_API_URL || 'http://localhost:8080';
-  const browserApiBaseUrl = env.VITE_API_BASE_URL || process.env.VITE_API_BASE_URL || `${apiOrigin.replace(/\/+$/, '')}/api/v1`;
+  const browserApiBaseUrl = env.VITE_API_BASE_URL || process.env.VITE_API_BASE_URL || '/api/v1';
 
   return {
     root: runtimeRoot,

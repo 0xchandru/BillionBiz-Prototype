@@ -1,4 +1,5 @@
 import http from 'node:http';
+import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +10,7 @@ const distRoot = path.join(runtimeRoot, 'dist');
 const indexPath = path.join(distRoot, 'index.html');
 const port = Number(process.env.STOREFRONT_PORT || process.env.PORT || 3000);
 const host = process.env.STOREFRONT_HOST || '0.0.0.0';
+const backendOrigin = process.env.BACKEND_API_URL || 'http://localhost:8080';
 const contentTypes = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -35,6 +37,42 @@ const server = http.createServer((req, res) => {
   if (requestPath === '/_runtime/health') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify({ status: 'ok', service: 'billionbiz-storefront-runtime' }));
+    return;
+  }
+
+  // Keep API requests on the public storefront origin. This is essential for
+  // browsers: localhost:8080 would mean the visitor's computer, not our server.
+  if (requestPath === '/api' || requestPath.startsWith('/api/')) {
+    let upstreamUrl;
+    try {
+      upstreamUrl = new URL(req.url || '/', backendOrigin);
+      if (!['http:', 'https:'].includes(upstreamUrl.protocol)) throw new Error('Unsupported backend protocol');
+    } catch {
+      res.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ error: 'STOREFRONT_API_UNAVAILABLE', message: 'The backend API origin is not configured.' }));
+      return;
+    }
+
+    const transport = upstreamUrl.protocol === 'https:' ? https : http;
+    const upstream = transport.request(upstreamUrl, {
+      method: req.method,
+      headers: { ...req.headers, host: hostname },
+    }, (upstreamResponse) => {
+      const headers = { ...upstreamResponse.headers };
+      for (const header of ['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'transfer-encoding', 'upgrade']) {
+        delete headers[header];
+      }
+      res.writeHead(upstreamResponse.statusCode || 502, headers);
+      upstreamResponse.pipe(res);
+    });
+    upstream.on('error', (error) => {
+      if (res.headersSent) return res.destroy(error);
+      res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ error: 'STOREFRONT_API_UNAVAILABLE', message: 'The storefront backend is temporarily unavailable.' }));
+    });
+    req.on('aborted', () => upstream.destroy());
+    res.on('close', () => { if (!res.writableEnded) upstream.destroy(); });
+    req.pipe(upstream);
     return;
   }
 

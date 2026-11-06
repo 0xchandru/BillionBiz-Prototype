@@ -77,7 +77,7 @@ npm run dev:storefront
 npm run dev:all
 ```
 
-The storefront runtime listens on `STOREFRONT_PORT` (default `3000`), and reads `VITE_API_BASE_URL` (default `http://localhost:8080/api/v1`) and `VITE_ROOT_DOMAIN`. Build a production static bundle with `npm run build:storefront`, then serve it with `npm run start:storefront`. The static production server also defaults to port 3000 and binds to `0.0.0.0`, which makes it reachable by the existing Cloudflare Tunnel origin.
+The storefront runtime listens on `STOREFRONT_PORT` (default `3000`). Browser API requests use the same storefront origin at `/api/v1`; the runtime server proxies those requests to `BACKEND_API_URL` (default `http://localhost:8080`). This keeps visitors' browsers from trying to call their own `localhost`. `VITE_ROOT_DOMAIN` controls tenant hostname matching. Build a production static bundle with `npm run build:storefront`, then serve it with `npm run start:storefront`. The static production server also defaults to port 3000 and binds to `0.0.0.0`, which makes it reachable by the existing Cloudflare Tunnel origin.
 
 Local preview can use `http://localhost:3000/store/<store-slug>` or `http://<store-slug>.localhost:3000`. For realistic public-host testing, route `*.chandraprakash.codes` to the same runtime and use a valid active store slug. The editor may continue running at `localhost:5173`; the public storefront no longer depends on the editor dev server.
 
