@@ -82,9 +82,11 @@ export const OnlineStoreOverview: React.FC = () => {
     loadData();
   }, [storeSlug]);
 
-  const localPreviewUrl = getStoreUrl(storeSlug);
+  const liveStoreUrl = getStoreUrl(storeSlug);
   const liveReady = provisioning?.status === 'LIVE' && provisioning?.domainStatus === 'ACTIVE' && provisioning?.httpsStatus === 'ACTIVE';
-  const storefrontUrl = liveReady ? localPreviewUrl : provisioning?.previewUrl || localPreviewUrl;
+  const localHost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  const localSharedPreviewUrl = localHost ? `/store/${encodeURIComponent(storeSlug)}` : null;
+  const storefrontUrl = liveReady ? liveStoreUrl : provisioning?.previewUrl || localSharedPreviewUrl;
   const retryProvisioning = async () => {
     setRetrying(true);
     try { await apiClient('/storefront/provisioning/retry', { method: 'POST', body: JSON.stringify({}) }); await loadData(); }
@@ -114,16 +116,16 @@ export const OnlineStoreOverview: React.FC = () => {
             <RefreshCw size={15} className={retrying ? 'animate-spin' : ''} />
             <span>{retrying ? 'Checking…' : 'Retry domain check'}</span>
           </button>}
-          <a
+          {storefrontUrl ? <a
             href={storefrontUrl}
             target="_blank"
             rel="noopener noreferrer"
             className={styles.btnOutline}
           >
             <Globe size={16} />
-            <span>{liveReady ? 'View Live Store' : 'Open Local Preview'}</span>
+            <span>{liveReady ? 'View Live Store' : 'Open Store Preview'}</span>
             <ExternalLink size={14} style={{ color: '#94a3b8' }} />
-          </a>
+          </a> : <button type="button" disabled className={styles.btnOutline} title="Configure the shared storefront preview runtime URL to open a preview here."><Globe size={16} /><span>Preview runtime unavailable</span></button>}
           <button
             onClick={() => navigate('/editor/pages')}
             className={styles.btnPrimary}

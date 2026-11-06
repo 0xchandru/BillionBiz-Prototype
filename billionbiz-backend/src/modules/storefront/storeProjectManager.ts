@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,9 +10,10 @@ interface StoreRow {
   name: string;
 }
 
-interface RunningProject {
-  process: ChildProcess;
-  port: number;
+interface BuiltProject {
+  projectDir: string;
+  artifactDir: string;
+  builtAt: number;
 }
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -23,7 +24,7 @@ const frontendRoot = process.env.BILLIONBIZ_FRONTEND_ROOT
 const projectsRoot = process.env.BILLIONBIZ_STORE_PROJECTS_DIR
   ? path.resolve(process.env.BILLIONBIZ_STORE_PROJECTS_DIR)
   : path.resolve(moduleDir, '../../../store-projects');
-const runningProjects = new Map<string, RunningProject>();
+const builtProjects = new Map<string, BuiltProject>();
 const syncIntervalMs = Number(process.env.BILLIONBIZ_STORE_PROJECT_SYNC_MS || 10_000);
 let syncTimer: NodeJS.Timeout | undefined;
 let syncInProgress = false;
@@ -32,8 +33,8 @@ export function isStoreProjectManagerEnabled(): boolean {
   const mode = (process.env.BILLIONBIZ_STORE_PROJECT_MODE || '').trim().toLowerCase();
   if (mode === 'disabled' || process.env.NODE_ENV === 'test') return false;
   if (mode === 'local') return true;
-  // npm run dev does not set NODE_ENV in many environments. Enable previews
-  // for non-production runs by default while keeping production opt-in explicit.
+  // Build isolated project artifacts during local development. Production can
+  // opt in to the same one-shot build workflow; live hosts use the shared app.
   return process.env.NODE_ENV !== 'production' || process.env.BILLIONBIZ_ENABLE_LOCAL_STORE_PROJECTS === 'true';
 }
 
@@ -93,54 +94,38 @@ async function writeProjectFiles(store: StoreRow, port: number): Promise<string>
   return projectDir;
 }
 
-async function startProject(store: StoreRow, projectDir: string, port: number): Promise<void> {
+async function buildProject(store: StoreRow, projectDir: string): Promise<string> {
   const viteEntrypoint = path.join(frontendRoot, 'node_modules', 'vite', 'bin', 'vite.js');
-  const child = spawn(process.execPath, [viteEntrypoint, '--config', path.join(projectDir, 'vite.config.ts')], {
+  const child = spawn(process.execPath, [viteEntrypoint, 'build', '--config', path.join(projectDir, 'vite.config.ts')], {
     cwd: projectDir,
     env: {
       ...process.env,
       BILLIONBIZ_FRONTEND_ROOT: frontendRoot,
-      PORT: String(port),
       VITE_STORE_SLUG: store.slug,
       VITE_API_BASE_URL: process.env.VITE_API_BASE_URL || `http://localhost:${process.env.PORT || 8080}/api/v1`,
     },
-    stdio: 'inherit',
+    stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
-
-  child.on('error', (error) => console.error(`[Store Project ${store.slug}] Could not start: ${error.message}`));
-  child.on('exit', (code, signal) => {
-    const active = runningProjects.get(store.id);
-    if (active?.process === child) runningProjects.delete(store.id);
-    if (code !== 0 && code !== null) {
-      console.warn(`[Store Project ${store.slug}] Vite exited with code ${code}${signal ? ` (${signal})` : ''}.`);
-    }
+  let output = '';
+  child.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+  child.stderr?.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error(`Storefront build timed out for ${store.slug}.`));
+    }, 120_000);
+    child.once('error', (error) => { clearTimeout(timeout); reject(error); });
+    child.once('exit', (code) => {
+      clearTimeout(timeout);
+      if (code === 0) resolve();
+      else reject(new Error(`Storefront build failed for ${store.slug} (exit ${code}). ${output.slice(-1200)}`));
+    });
   });
-
-  runningProjects.set(store.id, { process: child, port });
-  console.log(`[Store Project ${store.slug}] Starting React storefront at http://${store.slug}.localhost:${port}`);
-
-  // A spawned process is not a ready preview. Wait until Vite serves the generated
-  // app, and fail provisioning if it exits or never begins listening.
-  const deadline = Date.now() + 30_000;
-  let lastError = 'The storefront preview did not start listening.';
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null || child.killed) {
-      runningProjects.delete(store.id);
-      throw new Error(`The storefront preview exited before becoming ready (code ${child.exitCode ?? 'unknown'}).`);
-    }
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1500) });
-      if (response.ok) return;
-      lastError = `The storefront preview returned HTTP ${response.status}.`;
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  child.kill();
-  runningProjects.delete(store.id);
-  throw new Error(`The storefront preview did not become ready: ${lastError}`);
+  const artifactDir = path.join(projectDir, 'dist');
+  const indexStat = await fs.stat(path.join(artifactDir, 'index.html')).catch(() => null);
+  if (!indexStat?.isFile()) throw new Error(`Storefront build for ${store.slug} produced no index.html.`);
+  return artifactDir;
 }
 
 export async function syncStoreProjects(): Promise<void> {
@@ -152,20 +137,16 @@ export async function syncStoreProjects(): Promise<void> {
     );
     const activeIds = new Set(result.rows.map((store) => store.id));
 
-    for (const [storeId, running] of runningProjects) {
-      if (!activeIds.has(storeId)) {
-        running.process.kill();
-        runningProjects.delete(storeId);
-      }
-    }
+    for (const storeId of builtProjects.keys()) if (!activeIds.has(storeId)) builtProjects.delete(storeId);
 
     await fs.mkdir(projectsRoot, { recursive: true });
     for (const store of result.rows) {
-      if (runningProjects.has(store.id)) continue;
+      if (builtProjects.has(store.id)) continue;
       const port = getStoreProjectPort(store.slug);
       try {
         const projectDir = await writeProjectFiles(store, port);
-        await startProject(store, projectDir, port);
+        const artifactDir = await buildProject(store, projectDir);
+        builtProjects.set(store.id, { projectDir, artifactDir, builtAt: Date.now() });
         await pool.query(
           `INSERT INTO storefront_provisioning (store_id, plan_code, status, project_name, local_project_path, attempts)
            VALUES ($1, 'FREE_TRIAL', 'LOCAL_READY', $2, $3, 1)
@@ -174,6 +155,7 @@ export async function syncStoreProjects(): Promise<void> {
              attempts = storefront_provisioning.attempts + 1, last_error = NULL, updated_at = NOW()`,
           [store.id, safeProjectName(store.slug), projectDir]
         );
+        console.log(`[Store Project ${store.slug}] Built isolated React artifact at ${artifactDir}; shared runtime serves active releases.`);
       } catch (error) {
         await pool.query(
           `INSERT INTO storefront_provisioning (store_id, plan_code, status, project_name, last_error, attempts)
@@ -202,6 +184,7 @@ export function startStoreProjectManager(): void {
 export function stopStoreProjectManager(): void {
   if (syncTimer) clearInterval(syncTimer);
   syncTimer = undefined;
-  for (const { process: child } of runningProjects.values()) child.kill();
-  runningProjects.clear();
+  // Merchant artifacts are built in short-lived subprocesses only. No per-store
+  // Node server remains running; all public storefronts use the shared runtime.
+  builtProjects.clear();
 }

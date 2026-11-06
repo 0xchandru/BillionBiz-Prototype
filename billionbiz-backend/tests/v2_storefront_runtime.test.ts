@@ -235,14 +235,16 @@ describe('V2 Native Storefront Runtime & Multi-Tenant Isolation Suite (REQ-STORE
     expect(Array.isArray(res.body.products)).toBe(true);
   });
 
-  it('TC-STORE-003B: Store UI configuration saves per tenant and reaches the live storefront response', async () => {
+  it('TC-STORE-003B: Store UI configuration stays draft until published, then reaches the live storefront response', async () => {
+    const draftNonce = `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const uiConfig = {
       showBottomNav: true,
       bottomNavStyle: 'pill',
       bottomNavLinks: [{ id: 'home', text: 'Home', link: '/', icon: 'Home' }],
       floatingActions: [{ id: 'top', type: 'back-to-top', label: 'Back to top' }],
       decorationsEnabled: false,
-      decorationTrigger: 'purchase'
+      decorationTrigger: 'purchase',
+      testDraftNonce: draftNonce
     };
     const saved = await request('PATCH', '/api/v1/storefront/settings', { token: storeAToken, body: { uiConfig } });
     expect(saved.status).toBe(200);
@@ -250,6 +252,15 @@ describe('V2 Native Storefront Runtime & Multi-Tenant Isolation Suite (REQ-STORE
 
     const editorSettings = await request('GET', '/api/v1/storefront/settings', { token: storeAToken });
     expect(editorSettings.body.settings.uiConfig).toEqual(uiConfig);
+    const beforePublish = await request('GET', `/api/v1/storefront/by-slug/${storeASlug}`);
+    expect(beforePublish.body.settings.uiConfig).not.toEqual(uiConfig);
+
+    const published = await request('POST', '/api/v1/storefront/publish', {
+      token: storeAToken,
+      body: { notes: 'Publish storefront UI settings' }
+    });
+    expect(published.status).toBe(201);
+
     const liveStore = await request('GET', `/api/v1/storefront/by-slug/${storeASlug}`);
     expect(liveStore.body.settings.uiConfig).toEqual(uiConfig);
 

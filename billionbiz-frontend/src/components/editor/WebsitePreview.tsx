@@ -166,9 +166,9 @@ export const WebsitePreview: React.FC<WebsitePreviewProps> = ({
     return (
       <div className="store-preview-compare-grid" style={{ height: '100%', minHeight: 0, display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, overflow: 'hidden', padding: 12, boxSizing: 'border-box' }}>
         {(['desktop', 'tablet', 'mobile'] as const).map((device) => (
-          <div key={device} style={{ minWidth: 0, minHeight: 0, height: '100%', overflow: 'hidden', border: '1px solid #dbe3ec', borderRadius: 12, background: '#eef2f7' }}>
+          <div key={device} style={{ minWidth: 0, minHeight: 0, height: '100%', overflow: 'hidden', display: 'grid', gridTemplateRows: '30px minmax(0, 1fr)', border: '1px solid #dbe3ec', borderRadius: 12, background: '#eef2f7' }}>
             <div style={{ height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#475569', borderBottom: '1px solid #dbe3ec', background: '#fff' }}>{device === 'desktop' ? 'Desktop · 1280px' : device === 'tablet' ? 'Tablet · 768px' : 'Mobile · 375px'}</div>
-            <WebsitePreview overrideDevice={device} useEditorChrome={useEditorChrome} />
+            <div style={{ minHeight: 0, overflow: 'hidden' }}><WebsitePreview overrideDevice={device} useEditorChrome={useEditorChrome} /></div>
           </div>
         ))}
       </div>
@@ -182,7 +182,8 @@ export const WebsitePreview: React.FC<WebsitePreviewProps> = ({
         boxShadow: '0 12px 36px -4px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0,0,0,0.06)',
         overflowX: 'hidden',
         overflowY: 'auto',
-        height: 'calc(100vh - 190px)',
+        height: '100%',
+        minHeight: '100%',
         overscrollBehavior: 'contain',
       }
     : activeDevice === 'tablet'
@@ -192,7 +193,8 @@ export const WebsitePreview: React.FC<WebsitePreviewProps> = ({
           boxShadow: '0 12px 36px -4px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0,0,0,0.06)',
           overflowX: 'hidden',
           overflowY: 'auto',
-          height: 'calc(100vh - 190px)',
+          height: '100%',
+          minHeight: '100%',
           overscrollBehavior: 'contain',
         }
       : {
@@ -201,7 +203,8 @@ export const WebsitePreview: React.FC<WebsitePreviewProps> = ({
           boxShadow: '0 2px 12px -2px rgba(0, 0, 0, 0.06)',
           overflowX: 'hidden',
           overflowY: 'auto',
-          height: 'calc(100vh - 190px)',
+          height: '100%',
+          minHeight: '100%',
           overscrollBehavior: 'contain',
         };
 

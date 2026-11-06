@@ -98,7 +98,9 @@ export const StorefrontPreviewViewport: React.FC<StorefrontPreviewViewportProps>
           ...frameDimensions,
           minHeight,
           flexShrink: 0,
-          transform: scale < 1 ? `scale(${scale})` : undefined,
+          // Keep fixed-position storefront controls (e.g. mobile bottom nav)
+          // inside the device frame even when the logical device fits at 1:1.
+          transform: `scale(${scale}) translateZ(0)`,
           transformOrigin: 'top center',
           transition: 'transform 160ms ease, width 160ms ease',
           boxSizing: 'border-box',

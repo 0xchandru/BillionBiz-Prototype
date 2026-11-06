@@ -1244,6 +1244,8 @@
 /* ---------------- Center Canvas ---------------- */
 .canvasArea {
   flex: 1;
+  height: 100%;
+  min-height: 0;
   background-color: #f8fafc;
   display: flex;
   justify-content: flex-start;

@@ -10,10 +10,10 @@ import { handleIdempotency } from '../../middleware/idempotency.js';
 import { recordAudit, enqueueOutbox, publishOutboxEvent, broadcastCommittedOutboxEvent } from '../../core/auditAndOutbox.js';
 import { realtimeGateway } from '../../core/realtimeGateway.js';
 import { provisionDefaultStorefront } from './storefrontProvisioner.js';
-import { getStoreProjectPort, isStoreProjectManagerEnabled, syncStoreProjects } from './storeProjectManager.js';
+import { isStoreProjectManagerEnabled, syncStoreProjects } from './storeProjectManager.js';
 import { PLATFORM_MAIN_DOMAIN } from '../../core/subdomains.js';
 import { env } from '../../core/env.js';
-import { resolveCname } from 'node:dns/promises';
+import { resolve4, resolve6, resolveCname } from 'node:dns/promises';
 import { validatePageSectionDocument } from './sectionDocumentValidation.js';
 
 export const storefrontRouter = Router();
@@ -648,6 +648,10 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
     }
   }
 
+  // Public store pages are keyed by their unique slug and immutable release.
+  // Permit short shared-cache reuse; password-protected stores remain private.
+  res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=15, stale-while-revalidate=30');
+
   // 1. Latest immutable published release snapshot
   const releaseRes = await query(
     `SELECT r.id, r.release_number, r.snapshot, r.content_hash, r.published_by, r.notes, r.created_at
@@ -803,9 +807,9 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
       // Maintenance mode is an immediate operational control, not a draft design token.
       maintenanceMode: Boolean(settingsRow.maintenance_mode),
       seoDefaults: publishedSettings.seoDefaults || {},
-      // UI behavior is operational storefront configuration: reflect saved
-      // edits immediately on the live site without requiring a new release.
-      uiConfig: settingsRow.ui_config || publishedSettings.uiConfig || {}
+      // Public rendering is pinned to the active immutable release. Draft UI
+      // changes stay in the editor until a new release is activated.
+      uiConfig: publishedSettings.uiConfig || {}
     }
   });
 });
@@ -1843,22 +1847,29 @@ storefrontRouter.get('/provisioning/status', requireAuth, resolveTenant, async (
   let httpsStatus = 'PENDING';
   let dnsError = '';
   const expected = env.STORE_DOMAIN_CNAME_TARGET?.trim().toLowerCase().replace(/\.$/, '');
-  if (state.domain && expected) {
+  if (state.domain) {
+    let cnames: string[] = [];
     try {
-      const cnames = await resolveCname(state.domain);
-      dnsStatus = cnames.some((value) => value.trim().toLowerCase().replace(/\.$/, '') === expected) ? 'ACTIVE' : 'MISMATCH';
-      if (dnsStatus !== 'ACTIVE') dnsError = 'DNS does not point at the configured storefront runtime.';
-    } catch {
-      dnsStatus = 'PENDING';
-      dnsError = 'Store domain does not resolve to a CNAME yet.';
+      cnames = await resolveCname(state.domain);
+    } catch { /* Proxied Cloudflare wildcard records resolve to A/AAAA, not CNAME. */ }
+    const normalizedCnames = cnames.map((value) => value.trim().toLowerCase().replace(/\.$/, ''));
+    if (normalizedCnames.length) {
+      dnsStatus = !expected || normalizedCnames.includes(expected) ? 'ACTIVE' : 'MISMATCH';
+      if (dnsStatus !== 'ACTIVE') dnsError = 'DNS CNAME does not match the configured storefront runtime.';
+    } else {
+      const addresses = await Promise.allSettled([resolve4(state.domain), resolve6(state.domain)]);
+      const hasAddress = addresses.some((result) => result.status === 'fulfilled' && result.value.length > 0);
+      if (hasAddress) dnsStatus = 'ACTIVE';
+      else dnsError = 'Store domain does not resolve through the configured wildcard DNS record yet.';
     }
     if (dnsStatus === 'ACTIVE') {
       try {
         const response = await fetch(`https://${state.domain}/`, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(5000) });
         httpsStatus = response.status >= 200 && response.status < 400 ? 'ACTIVE' : 'PENDING';
-      } catch { httpsStatus = 'PENDING'; }
+        if (httpsStatus !== 'ACTIVE') dnsError = `Storefront runtime returned HTTP ${response.status} for this hostname.`;
+      } catch { httpsStatus = 'PENDING'; dnsError = 'DNS resolves, but HTTPS is not ready on this storefront hostname.'; }
     }
-  } else if (!expected) dnsError = 'Set STORE_DOMAIN_CNAME_TARGET to enable DNS verification.';
+  } else dnsError = 'No primary store hostname is configured.';
   if (state.domain_id && dnsStatus === 'ACTIVE' && httpsStatus === 'ACTIVE') {
     await query(`UPDATE store_domains SET is_verified = TRUE, ssl_status = 'ACTIVE' WHERE id = $1`, [state.domain_id]);
     await query(`UPDATE storefront_provisioning SET status = 'LIVE', domain_status = 'ACTIVE', https_status = 'ACTIVE', last_error = NULL, updated_at = NOW() WHERE store_id = $1`, [storeId]);
@@ -1879,7 +1890,11 @@ storefrontRouter.get('/provisioning/status', requireAuth, resolveTenant, async (
     projectName: state.project_name || `billionbiz-store-${req.tenant!.storeId}`,
     localProjectPath: state.local_project_path || null,
     deploymentUrl: state.deployment_url || null,
-    previewUrl: `http://${state.slug || 'store'}.localhost:${getStoreProjectPort(state.slug || 'store')}`,
+    previewUrl: (() => {
+      const configuredBase = process.env.BILLIONBIZ_STORE_PREVIEW_BASE_URL?.trim();
+      const previewBase = configuredBase || (env.NODE_ENV === 'production' ? '' : 'http://localhost:5173');
+      return previewBase ? `${previewBase.replace(/\/+$/, '')}/store/${encodeURIComponent(state.slug || 'store')}` : null;
+    })(),
     domain: state.domain,
     domainStatus: dnsStatus,
     httpsStatus,
@@ -1974,45 +1989,47 @@ storefrontRouter.post(
       return res.status(404).json({ error: 'DOMAIN_NOT_FOUND', message: 'Domain not found' });
     }
 
-    // Never mark DNS or SSL as ready without a real check. The hosting
-    // provider's CNAME destination must be configured by the platform operator.
+    // Verify the shared wildcard route without requiring a DNS row per store.
+    // Cloudflare-proxied records return A/AAAA answers, while DNS-only records
+    // expose their CNAME. Either is acceptable after the hostname resolves.
     const expectedCname = env.STORE_DOMAIN_CNAME_TARGET?.trim().toLowerCase().replace(/\.$/, '');
-    if (!expectedCname) {
-      return res.status(503).json({
-        error: 'DOMAIN_VERIFICATION_NOT_CONFIGURED',
-        message: 'Custom-domain verification is not configured on this deployment. No verification or SSL status was changed.'
-      });
-    }
-
-    let cnameRecords: string[];
+    let cnameRecords: string[] = [];
     try {
       cnameRecords = await resolveCname(domRes.rows[0].domain);
-    } catch {
+    } catch { /* proxied wildcard mode */ }
+    const normalizedRecords = cnameRecords.map((record) => record.trim().toLowerCase().replace(/\.$/, ''));
+    const cnameMatches = normalizedRecords.length > 0 && (!expectedCname || normalizedRecords.includes(expectedCname));
+    const addresses = normalizedRecords.length ? [] : await Promise.allSettled([
+      resolve4(domRes.rows[0].domain), resolve6(domRes.rows[0].domain)
+    ]);
+    const hasAddress = addresses.some((result) => result.status === 'fulfilled' && result.value.length > 0);
+    if (!cnameMatches && !hasAddress) {
       return res.status(409).json({
         error: 'DOMAIN_DNS_NOT_READY',
-        message: 'No CNAME record could be resolved for this hostname yet. Check the DNS record and retry.'
-      });
-    }
-
-    const normalizedRecords = cnameRecords.map((record) => record.trim().toLowerCase().replace(/\.$/, ''));
-    if (!normalizedRecords.includes(expectedCname)) {
-      return res.status(409).json({
-        error: 'DOMAIN_DNS_MISMATCH',
-        message: 'The hostname does not point to the configured BillionBiz storefront target.',
-        expectedTarget: expectedCname,
+        message: 'The hostname does not resolve through the shared wildcard DNS record yet.',
+        expectedTarget: expectedCname || null,
         receivedTargets: normalizedRecords
       });
     }
 
+    let httpsReady = false;
+    try {
+      const response = await fetch(`https://${domRes.rows[0].domain}/`, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(5000) });
+      httpsReady = response.status >= 200 && response.status < 400;
+    } catch { httpsReady = false; }
+    if (!httpsReady) {
+      return res.status(409).json({ error: 'DOMAIN_HTTPS_NOT_READY', message: 'DNS resolves, but HTTPS is not active for this hostname yet.' });
+    }
+
     await query(
-      `UPDATE store_domains SET is_verified = TRUE, ssl_status = CASE WHEN ssl_status = 'ACTIVE' THEN ssl_status ELSE 'PENDING' END WHERE id = $1 AND store_id = $2`,
+      `UPDATE store_domains SET is_verified = TRUE, ssl_status = 'ACTIVE' WHERE id = $1 AND store_id = $2`,
       [domainId, storeId]
     );
 
     res.status(202).json({
-      message: 'DNS ownership verified. HTTPS activation is still pending and this domain cannot be made primary yet.',
+      message: 'Wildcard DNS and HTTPS are verified for this hostname.',
       isVerified: true,
-      sslStatus: 'PENDING'
+      sslStatus: 'ACTIVE'
     });
   }
 );
