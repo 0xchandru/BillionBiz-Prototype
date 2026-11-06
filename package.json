@@ -1,0 +1,12 @@
+{
+  "name": "billionbiz-platform-dev",
+  "private": true,
+  "scripts": {
+    "dev:backend": "npm run dev --prefix billionbiz-backend",
+    "dev:editor": "npm run dev --prefix billionbiz-frontend -- --host 0.0.0.0",
+    "dev:storefront": "npm run dev --prefix billionbiz-frontend/storefront-runtime -- --host 0.0.0.0",
+    "dev:all": "node scripts/dev-platform.mjs",
+    "build:storefront": "npm run build --prefix billionbiz-frontend/storefront-runtime",
+    "start:storefront": "npm run start --prefix billionbiz-frontend/storefront-runtime"
+  }
+}

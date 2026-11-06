@@ -620,7 +620,7 @@ storefrontRouter.get('/by-slug/:slug', async (req: Request, res: Response) => {
   const storeRes = await query(
     `SELECT id, organization_id, name, slug, currency, timezone, status
      FROM stores
-     WHERE LOWER(slug) = LOWER($1) AND status != 'SUSPENDED'`,
+     WHERE LOWER(slug) = LOWER($1) AND status = 'ACTIVE'`,
     [slug]
   );
 
@@ -1919,7 +1919,7 @@ storefrontRouter.get('/provisioning/status', requireAuth, resolveTenant, async (
     deploymentUrl: state.deployment_url || null,
     previewUrl: (() => {
       const configuredBase = process.env.BILLIONBIZ_STORE_PREVIEW_BASE_URL?.trim();
-      const previewBase = configuredBase || (env.NODE_ENV === 'production' ? '' : 'http://localhost:5173');
+      const previewBase = configuredBase || (env.NODE_ENV === 'production' ? '' : `http://localhost:${process.env.STOREFRONT_PORT || 3000}`);
       return previewBase ? `${previewBase.replace(/\/+$/, '')}/store/${encodeURIComponent(state.slug || 'store')}` : null;
     })(),
     domain: state.domain,

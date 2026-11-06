@@ -8,6 +8,10 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "test": "vitest run",
+    "dev:storefront": "npm run dev --prefix storefront-runtime -- --host 0.0.0.0",
+    "build:storefront": "npm run build --prefix storefront-runtime",
+    "start:storefront": "npm run start --prefix storefront-runtime",
+    "test:storefront": "npm run test --prefix storefront-runtime",
     "preview": "vite preview"
   },
   "dependencies": {

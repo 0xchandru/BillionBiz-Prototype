@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "types": ["vite/client"],
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "allowArbitraryExtensions": true,
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "strict": true
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "../src/pages/StorefrontPage.tsx",
+    "../src/components/storefront/**/*.tsx",
+    "../src/api/client.ts",
+    "../src/utils/reservedSubdomains.ts"
+  ]
+}
