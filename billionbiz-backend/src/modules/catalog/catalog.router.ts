@@ -152,6 +152,21 @@ catalogRouter.post(
       return res.status(400).json({ error: 'VALIDATION_FAILED', message: 'Product name is required' });
     }
 
+    if (!Array.isArray(options) || !Array.isArray(variants) || variants.length > 250) {
+      return res.status(400).json({ error: 'INVALID_VARIANT_MATRIX', message: 'Provide valid product options with no more than 250 purchasable variants.' });
+    }
+    const optionNames = options.map((option: any) => String(option?.name || '').trim().toLowerCase());
+    if (new Set(optionNames).size !== optionNames.length || options.some((option: any, index: number) =>
+      !optionNames[index] || !Array.isArray(option?.values) || !option.values.length ||
+      option.values.some((value: unknown) => typeof value !== 'string' || !value.trim())
+    ) || (options.length > 0 && variants.length === 0)) {
+      return res.status(400).json({ error: 'INVALID_PRODUCT_OPTIONS', message: 'Variant option names must be unique and each option must contain a list of values.' });
+    }
+    const suppliedSkus = variants.map((variant: any) => String(variant?.sku || '').trim().toLowerCase()).filter(Boolean);
+    if (new Set(suppliedSkus).size !== suppliedSkus.length) {
+      return res.status(400).json({ error: 'DUPLICATE_VARIANT_SKU', message: 'Every variant must have a unique SKU.' });
+    }
+
     const normalizedCategoryIds = [...new Set([...(Array.isArray(categoryIds) ? categoryIds : []), ...(categoryId ? [categoryId] : [])])];
     const unitCheck = await query(`SELECT is_enabled FROM selling_units WHERE store_id = $1 AND code = $2`, [storeId, String(sellingUnit || 'pcs')]);
     if (!unitCheck.rowCount || !unitCheck.rows[0].is_enabled) return res.status(400).json({ error: 'SELLING_UNIT_UNAVAILABLE', message: 'Choose an enabled selling unit in catalogue settings.' });

@@ -10,6 +10,7 @@ import { api } from '../api/services';
 import { TableSkeleton } from '../components/common/SkeletonLoader';
 import { EmptyState } from '../components/common/EmptyState';
 import { ErrorState } from '../components/common/ErrorState';
+import { buildVariantMatrix, buildVariantSku } from '../utils/catalog/variantMatrix';
 
 const formatCurrency = (minor: number) => {
   return '₹' + (minor / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -42,8 +43,7 @@ export const ProductsPage: React.FC = () => {
   const [quantityStep, setQuantityStep] = useState('1');
   const [comparePrice, setComparePrice] = useState('');
   const [imageUrls, setImageUrls] = useState('');
-  const [variantOptionName, setVariantOptionName] = useState('Size');
-  const [variantOptionValues, setVariantOptionValues] = useState('');
+  const [variantOptions, setVariantOptions] = useState([{ name: 'Size', values: '' }]);
   const [visibility, setVisibility] = useState('ACTIVE');
   const [uploadingImages, setUploadingImages] = useState(false);
   const [variantDrafts, setVariantDrafts] = useState<VariantDraft[]>([]);
@@ -70,7 +70,7 @@ export const ProductsPage: React.FC = () => {
   const resetProductForm = () => {
     setEditingProduct(null); setName(''); setPrice(''); setInitialStock('0'); setDescription(''); setSku(''); setCategoryIds([]);
     setSellingUnit('pcs'); setMinimumQuantity('1'); setQuantityStep('1'); setComparePrice('');
-    setImageUrls(''); setVariantOptionName('Size'); setVariantOptionValues(''); setVisibility('ACTIVE'); setVariantDrafts([]);
+    setImageUrls(''); setVariantOptions([{ name: 'Size', values: '' }]); setVisibility('ACTIVE'); setVariantDrafts([]);
   };
 
   const openProduct = (product?: any) => {
@@ -89,11 +89,10 @@ export const ProductsPage: React.FC = () => {
         price: String(((variant.price_minor ?? 0) / 100).toFixed(2)),
         compareAt: variant.compare_at_minor == null ? '' : String((variant.compare_at_minor / 100).toFixed(2)),
       })));
-      const firstOption = Object.keys(firstVariant?.option_values || {})[0];
-      if (firstOption) {
-        setVariantOptionName(firstOption);
-        setVariantOptionValues([...new Set(productVariants.map((variant: any) => variant.option_values?.[firstOption]).filter(Boolean))].join(', '));
-      }
+      const productOptions = Array.isArray(product.options) ? product.options : [];
+      setVariantOptions(productOptions.length
+        ? productOptions.map((option: any) => ({ name: String(option.name || ''), values: Array.isArray(option.values) ? option.values.join(', ') : '' }))
+        : [{ name: Object.keys(firstVariant?.option_values || {})[0] || 'Size', values: [...new Set(productVariants.map((variant: any) => variant.option_values?.[Object.keys(firstVariant?.option_values || {})[0]]).filter(Boolean))].join(', ') }]);
       setCategoryIds((product.categories || []).map((category: any) => category.id));
       setSellingUnit(product.selling_unit || 'pcs'); setMinimumQuantity(String(product.minimum_quantity || 1));
       setQuantityStep(String(product.quantity_step || 1)); setComparePrice(firstVariant?.compare_at_minor == null ? '' : String((firstVariant.compare_at_minor / 100).toFixed(2)));
@@ -114,16 +113,20 @@ export const ProductsPage: React.FC = () => {
       const priceMinor = Math.round(Number(price) * 100);
       if (!Number.isFinite(priceMinor) || priceMinor < 0) throw new Error('Enter a valid product price.');
       if (!Number.isFinite(Number(minimumQuantity)) || Number(minimumQuantity) <= 0 || !Number.isFinite(Number(quantityStep)) || Number(quantityStep) <= 0) throw new Error('Minimum quantity and quantity step must be greater than zero.');
-      const optionValues = [...new Set(variantOptionValues.split(',').map((value) => value.trim()).filter(Boolean))];
+      const normalizedOptions = variantOptions
+        .map((option) => ({ name: option.name.trim(), values: [...new Set(option.values.split(',').map((value) => value.trim()).filter(Boolean))] }))
+        .filter((option) => option.name && option.values.length > 0);
+      const variantMatrix = buildVariantMatrix(variantOptions);
+      const hasVariants = normalizedOptions.length > 0;
       const createdVariants = editingProduct ? variantDrafts.map((variant) => ({
         id: variant.id,
         sku: variant.sku || undefined,
         optionValues: variant.optionValues,
         priceMinor: Math.round(Number(variant.price) * 100),
         compareAtMinor: variant.compareAt ? Math.round(Number(variant.compareAt) * 100) : null,
-      })) : optionValues.length ? optionValues.map((value, index) => ({
-        sku: optionValues.length === 1 ? (sku || undefined) : `${(sku || name).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12)}-${value.toUpperCase().replace(/[^A-Z0-9]/g, '')}`,
-        optionValues: { [variantOptionName || 'Option']: value }, priceMinor, compareAtMinor: comparePrice ? Math.round(Number(comparePrice) * 100) : null,
+      })) : hasVariants ? variantMatrix.map((combination, index) => ({
+        sku: buildVariantSku(sku || name, combination, variantMatrix.length),
+        optionValues: combination.optionValues, priceMinor, compareAtMinor: comparePrice ? Math.round(Number(comparePrice) * 100) : null,
         initialStock: Number(initialStock) || 0, barcode: undefined, position: index
       })) : [{ sku: sku || undefined, priceMinor, compareAtMinor: comparePrice ? Math.round(Number(comparePrice) * 100) : null, initialStock: Number(initialStock) || 0 }];
       const payload = {
@@ -132,7 +135,7 @@ export const ProductsPage: React.FC = () => {
         priceMinor,
         initialStock: Number(initialStock) || 0, categoryIds, sellingUnit, minimumQuantity: Number(minimumQuantity), quantityStep: Number(quantityStep),
         media: imageUrls.split('\n').map((url) => url.trim()).filter(Boolean).map((url) => ({ url })), status: visibility,
-        options: optionValues.length ? [{ name: variantOptionName || 'Option', values: optionValues }] : [],
+        options: normalizedOptions,
         variants: createdVariants
       };
       if (editingProduct) await api.updateProduct(editingProduct.id, payload);
@@ -469,10 +472,19 @@ export const ProductsPage: React.FC = () => {
               />
             </div>}
 
-            {!editingProduct && <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 10, marginBottom: 14 }}>
-              <label style={{ fontSize: 12, fontWeight: 600 }}>Variant option<input value={variantOptionName} onChange={(e) => setVariantOptionName(e.target.value)} style={{ display: 'block', width: '100%', marginTop: 5, padding: 8, border: '1px solid #e2e8f0', borderRadius: 7 }} /></label>
-              <label style={{ fontSize: 12, fontWeight: 600 }}>Variant values (comma separated)<input value={variantOptionValues} onChange={(e) => setVariantOptionValues(e.target.value)} placeholder="Small, Medium, Large" style={{ display: 'block', width: '100%', marginTop: 5, padding: 8, border: '1px solid #e2e8f0', borderRadius: 7 }} /></label>
-            </div>}
+            <section aria-label="Product variants" style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: 14, marginBottom: 14, background: '#fbfdff' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                <div><strong style={{ fontSize: 14, color: '#0f172a' }}>Variants</strong><p style={{ margin: '3px 0 0', fontSize: 12, color: '#64748b' }}>Add options such as Size and Color. BillionBiz creates up to 250 combinations with a unique SKU for each. Price and starting stock apply to each variant.</p></div>
+                {!editingProduct && variantOptions.length < 3 && <button type="button" onClick={() => setVariantOptions((items) => [...items, { name: items.length === 1 ? 'Color' : 'Material', values: '' }])} style={{ border: '1px solid #cbd5e1', background: '#fff', borderRadius: 7, padding: '7px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>+ Add option</button>}
+              </div>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {variantOptions.map((option, index) => <div key={`${index}-${option.name}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 1fr) minmax(180px, 2fr) auto', alignItems: 'end', gap: 8 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600 }}>Option name<input disabled={Boolean(editingProduct)} aria-label={`Variant option ${index + 1} name`} value={option.name} onChange={(event) => setVariantOptions((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item))} placeholder={index === 0 ? 'Size' : 'Color'} style={{ display: 'block', width: '100%', boxSizing: 'border-box', marginTop: 5, padding: 8, border: '1px solid #e2e8f0', borderRadius: 7 }} /></label>
+                  <label style={{ fontSize: 12, fontWeight: 600 }}>Values, comma separated<input disabled={Boolean(editingProduct)} aria-label={`Variant option ${index + 1} values`} value={option.values} onChange={(event) => setVariantOptions((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, values: event.target.value } : item))} placeholder={index === 0 ? 'Small, Medium, Large' : 'Black, White'} style={{ display: 'block', width: '100%', boxSizing: 'border-box', marginTop: 5, padding: 8, border: '1px solid #e2e8f0', borderRadius: 7 }} /></label>
+                  {!editingProduct && variantOptions.length > 1 ? <button type="button" aria-label={`Remove variant option ${index + 1}`} onClick={() => setVariantOptions((items) => items.filter((_, itemIndex) => itemIndex !== index))} style={{ height: 34, border: '1px solid #fecaca', background: '#fff7f7', color: '#b91c1c', borderRadius: 7, padding: '0 9px', cursor: 'pointer' }}>Remove</button> : <span />}
+                </div>)}
+              </div>
+            </section>
 
             <div style={{ marginBottom: 14 }}>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6 }}>Product image URLs (one per line; first image is primary)</label>
